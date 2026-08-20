@@ -227,20 +227,38 @@ object ThumbnailRepository {
                 val sample = calculateSample(bounds.outWidth, bounds.outHeight, size)
                 BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
             }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            context.contentResolver.loadThumbnail(item.uri, Size(size, size), null)
-        } else if (item.isVideo) {
-            @Suppress("DEPRECATION")
-            MediaStore.Video.Thumbnails.getThumbnail(
-                context.contentResolver, item.id, MediaStore.Video.Thumbnails.MINI_KIND, null
-            )
         } else {
-            @Suppress("DEPRECATION")
-            MediaStore.Images.Thumbnails.getThumbnail(
-                context.contentResolver, item.id, MediaStore.Images.Thumbnails.MINI_KIND, null
-            )
+            val platformThumbnail = runCatching { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                context.contentResolver.loadThumbnail(item.uri, Size(size, size), null)
+            } else if (item.isVideo) {
+                @Suppress("DEPRECATION")
+                MediaStore.Video.Thumbnails.getThumbnail(
+                    context.contentResolver, item.id, MediaStore.Video.Thumbnails.MINI_KIND, null
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                MediaStore.Images.Thumbnails.getThumbnail(
+                    context.contentResolver, item.id, MediaStore.Images.Thumbnails.MINI_KIND, null
+                )
+            } }.getOrNull()
+            platformThumbnail ?: decodeImageThumbnail(context, item, size)
         }
     }.getOrNull()
+
+    // SAF files may not be indexed by MediaStore immediately after an archive.
+    // Decode the new content URI directly so the thumbnail does not depend on indexing timing.
+    private fun decodeImageThumbnail(context: Context, item: MediaItem, size: Int): Bitmap? {
+        if (item.isVideo) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        openMediaInputStream(context, item.uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, bounds)
+        } ?: return null
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val sample = calculateSample(bounds.outWidth, bounds.outHeight, size)
+        return openMediaInputStream(context, item.uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, BitmapFactory.Options().apply { inSampleSize = sample })
+        }
+    }
 
     private fun decodeOriginalBitmap(context: Context, item: MediaItem): Bitmap? = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
