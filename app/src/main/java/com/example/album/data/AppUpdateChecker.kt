@@ -28,10 +28,19 @@ object AppUpdateChecker {
             if (status !in 200..299) error("Update server returned HTTP $status")
             val body = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             val json = JSONObject(body)
-            val versionCode = json.optLong("versionCode", -1L)
+            val element = json.optJSONArray("elements")?.optJSONObject(0)
+            val versionCode = json.optLong("versionCode", element?.optLong("versionCode", -1L) ?: -1L)
             require(versionCode >= 0L) { "Missing or invalid versionCode" }
-            val versionName = json.optString("versionName").ifBlank { versionCode.toString() }
-            val downloadUrl = json.optString("downloadUrl").ifBlank { json.optString("url") }
+            val versionName = json.optString("versionName")
+                .ifBlank { element?.optString("versionName").orEmpty() }
+                .ifBlank { versionCode.toString() }
+            val downloadUrl = json.optString("downloadUrl")
+                .ifBlank { json.optString("url") }
+                .ifBlank {
+                    element?.optString("outputFile")?.takeIf { it.isNotBlank() }?.let { outputFile ->
+                        updateUrl.substringBeforeLast('/') + "/" + outputFile
+                    }.orEmpty()
+                }
             AppRelease(
                 versionCode = versionCode,
                 versionName = versionName,
