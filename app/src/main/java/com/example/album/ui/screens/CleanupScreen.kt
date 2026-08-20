@@ -271,7 +271,7 @@ fun PixivArchiveScreen(
     session: PixivArchiveSession,
     onStartScan: (Uri, Int) -> Unit,
     onBack: () -> Unit,
-    onArchiveComplete: suspend () -> Unit,
+    onArchiveComplete: suspend (completed: Int, failed: Int) -> Unit,
     favoriteSelected: (List<MediaItem>) -> Boolean = { false },
     onFavorite: (List<MediaItem>) -> Unit = {},
     onCopy: (List<MediaItem>) -> Unit = {},
@@ -943,7 +943,7 @@ class PixivArchiveSession {
 private fun ArchiveContent(
     session: PixivArchiveSession,
     onStartScan: (Uri, Int) -> Unit,
-    onArchiveComplete: suspend () -> Unit
+    onArchiveComplete: suspend (completed: Int, failed: Int) -> Unit
 ) {
     val context = LocalContext.current
     val english = LocalAppEnglish.current
@@ -1108,7 +1108,7 @@ private fun ArchiveContent(
             completed = result.completed
             failed = result.failed
             state = if (result.failed == 0) ArchiveUiState.Ready else ArchiveUiState.Error
-            onArchiveComplete()
+            onArchiveComplete(result.completed, result.failed)
         }
     }
     fun rescanFailed() {
@@ -1501,7 +1501,7 @@ private fun ArchiveContent(
                     completed = result.completed
                     failed = result.failed
                     state = if (result.failed == 0) ArchiveUiState.Complete else ArchiveUiState.Error
-                    onArchiveComplete()
+                    onArchiveComplete(result.completed, result.failed)
                 }
             }
         )

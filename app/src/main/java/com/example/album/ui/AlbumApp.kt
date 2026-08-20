@@ -1045,13 +1045,22 @@ fun AlbumApp(
                 }
             },
             onBack = { pixivArchiveOpen = false; pixivRefreshKey++ },
-            onArchiveComplete = {
+            onArchiveComplete = { completed, failed ->
                 // Refresh the index after archiving, but do not start a large
                 // thumbnail maintenance pass on the same frame as completion.
                 observerRefreshJob[0]?.cancel()
                 suppressObserverRefreshUntil = android.os.SystemClock.uptimeMillis() + 1_500L
                 library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
                 pixivRefreshKey++
+                Toast.makeText(
+                    context,
+                    if (failed == 0) {
+                        if (english) "Archive complete: $completed items" else "归档完成，共 $completed 项"
+                    } else {
+                        if (english) "Archive finished: $completed succeeded, $failed failed" else "归档完成：成功 $completed 项，失败 $failed 项"
+                    },
+                    Toast.LENGTH_SHORT
+                ).show()
             },
             favoriteSelected = { items -> items.isNotEmpty() && items.all { it.uri.toString() in favoriteUris } },
             onFavorite = { items ->
