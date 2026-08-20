@@ -370,17 +370,19 @@ fun SettingsScreen(
             dialog = InfoDialog(
                 "隐私政策",
                 if (isEnglish) {
-                    "Album processes photos and videos on this device. Browsing, sorting, favorites, slideshows, and thumbnail caching stay local.\n\n" +
-                        "Pixiv features contact Pixiv services to sign in, query artwork metadata, and load Pixiv library information. When you sign in, the Pixiv WebView session cookie is stored by the app until you sign out; source images remain on the device unless you explicitly share or upload them elsewhere.\n\n" +
-                        "Media is handed to the system share sheet only when you choose to share it. The app does not retain share targets. Theme, default-screen, playback, and other preferences are stored locally.\n\n" +
-                        "Thumbnail cache only speeds up browsing and can be cleared at any time. Clearing app data removes local settings and the Pixiv WebView session.\n\n" +
-                        "Version: v$appVersion\nUpdated: August 17, 2026"
+                    "Album is designed to keep your personal media on your device. Photos and videos are scanned, sorted, edited, played, favorited, and cached locally. The app does not upload your local media, use it for advertising, or send it to an analytics service.\n\n" +
+                        "The app may request Android media, file-management, notification, and media-playback permissions. These permissions are used only for the related features you enable. You can revoke them in Android settings; some features may then be unavailable.\n\n" +
+                        "Pixiv features open Pixiv services in an in-app WebView and may request Pixiv pages, artwork metadata, and media URLs. Pixiv login cookies are stored by Android WebView on this device until you sign out or clear the app data. Pixiv handles information submitted to its services under its own privacy policy.\n\n" +
+                        "When you check for updates, Album requests release metadata from this project's GitHub repository. When you choose an update, Android opens the APK download link from that repository. The app does not silently install updates.\n\n" +
+                        "Media is sent to another app only when you choose a system action such as sharing or opening a file. Settings, thumbnails, playback progress, and cached data remain on the device and can be cleared from the app or Android settings.\n\n" +
+                        "Version: v$appVersion\nLast revised: August 20, 2026"
                 } else {
-                    "相册默认在本机处理图片和视频。浏览、排序、收藏、幻灯片和缩略图缓存保留在本机。\n\n" +
-                        "Pixiv 功能会连接 Pixiv 服务用于登录、查询作品信息和读取 Pixiv 媒体库。登录后，Pixiv WebView 会话 Cookie 会保存在应用中，直到你主动退出登录；除非你主动分享或上传，原始图片不会因此离开设备。\n\n" +
-                        "只有在你主动使用系统分享功能时，所选项目才会交给系统分享面板；应用不会保存分享目标。主题、默认界面、播放偏好等设置保存在设备本地。\n\n" +
-                        "缩略图缓存仅用于加快再次浏览，可随时在设置中清理。清除应用数据会删除本地设置和 Pixiv WebView 会话。\n\n" +
-                        "版本：v$appVersion\n更新日期：2026年8月17日"
+                    "Album 以本地处理为设计原则。图片和视频的扫描、排序、编辑、播放、收藏及缩略图缓存均在本机完成。应用不会上传你的本地媒体，不会将其用于广告，也不会接入分析统计服务。\n\n" +
+                        "应用可能申请媒体访问、文件管理、通知和媒体播放等 Android 权限，仅用于你启用的对应功能。你可以在 Android 系统设置中撤销权限；撤销后，相关功能可能无法使用。\n\n" +
+                        "Pixiv 功能会通过应用内 WebView 访问 Pixiv 页面，并可能请求作品信息、媒体库信息和媒体地址。Pixiv 登录 Cookie 由 Android WebView 保存在本机，直到你退出登录或清除应用数据。提交给 Pixiv 服务的信息受 Pixiv 自身隐私政策约束。\n\n" +
+                        "检查更新时，Album 会从本项目的 GitHub 仓库读取版本清单。你选择更新后，应用会让 Android 打开该仓库中的 APK 下载地址；应用不会静默安装更新。\n\n" +
+                        "只有在你主动使用系统分享或打开文件等操作时，媒体才会交给其他应用。设置、缩略图、播放进度和缓存均保存在本机，可在应用内或 Android 系统设置中清除。\n\n" +
+                        "版本：v$appVersion\n最后修订：2026年8月20日"
                 }
             )
         } }
