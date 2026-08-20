@@ -1025,6 +1025,11 @@ fun AlbumApp(
                     }.onSuccess { scanned ->
                         pixivArchiveSession.records.value = scanned
                         pixivArchiveSession.state.value = ArchiveUiState.Ready
+                        Toast.makeText(
+                            context,
+                            if (english) "Scan complete: ${scanned.size} results" else "全部扫描完成，共 ${scanned.size} 项结果",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }.onFailure { error ->
                         if (error is CancellationException) throw error
                         val message = error.message ?: if (english) "Unable to read source folder" else "无法读取来源目录"
