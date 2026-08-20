@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -1413,7 +1414,7 @@ private fun ArchiveContent(
                             Icons.Outlined.DeleteForever,
                             contentDescription = appText("清空扫描结果", english),
                             tint = Color(0xFFE53935),
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(24.dp).offset(x = 4.dp)
                         )
                     }
                 }
