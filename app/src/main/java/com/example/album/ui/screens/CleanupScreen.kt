@@ -548,7 +548,7 @@ private fun DuplicateContent(
                                 val key = item.uri.toString()
                                 Box(Modifier.weight(1f).aspectRatio(1f).clickable { onToggle(key) }) {
                                     MediaThumbnail(item, Modifier.fillMaxSize())
-                                    CleanupSelectionMark(key in selectedUris, Modifier.align(Alignment.TopStart).padding(5.dp))
+                                    CleanupSelectionMark(key in selectedUris, Modifier.align(Alignment.TopEnd).padding(5.dp))
                                 }
                             }
                             repeat(4 - rowItems.size) { Spacer(Modifier.weight(1f).aspectRatio(1f)) }
@@ -570,7 +570,7 @@ private fun DuplicateMediaRow(item: MediaItem, selected: Boolean, onClick: () ->
     ) {
         Box(Modifier.size(72.dp)) {
             MediaThumbnail(item, Modifier.fillMaxSize())
-            CleanupSelectionMark(selected, Modifier.align(Alignment.TopStart).padding(5.dp))
+            CleanupSelectionMark(selected, Modifier.align(Alignment.TopEnd).padding(5.dp))
         }
         Column(Modifier.weight(1f).padding(start = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
