@@ -1097,20 +1097,32 @@ private fun ArchiveContent(
                 total = 1,
                 message = if (english) "Archiving selected image" else "正在归档所选图片"
             )
-            val result = repository.archive(listOf(record), target, keepName, writeTags, copyInsteadOfMove) { update ->
-                withContext(Dispatchers.Main) {
-                    completed = update.completed
-                    failed = update.failed
-                    applyProgress(update)
+            try {
+                val result = repository.archive(listOf(record), target, keepName, writeTags, copyInsteadOfMove) { update ->
+                    withContext(Dispatchers.Main) {
+                        completed = update.completed
+                        failed = update.failed
+                        applyProgress(update)
+                    }
                 }
+                records = records.map { current ->
+                    result.records.firstOrNull { it.uri == current.uri } ?: current
+                }
+                completed = result.completed
+                failed = result.failed
+                state = if (result.failed == 0) ArchiveUiState.Ready else ArchiveUiState.Error
+                onArchiveComplete(result.completed, result.failed)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                failed = 1
+                activity = activity.copy(
+                    phase = PixivArchivePhase.Error,
+                    message = error.message ?: if (english) "Archive failed" else "归档失败，来源文件已保留",
+                    logs = (listOf(error.message ?: "归档任务异常") + activity.logs).take(4)
+                )
+                state = ArchiveUiState.Error
             }
-            records = records.map { current ->
-                result.records.firstOrNull { it.uri == current.uri } ?: current
-            }
-            completed = result.completed
-            failed = result.failed
-            state = if (result.failed == 0) ArchiveUiState.Ready else ArchiveUiState.Error
-            onArchiveComplete(result.completed, result.failed)
         }
     }
     fun rescanFailed() {
@@ -1491,18 +1503,29 @@ private fun ArchiveContent(
                     completed = 0
                     failed = 0
                     activity = ArchiveActivity(phase = PixivArchivePhase.Folders, total = readyCount, message = if (english) "Preparing artist folders" else "正在准备画师目录")
-                            val result = repository.archive(records, target, keepName, writeTags, copyInsteadOfMove) { update ->
-                        withContext(Dispatchers.Main) {
-                            completed = update.completed
-                            failed = update.failed
-                            applyProgress(update)
-                        }
-                    }
-                    records = result.records
-                    completed = result.completed
-                    failed = result.failed
-                    state = if (result.failed == 0) ArchiveUiState.Complete else ArchiveUiState.Error
-                    onArchiveComplete(result.completed, result.failed)
+                            try {
+                                val result = repository.archive(records, target, keepName, writeTags, copyInsteadOfMove) { update ->
+                                    withContext(Dispatchers.Main) {
+                                        completed = update.completed
+                                        failed = update.failed
+                                        applyProgress(update)
+                                    }
+                                }
+                                records = result.records
+                                completed = result.completed
+                                failed = result.failed
+                                state = if (result.failed == 0) ArchiveUiState.Complete else ArchiveUiState.Error
+                                onArchiveComplete(result.completed, result.failed)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Throwable) {
+                                activity = activity.copy(
+                                    phase = PixivArchivePhase.Error,
+                                    message = error.message ?: if (english) "Archive failed" else "归档失败，来源文件已保留",
+                                    logs = (listOf(error.message ?: "归档任务异常") + activity.logs).take(4)
+                                )
+                                state = ArchiveUiState.Error
+                            }
                 }
             }
         )
