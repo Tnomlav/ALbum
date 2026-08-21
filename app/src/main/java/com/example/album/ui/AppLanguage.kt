@@ -55,7 +55,7 @@ private val APP_ENGLISH = mapOf(
     "鲜艳" to "Vivid", "暖色" to "Warm", "冷色" to "Cool", "黑白" to "Mono", "胶片" to "Film",
     "回收站" to "Trash", "重复图片" to "Duplicates", "已排除" to "Excluded", "文件归档" to "Archive",
     "返回设置" to "Back to Settings", "全盘查重" to "Scan duplicates", "清理全部" to "Clean all",
-    "清理所选" to "Clean selected", "全部还原" to "Restore all", "清空回收站" to "Empty Trash",
+    "清理所选" to "Clean selected", "全部还原" to "Restore all", "全部清除" to "Clear all",
     "还原" to "Restore", "没有发现重复图片" to "No duplicate photos found", "没有已排除文件夹" to "No excluded folders",
     "展开全部" to "Expand all", "折叠全部" to "Collapse all", "展开" to "Expand", "折叠" to "Collapse",
     "正在计算文件哈希…" to "Calculating file hashes...", "回收站为空" to "Trash is empty", "恢复扫描" to "Restore scanning",
