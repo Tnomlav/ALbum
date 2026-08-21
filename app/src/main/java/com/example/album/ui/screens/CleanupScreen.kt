@@ -1371,7 +1371,7 @@ private fun ArchiveContent(
                     modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
-                        if (resultGrid) Icons.Outlined.KeyboardArrowDown else Icons.Outlined.KeyboardArrowRight,
+                         if (resultGrid) Icons.Outlined.KeyboardArrowRight else Icons.Outlined.KeyboardArrowDown,
                         if (resultGrid) appText("列表显示", english) else appText("网格显示", english),
                         modifier = Modifier.size(19.dp)
                     )
