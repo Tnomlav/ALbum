@@ -254,7 +254,7 @@ class PixivArchiveRepository(private val context: Context) {
         runCatching { collectImages(root, files) }
             .getOrElse { throw IllegalStateException("来源目录读取失败，请检查访问权限", it) }
         files.sortBy { it.name.orEmpty().lowercase(Locale.ROOT) }
-        val filesToScan = files.take(maxItems.coerceAtLeast(1))
+        val filesToScan = files.distinctBy { it.uri }.take(maxItems.coerceAtLeast(1))
         onProgress(PixivArchiveProgress(PixivArchivePhase.Metadata, 0, filesToScan.size, 0, message = "找到 ${filesToScan.size} 张图片，正在查询作品信息", log = "已读取 ${filesToScan.size} 个文件"))
         val parsed = filesToScan.map { file -> file to parsePixivFilename(file.name.orEmpty()) }
         val hasUncachedPid = parsed.any { (file, details) ->

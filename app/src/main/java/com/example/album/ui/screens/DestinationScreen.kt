@@ -157,12 +157,24 @@ fun DestinationScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp)
             ) {
-                items(items, key = { it.uri.toString() }) { item ->
-                    MediaThumbnail(
-                        item = item,
-                        modifier = Modifier.size(62.dp).clip(RoundedCornerShape(7.dp)),
-                        requestedSize = 180
-                    )
+                items(items.size, key = { index -> "${items[index].uri}:$index" }) { index ->
+                    val item = items[index]
+                    if (item.isDocument) {
+                        Box(
+                            Modifier.size(62.dp)
+                                .clip(RoundedCornerShape(7.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("图片", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                        }
+                    } else {
+                        MediaThumbnail(
+                            item = item,
+                            modifier = Modifier.size(62.dp).clip(RoundedCornerShape(7.dp)),
+                            requestedSize = 180
+                        )
+                    }
                 }
             }
             Text(

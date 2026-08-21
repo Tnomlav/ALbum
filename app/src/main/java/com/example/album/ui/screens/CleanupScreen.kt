@@ -306,6 +306,7 @@ fun PixivArchiveScreen(
 
     fun selectedMedia(): List<MediaItem> = records
         .filter { it.uri.toString() in selectedUris }
+        .distinctBy { it.uri }
         .map(::mediaItem)
 
     fun copySelectedUrls() {
