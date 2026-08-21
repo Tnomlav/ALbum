@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Environment
 import android.os.SystemClock
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -408,13 +409,24 @@ class PixivArchiveRepository(private val context: Context) {
         val updated = records.map { record ->
             if (!record.canArchive) return@map record
             val metadata = requireNotNull(record.metadata)
-            onProgress(PixivArchiveProgress(PixivArchivePhase.Folders, completed, total, failed, record.filename, metadata.artist, "正在创建画师目录", "创建目录 ${metadata.artist} [${metadata.artistId}]", itemProgress = 0.1f))
+            onProgress(PixivArchiveProgress(PixivArchivePhase.Folders, completed, total, failed, record.filename, metadata.artist, "正在创建画师目录", "创建目录 ${metadata.artist} [${metadata.artistId}]", itemProgress = 0.05f))
             val folderName = sanitize("${metadata.artist} [${metadata.artistId}]")
             val folder = root.findFile(folderName)?.takeIf { it.isDirectory } ?: root.createDirectory(folderName)
             val targetName = if (keepOriginalFilename) record.filename else canonicalName(record)
             val target = folder?.let { createUniqueFile(it, record.mimeType, targetName) }
-            val copied = target != null && copy(record.uri, target.uri)
-            if (copied && writeTags) onProgress(PixivArchiveProgress(PixivArchivePhase.Tags, completed, total, failed, record.filename, metadata.artist, "正在写入 Pixiv tags", itemProgress = 0.5f))
+            val copied = target != null && copy(record.uri, target.uri) { copyProgress ->
+                onProgress(PixivArchiveProgress(
+                    PixivArchivePhase.Move,
+                    completed,
+                    total,
+                    failed,
+                    record.filename,
+                    metadata.artist,
+                    if (copyInsteadOfMove) "正在复制到画师目录" else "正在移动到画师目录",
+                    itemProgress = (0.1f + copyProgress * 0.65f).coerceIn(0.1f, 0.75f)
+                ))
+            }
+            if (copied && writeTags) onProgress(PixivArchiveProgress(PixivArchivePhase.Tags, completed, total, failed, record.filename, metadata.artist, "正在写入 Pixiv tags", itemProgress = 0.85f))
             if (copied) onProgress(
                 PixivArchiveProgress(
                     PixivArchivePhase.Move,
@@ -424,7 +436,7 @@ class PixivArchiveRepository(private val context: Context) {
                     record.filename,
                     metadata.artist,
                     if (copyInsteadOfMove) "正在复制到画师目录" else "正在移动到画师目录",
-                    itemProgress = 0.75f
+                    itemProgress = 0.9f
                 )
             )
             var sidecar: DocumentFile? = null
@@ -729,16 +741,43 @@ class PixivArchiveRepository(private val context: Context) {
         )
     }
 
-    private fun copy(source: Uri, target: Uri): Boolean = runCatching {
-        openMediaInputStream(context, source).use { input ->
-            requireNotNull(input)
-            openMediaOutputStream(context, target, "w").use { output ->
-                requireNotNull(output)
-                input.copyTo(output)
+    private suspend fun copy(source: Uri, target: Uri, onProgress: suspend (Float) -> Unit): Boolean {
+        return try {
+            val totalBytes = contentResolverSize(source)
+            openMediaInputStream(context, source).use { input ->
+                requireNotNull(input)
+                openMediaOutputStream(context, target, "w").use { output ->
+                    requireNotNull(output)
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var copiedBytes = 0L
+                    var lastReportedBytes = 0L
+                    var lastReportedAt = SystemClock.uptimeMillis()
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        copiedBytes += count
+                        val now = SystemClock.uptimeMillis()
+                        if (totalBytes > 0L && (copiedBytes == totalBytes || copiedBytes - lastReportedBytes >= 64 * 1024 || now - lastReportedAt >= 50L)) {
+                            onProgress((copiedBytes.toFloat() / totalBytes).coerceIn(0f, 1f))
+                            lastReportedBytes = copiedBytes
+                            lastReportedAt = now
+                        }
+                    }
+                    if (totalBytes <= 0L) onProgress(1f)
+                }
             }
+            true
+        } catch (_: Exception) {
+            false
         }
-        true
-    }.getOrDefault(false)
+    }
+
+    private fun contentResolverSize(uri: Uri): Long = runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getLong(cursor.getColumnIndexOrThrow(OpenableColumns.SIZE)) else -1L
+        } ?: -1L
+    }.getOrDefault(-1L)
 
     private fun writeMetadata(target: DocumentFile, folder: DocumentFile, metadata: PixivMetadata): DocumentFile? {
         if (target.type == "image/jpeg") {
