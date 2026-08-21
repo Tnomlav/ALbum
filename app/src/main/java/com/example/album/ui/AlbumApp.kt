@@ -1758,6 +1758,7 @@ fun AlbumApp(
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
+                    additionalAlbumNames = if (query.isBlank()) emptySet() else library.searchableFolderNames,
                     onClearQuery = { query = "" }
                     ,onOpenPixivArchive = {
                         pixivArchiveOpen = true
@@ -1794,6 +1795,7 @@ fun AlbumApp(
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
+                    additionalAlbumNames = if (query.isBlank()) emptySet() else library.searchableFolderNames,
                     onClearQuery = { query = "" }
                 )
                 MainTab.Timeline -> TimelineScreen(
