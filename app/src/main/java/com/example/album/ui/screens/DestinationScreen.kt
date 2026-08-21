@@ -1,5 +1,7 @@
 package com.example.album.ui.screens
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -52,6 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,7 +62,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,6 +77,9 @@ import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
 import com.example.album.ui.components.MediaThumbnail
 import com.example.album.ui.components.VaultTextInputSheet
+import com.example.album.data.openMediaInputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun DestinationScreen(
@@ -160,14 +168,7 @@ fun DestinationScreen(
                 items(items.size, key = { index -> "${items[index].uri}:$index" }) { index ->
                     val item = items[index]
                     if (item.isDocument) {
-                        Box(
-                            Modifier.size(62.dp)
-                                .clip(RoundedCornerShape(7.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("图片", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                        }
+                        DocumentPreviewThumbnail(item)
                     } else {
                         MediaThumbnail(
                             item = item,
@@ -217,6 +218,39 @@ fun DestinationScreen(
                 newFolderOpen = false
             }
         )
+    }
+}
+
+@Composable
+private fun DocumentPreviewThumbnail(item: MediaItem) {
+    val context = LocalContext.current
+    val bitmap by produceState<Bitmap?>(initialValue = null, item.uri) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                openMediaInputStream(context, item.uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+                var sample = 1
+                while (bounds.outWidth / sample > 180 || bounds.outHeight / sample > 180) sample *= 2
+                val options = BitmapFactory.Options().apply { inSampleSize = sample }
+                openMediaInputStream(context, item.uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+            }.getOrNull()
+        }
+    }
+    Box(
+        Modifier.size(62.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        bitmap?.let {
+            androidx.compose.foundation.Image(
+                bitmap = it.asImageBitmap(),
+                contentDescription = item.name,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } ?: Text("图片", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
     }
 }
 
