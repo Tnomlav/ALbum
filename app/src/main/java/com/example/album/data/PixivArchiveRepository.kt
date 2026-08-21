@@ -408,13 +408,13 @@ class PixivArchiveRepository(private val context: Context) {
         val updated = records.map { record ->
             if (!record.canArchive) return@map record
             val metadata = requireNotNull(record.metadata)
-            onProgress(PixivArchiveProgress(PixivArchivePhase.Folders, completed, total, failed, record.filename, metadata.artist, "正在创建画师目录", "创建目录 ${metadata.artist} [${metadata.artistId}]"))
+            onProgress(PixivArchiveProgress(PixivArchivePhase.Folders, completed, total, failed, record.filename, metadata.artist, "正在创建画师目录", "创建目录 ${metadata.artist} [${metadata.artistId}]", itemProgress = 0.1f))
             val folderName = sanitize("${metadata.artist} [${metadata.artistId}]")
             val folder = root.findFile(folderName)?.takeIf { it.isDirectory } ?: root.createDirectory(folderName)
             val targetName = if (keepOriginalFilename) record.filename else canonicalName(record)
             val target = folder?.let { createUniqueFile(it, record.mimeType, targetName) }
             val copied = target != null && copy(record.uri, target.uri)
-            if (copied && writeTags) onProgress(PixivArchiveProgress(PixivArchivePhase.Tags, completed, total, failed, record.filename, metadata.artist, "正在写入 Pixiv tags"))
+            if (copied && writeTags) onProgress(PixivArchiveProgress(PixivArchivePhase.Tags, completed, total, failed, record.filename, metadata.artist, "正在写入 Pixiv tags", itemProgress = 0.5f))
             if (copied) onProgress(
                 PixivArchiveProgress(
                     PixivArchivePhase.Move,
@@ -423,7 +423,8 @@ class PixivArchiveRepository(private val context: Context) {
                     failed,
                     record.filename,
                     metadata.artist,
-                    if (copyInsteadOfMove) "正在复制到画师目录" else "正在移动到画师目录"
+                    if (copyInsteadOfMove) "正在复制到画师目录" else "正在移动到画师目录",
+                    itemProgress = 0.75f
                 )
             )
             var sidecar: DocumentFile? = null
@@ -453,7 +454,8 @@ class PixivArchiveRepository(private val context: Context) {
                 message = if (moved) {
                     if (copyInsteadOfMove) "文件复制完成" else "文件移动完成"
                 } else "归档失败，来源文件已保留",
-                log = "${record.filename} · ${if (moved) "完成" else "失败，可重试"}"
+                log = "${record.filename} · ${if (moved) "完成" else "失败，可重试"}",
+                itemProgress = 1f
             ))
             next
         }

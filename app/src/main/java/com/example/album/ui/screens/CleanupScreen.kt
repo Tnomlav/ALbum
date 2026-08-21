@@ -1683,7 +1683,11 @@ private fun ArchiveActivityPanel(activity: ArchiveActivity, progress: Float, ind
         if (indeterminate) LinearProgressIndicator(Modifier.fillMaxWidth().height(3.dp))
         else LinearProgressIndicator(
             progress = {
-                if (activity.phase == PixivArchivePhase.Metadata) activity.itemProgress.coerceIn(0f, 1f)
+                if (activity.phase == PixivArchivePhase.Metadata ||
+                    activity.phase == PixivArchivePhase.Folders ||
+                    activity.phase == PixivArchivePhase.Tags ||
+                    activity.phase == PixivArchivePhase.Move
+                ) activity.itemProgress.coerceIn(0f, 1f)
                 else progress.coerceIn(0f, 1f)
             },
             modifier = Modifier.fillMaxWidth().height(3.dp)
