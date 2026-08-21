@@ -758,7 +758,7 @@ class PixivArchiveRepository(private val context: Context) {
                         output.write(buffer, 0, count)
                         copiedBytes += count
                         val now = SystemClock.uptimeMillis()
-                        if (totalBytes > 0L && (copiedBytes == totalBytes || copiedBytes - lastReportedBytes >= 64 * 1024 || now - lastReportedAt >= 50L)) {
+                        if (totalBytes > 0L && (copiedBytes == totalBytes || copiedBytes - lastReportedBytes >= 256 * 1024 || now - lastReportedAt >= PROGRESS_UPDATE_INTERVAL_MS)) {
                             onProgress((copiedBytes.toFloat() / totalBytes).coerceIn(0f, 1f))
                             lastReportedBytes = copiedBytes
                             lastReportedAt = now
