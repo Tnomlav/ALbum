@@ -1046,12 +1046,19 @@ fun AlbumApp(
             },
             onBack = { pixivArchiveOpen = false; pixivRefreshKey++ },
             onArchiveComplete = { completed, failed ->
-                // Refresh the index after archiving, but do not start a large
-                // thumbnail maintenance pass on the same frame as completion.
+                // Let the archive screen finish its final state update before
+                // rebuilding the global media index. Doing both in the same
+                // frame can make several newly archived thumbnails decode at
+                // once and destabilize lower-memory devices.
                 observerRefreshJob[0]?.cancel()
-                suppressObserverRefreshUntil = android.os.SystemClock.uptimeMillis() + 1_500L
-                library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
                 pixivRefreshKey++
+                scope.launch {
+                    delay(1_000L)
+                    runCatching {
+                        suppressObserverRefreshUntil = android.os.SystemClock.uptimeMillis() + 1_500L
+                        library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
+                    }
+                }
                 Toast.makeText(
                     context,
                     if (failed == 0) {
