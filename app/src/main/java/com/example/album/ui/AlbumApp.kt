@@ -158,6 +158,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlin.coroutines.coroutineContext
 import kotlin.math.roundToInt
 
@@ -916,7 +917,16 @@ fun AlbumApp(
             defaultPreserveDate = albumSettings.getBoolean("preserve_date", true),
             onBack = { transferRequest = null },
             onConfirm = { destination, policy, preserveDate ->
-                scope.launch {
+                val transferErrorHandler = CoroutineExceptionHandler { _, error ->
+                    transferRequest = null
+                    pixivArchiveMoveUris = emptySet()
+                    Toast.makeText(
+                        context,
+                        error.message ?: if (english) "Transfer failed" else "移动或复制失败，源文件已保留",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                scope.launch(transferErrorHandler) {
                     val results = library.transfer(request.items, destination, policy, preserveDate)
                     val completed = results.filter { it.success && !it.skipped }.map { it.item }
                     val skipped = results.count { it.skipped }
