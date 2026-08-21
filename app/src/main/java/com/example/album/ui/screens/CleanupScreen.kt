@@ -255,9 +255,9 @@ fun CleanupScreen(
     }
     if (confirmEmptyRecycle) {
         VaultConfirmationSheet(
-            title = appText("清空回收站", english),
+            title = appText("全部清除", english),
             body = if (english) "${recycleEntries.size} items in Trash will be permanently deleted and cannot be recovered." else "回收站中的 ${recycleEntries.size} 项将被彻底删除且无法恢复。",
-            confirmLabel = appText("清空回收站", english),
+            confirmLabel = appText("全部清除", english),
             danger = true,
             onDismiss = { confirmEmptyRecycle = false },
             onConfirm = { onDeleteRecycle(recycleEntries); confirmEmptyRecycle = false }
@@ -806,7 +806,7 @@ private fun RecycleContent(
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         CleanupCommand("全部还原", onClick = onRestoreAll)
-                        CleanupCommand("清空回收站", color = Color(0xFFFF453A), onClick = onDeleteAll)
+                        CleanupCommand("全部清除", color = Color(0xFFFF453A), onClick = onDeleteAll)
                     }
                 }
             }
