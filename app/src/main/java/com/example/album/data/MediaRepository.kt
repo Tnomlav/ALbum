@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.DocumentsContract
+import android.webkit.MimeTypeMap
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -220,6 +221,7 @@ class MediaRepository(private val context: Context) {
         conflictPolicy: ConflictPolicy,
         preserveModifiedDate: Boolean
     ): TransferResult = withContext(Dispatchers.IO) {
+        try {
         val resolver = context.contentResolver
         val root = if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
         val relativePath = "$root/${destinationFolder.trim('/')}"
@@ -245,7 +247,7 @@ class MediaRepository(private val context: Context) {
         }
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, targetName)
-            put(MediaStore.MediaColumns.MIME_TYPE, item.mimeType)
+            put(MediaStore.MediaColumns.MIME_TYPE, transferMimeType(item))
             if (preserveModifiedDate) {
                 put(MediaStore.MediaColumns.DATE_MODIFIED, item.dateTaken / 1000L)
                 if (item.isVideo) put(MediaStore.Video.Media.DATE_TAKEN, item.dateTaken)
@@ -281,6 +283,17 @@ class MediaRepository(private val context: Context) {
             resolver.delete(target, null, null)
             TransferResult(item, success = false)
         }
+        } catch (_: Exception) {
+            TransferResult(item, success = false)
+        }
+    }
+
+    private fun transferMimeType(item: MediaItem): String {
+        val declared = item.mimeType.takeIf { it.contains('/') && !it.endsWith("/*") }
+        if (declared != null) return declared
+        val extension = item.name.substringAfterLast('.', "").lowercase()
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+            ?: if (item.isVideo) "video/mp4" else "image/jpeg"
     }
 
     private fun findDestination(collection: android.net.Uri, relativePath: String, name: String): android.net.Uri? {
