@@ -79,7 +79,8 @@ data class PixivArchiveProgress(
     val currentFile: String = "",
     val currentArtist: String = "",
     val message: String,
-    val log: String = ""
+    val log: String = "",
+    val itemProgress: Float = 0f
 )
 
 data class PixivArchiveResult(
@@ -273,6 +274,14 @@ class PixivArchiveRepository(private val context: Context) {
             }
             parsed.map { (file, details) ->
                 val pid = details?.first
+                onProgress(PixivArchiveProgress(
+                    phase = PixivArchivePhase.Metadata,
+                    completed = scanned - warnings,
+                    total = filesToScan.size,
+                    failed = warnings,
+                    currentFile = file.name.orEmpty(),
+                    message = "正在查询 Pixiv 信息"
+                ))
                 val info = pid?.let { metadataRequests[it]?.await() }
                 val record = PixivArchiveRecord(
                     uri = file.uri,
@@ -302,7 +311,8 @@ class PixivArchiveRepository(private val context: Context) {
                         currentFile = record.filename,
                         currentArtist = info?.artist.orEmpty(),
                         message = if (info != null) "已识别 PID $pid" else "无法识别作品信息",
-                        log = if (info != null) "${record.filename} -> ${info.artist}" else "${record.filename} · 需手动确认"
+                        log = if (info != null) "${record.filename} -> ${info.artist}" else "${record.filename} · 需手动确认",
+                        itemProgress = 1f
                     ))
                 }
                 onRecord(record)
