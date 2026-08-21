@@ -910,6 +910,7 @@ data class ArchiveActivity(
     val failed: Int = 0,
     val currentFile: String = "",
     val currentArtist: String = "",
+    val itemProgress: Float = 0f,
     val message: String = "等待开始",
     val logs: List<String> = emptyList()
 )
@@ -1037,6 +1038,7 @@ private fun ArchiveContent(
             failed = progress.failed,
             currentFile = progress.currentFile,
             currentArtist = progress.currentArtist,
+            itemProgress = progress.itemProgress,
             message = progress.message,
             logs = if (progress.log.isBlank()) activity.logs else (listOf(progress.log) + activity.logs).take(4)
         )
@@ -1679,7 +1681,13 @@ private fun ArchiveActivityPanel(activity: ArchiveActivity, progress: Float, ind
             Text("${(progress.coerceIn(0f, 1f) * 100).toInt()}%", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
         if (indeterminate) LinearProgressIndicator(Modifier.fillMaxWidth().height(3.dp))
-        else LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(3.dp))
+        else LinearProgressIndicator(
+            progress = {
+                if (activity.phase == PixivArchivePhase.Metadata) activity.itemProgress.coerceIn(0f, 1f)
+                else progress.coerceIn(0f, 1f)
+            },
+            modifier = Modifier.fillMaxWidth().height(3.dp)
+        )
         ArchiveStageGrid(activity.phase)
         Text(activity.message + activity.currentArtist.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         activity.currentFile.takeIf { it.isNotBlank() }?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp) }
