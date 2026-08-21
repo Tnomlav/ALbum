@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -970,6 +969,7 @@ private fun ArchiveContent(
     var failed by session.failed
     var activity by session.activity
     var confirmArchive by remember { mutableStateOf(false) }
+    var confirmClearResults by remember { mutableStateOf(false) }
     var showPixivLoginPrompt by remember { mutableStateOf(false) }
     var pixivSessionConnected by remember { mutableStateOf(false) }
     var checkingPixivLogin by remember { mutableStateOf(false) }
@@ -1374,9 +1374,9 @@ private fun ArchiveContent(
                         modifier = Modifier.size(19.dp)
                     )
                 }
-                Spacer(Modifier.weight(1f))
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(start = 6.dp)) {
-                    if (resultFilter != ArchiveResultFilter.Complete) {
+                 Spacer(Modifier.weight(1f))
+                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(start = 6.dp)) {
+                     if (resultFilter != ArchiveResultFilter.Complete) {
                         ArchiveResultActionButton(
                             label = if (state == ArchiveUiState.Scanning) (if (english) "Restart" else "重新开始") else if (english) "Retry" else "重新扫描",
                             enabled = retryCount > 0 && state != ArchiveUiState.Archiving,
@@ -1395,36 +1395,35 @@ private fun ArchiveContent(
                                 } else {
                                     rescanFailed()
                                 }
-                            }
-                        )
-                    }
-                    IconButton(
-                        onClick = {
-                            retryJob?.cancel()
-                            retryJob = null
-                            session.reset()
-                            resultFilter = ArchiveResultFilter.All
-                        },
-                        enabled = records.isNotEmpty() &&
-                            state != ArchiveUiState.Scanning &&
-                            state != ArchiveUiState.Archiving,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            Icons.Outlined.DeleteForever,
-                            contentDescription = appText("清空扫描结果", english),
-                            tint = Color(0xFFE53935),
-                            modifier = Modifier.size(24.dp).offset(x = 4.dp)
-                        )
-                    }
-                }
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ArchiveResultTab("全部", "All", batchRecords.size, resultFilter == ArchiveResultFilter.All, Modifier.weight(1f)) { resultFilter = ArchiveResultFilter.All; session.selectedUris.value = emptySet() }
-                ArchiveResultTab("完成", "Complete", completeRecords.size, resultFilter == ArchiveResultFilter.Complete, Modifier.weight(1f)) { resultFilter = ArchiveResultFilter.Complete; session.selectedUris.value = emptySet() }
-                ArchiveResultTab("失败", "Failed", failedRecords.size, resultFilter == ArchiveResultFilter.Failed, Modifier.weight(1f)) { resultFilter = ArchiveResultFilter.Failed; session.selectedUris.value = emptySet() }
-            }
-        }
+                             }
+                         )
+                     }
+                 }
+             }
+             Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                 ArchiveResultTab("全部", "All", batchRecords.size, resultFilter == ArchiveResultFilter.All, Modifier.weight(1f)) { resultFilter = ArchiveResultFilter.All; session.selectedUris.value = emptySet() }
+                 ArchiveResultTab("完成", "Complete", completeRecords.size, resultFilter == ArchiveResultFilter.Complete, Modifier.weight(1f)) { resultFilter = ArchiveResultFilter.Complete; session.selectedUris.value = emptySet() }
+                 ArchiveResultTab("失败", "Failed", failedRecords.size, resultFilter == ArchiveResultFilter.Failed, Modifier.weight(1f)) { resultFilter = ArchiveResultFilter.Failed; session.selectedUris.value = emptySet() }
+             }
+             if (records.isNotEmpty()) {
+                 Button(
+                     onClick = { confirmClearResults = true },
+                     enabled = state != ArchiveUiState.Scanning && state != ArchiveUiState.Archiving,
+                     modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp),
+                     colors = ButtonDefaults.buttonColors(
+                         containerColor = Color(0xFFE53935),
+                         contentColor = Color.White,
+                         disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                         disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                     ),
+                     contentPadding = PaddingValues(vertical = 10.dp)
+                 ) {
+                     Icon(Icons.Outlined.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
+                     Spacer(Modifier.width(6.dp))
+                     Text(if (english) "Clear scan results" else "清空扫描结果", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                 }
+             }
+         }
         if (records.isEmpty() && state != ArchiveUiState.Scanning) {
             item {
                 Text(
@@ -1503,6 +1502,27 @@ private fun ArchiveContent(
                     state = if (result.failed == 0) ArchiveUiState.Complete else ArchiveUiState.Error
                     onArchiveComplete(result.completed, result.failed)
                 }
+            }
+        )
+    }
+
+    if (confirmClearResults) {
+        VaultConfirmationSheet(
+            title = appText("清空扫描结果", english),
+            body = if (english) {
+                "Clear all ${records.size} scan results? This cannot be undone."
+            } else {
+                "确定清空全部 ${records.size} 条扫描结果吗？此操作无法撤销。"
+            },
+            confirmLabel = appText("清空扫描结果", english),
+            danger = true,
+            onDismiss = { confirmClearResults = false },
+            onConfirm = {
+                retryJob?.cancel()
+                retryJob = null
+                session.reset()
+                resultFilter = ArchiveResultFilter.All
+                confirmClearResults = false
             }
         )
     }
