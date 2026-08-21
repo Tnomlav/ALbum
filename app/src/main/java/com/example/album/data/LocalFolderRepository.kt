@@ -2,6 +2,7 @@ package com.example.album.data
 
 import android.content.Context
 import android.net.Uri
+import android.os.Environment
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -24,6 +25,36 @@ class LocalFolderRepository(private val context: Context) {
             val root = DocumentFile.fromTreeUri(context, treeUri) ?: return@flatMap emptyList()
             buildList { scan(root, root.name ?: "本地文件夹", this) }
         }.distinctBy { it.uri }.sortedByDescending { it.dateTaken }
+    }
+
+    suspend fun loadFolderNames(): Set<String> = withContext(Dispatchers.IO) {
+        val names = linkedSetOf<String>()
+        treeUris().forEach { treeUri ->
+            val root = DocumentFile.fromTreeUri(context, treeUri) ?: return@forEach
+            collectDirectories(root, names)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R &&
+            Environment.isExternalStorageManager()
+        ) {
+            val storageRoot = Environment.getExternalStorageDirectory()
+            storageRoot.walkTopDown()
+                .onEnter { directory ->
+                    !directory.name.startsWith('.') &&
+                        !directory.path.contains("/Android/data/") &&
+                        !directory.path.contains("/Android/obb/")
+                }
+                .filter { it.isDirectory && it != storageRoot }
+                .forEach { directory -> names += directory.name }
+        }
+        names
+    }
+
+    private fun collectDirectories(file: DocumentFile, output: MutableSet<String>) {
+        if (!file.isDirectory) return
+        file.name?.takeIf { it.isNotBlank() }?.let(output::add)
+        runCatching { file.listFiles() }.getOrDefault(emptyArray()).forEach { child ->
+            collectDirectories(child, output)
+        }
     }
 
     private fun scan(file: DocumentFile, folderName: String, output: MutableList<MediaItem>) {

@@ -25,7 +25,8 @@ private data class RefreshResult(
     val images: List<MediaItem>,
     val videos: List<MediaItem>,
     val local: List<MediaItem>,
-    val recycle: List<RecycleEntry>
+    val recycle: List<RecycleEntry>,
+    val folderNames: Set<String>
 )
 
 private data class PreparedMedia(
@@ -72,6 +73,8 @@ class MediaLibraryState(context: Context) {
         private set
     var localFolderCount by mutableIntStateOf(0)
         private set
+    var searchableFolderNames by mutableStateOf<Set<String>>(emptySet())
+        private set
     var excludedFolders by mutableStateOf(cleanupPreferences.getStringSet("excluded_folders", emptySet()).orEmpty().toSet())
         private set
     var excludedMedia by mutableStateOf<List<MediaItem>>(emptyList())
@@ -102,7 +105,8 @@ class MediaLibraryState(context: Context) {
                     }
                     runCatching { cleanup.loadRecycleEntries() }.getOrDefault(emptyList())
                 }
-                RefreshResult(imagesTask.await(), videosTask.await(), localTask.await(), maintenanceTask.await())
+                val folderNamesTask = async { runCatching { localFolders.loadFolderNames() }.getOrDefault(emptySet()) }
+                RefreshResult(imagesTask.await(), videosTask.await(), localTask.await(), maintenanceTask.await(), folderNamesTask.await())
             }
             val prepared = withContext(Dispatchers.Default) {
                 val showHiddenMedia = settingsPreferences.getBoolean("show_hidden_media", false)
@@ -123,6 +127,7 @@ class MediaLibraryState(context: Context) {
                 )
             }
             recycleEntries = refreshResult.recycle
+            searchableFolderNames = refreshResult.folderNames
             val localFolderCountSnapshot = withContext(Dispatchers.IO) { localFolders.treeUris().size }
             hasLocalFolders = localFolderCountSnapshot > 0
             localFolderCount = localFolderCountSnapshot
