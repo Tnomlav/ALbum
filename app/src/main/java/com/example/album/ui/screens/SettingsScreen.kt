@@ -92,7 +92,8 @@ fun SettingsScreen(
     onLanguageChange: (String) -> Unit,
     showFavoriteBadge: Boolean,
     onShowFavoriteBadgeChange: (Boolean) -> Unit,
-    onShowHiddenMediaChange: (Boolean) -> Unit
+    onShowHiddenMediaChange: (Boolean) -> Unit,
+    onRenameExtensionChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE) }
@@ -127,6 +128,7 @@ fun SettingsScreen(
     }
     var deleteConfirmation by remember { mutableStateOf(preferences.getBoolean("delete_confirmation", true)) }
     var preserveDate by remember { mutableStateOf(preferences.getBoolean("preserve_date", true)) }
+    var showRenameExtension by remember { mutableStateOf(preferences.getBoolean("rename_show_extension", false)) }
     var autoplay by remember { mutableStateOf(preferences.getBoolean("video_autoplay", true)) }
     var rememberProgress by remember { mutableStateOf(preferences.getBoolean("video_progress", true)) }
     var autoHidePlayer by remember { mutableStateOf(preferences.getBoolean("video_auto_hide", true)) }
@@ -290,6 +292,7 @@ fun SettingsScreen(
             ) { setBoolean("delete_confirmation", it) { deleteConfirmation = it } }
         }
         item { ToggleRow("复制/移动/编辑文件时保留原修改日期", null, preserveDate) { setBoolean("preserve_date", it) { preserveDate = it } } }
+        item { ToggleRow("重命名时显示后缀", "关闭后只编辑文件名，原后缀会自动保留", showRenameExtension) { setBoolean("rename_show_extension", it) { showRenameExtension = it; onRenameExtensionChange(it) } } }
         item { ValueRow("编辑后保存方式", value("edit_save", "每次询问"), "保留编辑副本或替换当前版本，保存前均需确认") { choose("编辑后保存方式", "edit_save", listOf("每次询问", "保留二者", "替换原图"), value("edit_save", "每次询问")) } }
         item { ValueRow("复制/移动文件已存在", value("conflict", "保留两者")) { choose("同名文件处理", "conflict", listOf("保留两者", "覆盖", "跳过"), value("conflict", "保留两者")) } }
 

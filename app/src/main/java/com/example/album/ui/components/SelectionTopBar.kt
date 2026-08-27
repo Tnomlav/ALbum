@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.statusBars
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Wallpaper
 import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material.icons.automirrored.outlined.DriveFileMove
@@ -41,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,7 +52,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.Layout
 import com.example.album.ui.theme.VaultDimens
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
@@ -73,11 +82,24 @@ fun SelectionTopBar(
     onWallpaper: (() -> Unit)? = null,
     onExclude: (() -> Unit)? = null,
     selectingFolders: Boolean = false,
+    query: String = "",
+    onQueryChange: (String) -> Unit = {},
     onClose: () -> Unit,
     chromeAlpha: Float = 1f
 ) {
     val english = LocalAppEnglish.current
     var menuOpen by remember { mutableStateOf(false) }
+    var searchExpanded by remember(selected) { mutableStateOf(false) }
+    val searchFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(searchExpanded) {
+        if (searchExpanded) {
+            searchFocusRequester.requestFocus()
+            keyboardController?.show()
+        }
+    }
+
     Surface(modifier = Modifier.alpha(chromeAlpha), color = MaterialTheme.colorScheme.surface) {
         Row(
             modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
@@ -87,33 +109,76 @@ fun SelectionTopBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            IconButton(onClick = onClose) {
+            IconButton(onClick = onClose, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, appText("返回", english))
             }
-            Text(
-                if (selectingFolders) appText("已选择文件夹", english) else appText("已选择", english),
-                modifier = Modifier.weight(1f).padding(start = 8.dp),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            IconButton(onClick = onDelete, enabled = selected > 0) { Icon(Icons.Outlined.Delete, appText("删除所选", english)) }
-            IconButton(onClick = onMove, enabled = selected > 0) { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, appText("移动", english)) }
-            IconButton(onClick = onRename, enabled = selected == 1 && renameEnabled) { Icon(Icons.Outlined.Edit, appText("重命名", english)) }
-            IconButton(onClick = onFavorite, enabled = selected > 0) {
-                Icon(
-                    if (favoriteSelected) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                    if (favoriteSelected) appText("取消收藏所选", english) else appText("收藏所选", english),
-                    tint = if (favoriteSelected) androidx.compose.ui.graphics.Color(0xFFFFD60A) else androidx.compose.ui.graphics.Color(0xFF1A1A1A)
-                )
+            if (searchExpanded) {
+                Row(
+                    modifier = Modifier.weight(1f).height(40.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Outlined.Search, appText("搜索", english), modifier = Modifier.size(17.dp))
+                    BasicTextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        modifier = Modifier.weight(1f).padding(start = 7.dp)
+                            .focusRequester(searchFocusRequester),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        decorationBox = { inner ->
+                            Box {
+                                if (query.isBlank()) Text(
+                                    appText(if (selectingFolders) "搜索文件夹" else "搜索图片和视频", english),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                inner()
+                            }
+                        }
+                    )
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(30.dp)) {
+                            Icon(Icons.Outlined.Close, contentDescription = appText("清除搜索", english), modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            } else {
+                IconButton(onClick = { searchExpanded = true }, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Outlined.Search, appText("搜索", english))
+                }
+                IconButton(onClick = onDelete, enabled = selected > 0, modifier = Modifier.size(48.dp)) { Icon(Icons.Outlined.Delete, appText("删除所选", english)) }
+                IconButton(onClick = onMove, enabled = selected > 0, modifier = Modifier.size(48.dp)) { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, appText("移动", english)) }
+                IconButton(onClick = onRename, enabled = selected == 1 && renameEnabled, modifier = Modifier.size(48.dp)) { Icon(Icons.Outlined.Edit, appText("重命名", english)) }
+                IconButton(onClick = onFavorite, enabled = selected > 0, modifier = Modifier.size(48.dp)) {
+                    Icon(
+                        if (favoriteSelected) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                        if (favoriteSelected) appText("取消收藏所选", english) else appText("收藏所选", english),
+                        tint = if (favoriteSelected) androidx.compose.ui.graphics.Color(0xFFFFD60A) else androidx.compose.ui.graphics.Color(0xFF1A1A1A)
+                    )
+                }
             }
             androidx.compose.foundation.layout.Box {
-                IconButton(onClick = { menuOpen = true }, enabled = selected > 0) { Icon(Icons.Outlined.MoreVert, appText("更多操作", english)) }
+                IconButton(onClick = { menuOpen = true }, enabled = selected > 0, modifier = Modifier.size(48.dp)) { Icon(Icons.Outlined.MoreVert, appText("更多操作", english)) }
                 DropdownMenu(
                     expanded = menuOpen,
                     onDismissRequest = { menuOpen = false },
                     modifier = Modifier.width(190.dp).clip(RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp))
                 ) {
                     fun run(action: () -> Unit) { menuOpen = false; action() }
+                    if (searchExpanded) {
+                        DropdownMenuItem(text = { Text(appText("删除所选", english)) }, leadingIcon = { Icon(Icons.Outlined.Delete, null) }, enabled = selected > 0, onClick = { run(onDelete) })
+                        DropdownMenuItem(text = { Text(appText("移动", english)) }, leadingIcon = { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, null) }, enabled = selected > 0, onClick = { run(onMove) })
+                        DropdownMenuItem(text = { Text(appText("重命名", english)) }, leadingIcon = { Icon(Icons.Outlined.Edit, null) }, enabled = selected == 1 && renameEnabled, onClick = { run(onRename) })
+                        DropdownMenuItem(
+                            text = { Text(if (favoriteSelected) appText("取消收藏所选", english) else appText("收藏所选", english)) },
+                            leadingIcon = { Icon(if (favoriteSelected) Icons.Filled.Star else Icons.Outlined.StarBorder, null) },
+                            enabled = selected > 0,
+                            onClick = { run(onFavorite) }
+                        )
+                    }
                     DropdownMenuItem(text = { Text(appText("分享", english)) }, leadingIcon = { Icon(Icons.Outlined.Share, null) }, onClick = { run(onShare) })
                     DropdownMenuItem(text = { Text(appText("复制", english)) }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) }, onClick = { run(onCopy) })
                     onSlideshow?.let { action -> DropdownMenuItem(text = { Text(appText("幻灯片", english)) }, leadingIcon = { Icon(Icons.Outlined.PhotoLibrary, null) }, onClick = { run(action) }) }
@@ -141,14 +206,37 @@ fun SelectionSubBar(
         color = MaterialTheme.colorScheme.surface,
         shadowElevation = 4.dp
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Box(
+            modifier = Modifier.fillMaxWidth().height(48.dp)
         ) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text("$selected/$total", style = MaterialTheme.typography.bodyMedium)
+            Layout(
+                modifier = Modifier.fillMaxWidth().height(48.dp).align(Alignment.Center),
+                content = {
+                    Text(selected.toString(), style = MaterialTheme.typography.labelSmall.copy(lineHeight = 20.sp))
+                    Text("/", style = MaterialTheme.typography.labelSmall.copy(lineHeight = 20.sp))
+                    Text(total.toString(), style = MaterialTheme.typography.labelSmall.copy(lineHeight = 20.sp))
+                }
+            ) { measurables, constraints ->
+                val placeables = measurables.map { it.measure(constraints.copy(minWidth = 0, minHeight = 0)) }
+                val left = placeables[0]
+                val slash = placeables[1]
+                val right = placeables[2]
+                val centerX = constraints.maxWidth / 2
+                val gap = 4.dp.roundToPx()
+                val slashLeft = centerX - slash.width / 2
+                val leftX = slashLeft - gap - left.width
+                val rightX = slashLeft + slash.width + gap
+                val height = placeables.maxOf { it.height }.coerceAtMost(constraints.maxHeight)
+                layout(constraints.maxWidth, height) {
+                    left.place(leftX, (height - left.height) / 2)
+                    slash.place(slashLeft, (height - slash.height) / 2)
+                    right.place(rightX, (height - right.height) / 2)
+                }
             }
-            IconButton(onClick = onSelectAll) {
+            IconButton(
+                onClick = onSelectAll,
+                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 6.dp).size(48.dp)
+            ) {
                 Box(
                     Modifier.size(18.dp)
                         .background(

@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.sample
 
 private data class VisibleMediaWindow(val first: Int, val last: Int)
 
@@ -70,11 +71,13 @@ private fun MediaPrefetchEffect(
             }
             .filterNotNull()
             .distinctUntilChanged()
+            .sample(80L)
             .collectLatest { window ->
+                ThumbnailRepository.cancelBackgroundOptimization()
                 val forward = previousFirst < 0 || window.first >= previousFirst
                 previousFirst = window.first
                 val visibleCount = (window.last - window.first + 1).coerceAtLeast(1)
-                val prefetchCount = (visibleCount * 2).coerceIn(16, 36)
+                val prefetchCount = (visibleCount * 2).coerceIn(8, 16)
                 val candidates = if (forward) {
                     items.subList(
                         (window.last + 1).coerceAtMost(items.size),

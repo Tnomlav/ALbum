@@ -1,6 +1,7 @@
 package com.example.album.data
 
 import android.net.Uri
+import android.provider.DocumentsContract
 
 data class MediaItem(
     val id: Long,
@@ -19,12 +20,24 @@ data class MediaItem(
     val isDocument: Boolean = false
 )
 
+fun MediaItem.isSystemTrashedFile(): Boolean = name.trimStart().startsWith(".trashed", ignoreCase = true)
+
 fun MediaItem.displayAddress(): String {
     val relative = relativePath?.trim()?.trim('/')
     if (!relative.isNullOrBlank()) return "$relative/$name"
     if (uri.scheme.equals("file", ignoreCase = true)) {
         uri.path?.let { path -> return Uri.decode(path) }
     }
+    // SAF uses primary: as the document ID for the device's main shared
+    // storage. Show the same relative path used by MediaStore instead of
+    // exposing the provider-specific URI prefix.
+    runCatching { DocumentsContract.getDocumentId(uri) }
+        .getOrNull()
+        ?.takeIf { it.startsWith("primary:", ignoreCase = true) }
+        ?.substringAfter(':')
+        ?.trim('/')
+        ?.takeIf { it.isNotBlank() }
+        ?.let { return Uri.decode(it) }
     return uri.toString()
 }
 

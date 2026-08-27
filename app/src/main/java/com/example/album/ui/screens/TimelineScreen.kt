@@ -42,6 +42,7 @@ import com.example.album.data.displayAspectRatio
 import com.example.album.ui.MediaLayout
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
+import com.example.album.ui.searchTextMatches
 import com.example.album.ui.components.PressableMediaThumbnail
 import com.example.album.ui.components.PullRefreshIndicator
 import com.example.album.ui.components.rememberPullRefreshConnection
@@ -49,12 +50,16 @@ import com.example.album.ui.components.ListScrollHandle
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.example.album.ui.components.LazyGridMediaPrefetch
 import com.example.album.ui.components.LazyStaggeredGridMediaPrefetch
+import com.example.album.ui.components.batchSelectionGesture
+import com.example.album.ui.components.batchSelectionStaggeredGesture
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Calendar
 import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.sample
 
 @Composable
 fun TimelineScreen(
@@ -62,6 +67,7 @@ fun TimelineScreen(
     query: String,
     loading: Boolean,
     scanning: Boolean = false,
+    searchingFolders: Boolean = false,
     permissionGranted: Boolean,
     isVideo: Boolean,
     columns: Int,
@@ -71,10 +77,16 @@ fun TimelineScreen(
     onRequestPermission: () -> Unit,
     onOpenMedia: (MediaItem) -> Unit,
     onLongPressMedia: (MediaItem) -> Unit,
+    onSelectionGestureStartMedia: ((MediaItem) -> Unit)? = null,
+    onBatchSelectMedia: (List<MediaItem>) -> Unit = {},
+    onSelectionGestureEnd: () -> Unit = {},
     onRefresh: () -> Unit,
     sharedElementEnabled: Boolean = true,
     favoriteUris: Set<String> = emptySet(),
     showFavoriteBadge: Boolean = true,
+    initialFirstVisibleItem: Int = 0,
+    initialFirstVisibleOffset: Int = 0,
+    onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
     onClearQuery: () -> Unit = {}
 ) {
     val refreshing = loading || scanning
@@ -91,6 +103,11 @@ fun TimelineScreen(
         return
     }
 
+    if (searchingFolders && query.isNotBlank()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
+
     if (media.isEmpty()) {
         Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Text(if (query.isBlank()) appText(if (isVideo) "这里还没有视频" else "这里还没有图片", english) else appText("没有找到相关内容", english), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -102,8 +119,7 @@ fun TimelineScreen(
     val formatter = remember { SimpleDateFormat("yyyy年M月d日", Locale.CHINA) }
     val filtered = remember(media, query) {
         media.filter {
-            query.isBlank() || it.name.contains(query, true) || it.folder.contains(query, true) ||
-                formatter.format(Date(it.dateTaken)).contains(query, true)
+            searchTextMatches(query, it.name, it.folder, formatter.format(Date(it.dateTaken)))
         }
     }
     val groups = remember(filtered) { filtered.groupBy { formatter.format(Date(it.dateTaken)) } }
@@ -120,10 +136,16 @@ fun TimelineScreen(
             onJumpConsumed = onJumpConsumed,
             onOpenMedia = onOpenMedia,
             onLongPressMedia = onLongPressMedia,
+            onSelectionGestureStartMedia = onSelectionGestureStartMedia,
+            onBatchSelectMedia = onBatchSelectMedia,
+            onSelectionGestureEnd = onSelectionGestureEnd,
             onRefresh = onRefresh,
             sharedElementEnabled = sharedElementEnabled,
             favoriteUris = favoriteUris,
-            showFavoriteBadge = showFavoriteBadge
+            showFavoriteBadge = showFavoriteBadge,
+            initialFirstVisibleItem = initialFirstVisibleItem,
+            initialFirstVisibleOffset = initialFirstVisibleOffset,
+            onScrollPositionChanged = onScrollPositionChanged
         )
         return
     }
@@ -138,10 +160,16 @@ fun TimelineScreen(
         onJumpConsumed = onJumpConsumed,
         onOpenMedia = onOpenMedia,
         onLongPressMedia = onLongPressMedia,
+        onSelectionGestureStartMedia = onSelectionGestureStartMedia,
+        onBatchSelectMedia = onBatchSelectMedia,
+        onSelectionGestureEnd = onSelectionGestureEnd,
         onRefresh = onRefresh,
         sharedElementEnabled = sharedElementEnabled,
         favoriteUris = favoriteUris,
-        showFavoriteBadge = showFavoriteBadge
+        showFavoriteBadge = showFavoriteBadge,
+        initialFirstVisibleItem = initialFirstVisibleItem,
+        initialFirstVisibleOffset = initialFirstVisibleOffset,
+        onScrollPositionChanged = onScrollPositionChanged
     )
     return
 }
@@ -157,10 +185,16 @@ private fun OptimizedTimelineGrid(
     onJumpConsumed: () -> Unit,
     onOpenMedia: (MediaItem) -> Unit,
     onLongPressMedia: (MediaItem) -> Unit,
+    onSelectionGestureStartMedia: ((MediaItem) -> Unit)?,
+    onBatchSelectMedia: (List<MediaItem>) -> Unit,
+    onSelectionGestureEnd: () -> Unit,
     onRefresh: () -> Unit,
     sharedElementEnabled: Boolean = true,
     favoriteUris: Set<String> = emptySet(),
-    showFavoriteBadge: Boolean = true
+    showFavoriteBadge: Boolean = true,
+    initialFirstVisibleItem: Int = 0,
+    initialFirstVisibleOffset: Int = 0,
+    onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current
@@ -168,6 +202,18 @@ private fun OptimizedTimelineGrid(
         context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true)
     }
     val state = rememberLazyGridState()
+    LaunchedEffect(state) {
+        snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
+            .sample(80L)
+            .collectLatest { (index, offset) -> onScrollPositionChanged(index, offset) }
+    }
+    var restored by remember { mutableStateOf(false) }
+    LaunchedEffect(groupedDates) {
+        if (!restored && groupedDates.isNotEmpty()) {
+            state.scrollToItem(initialFirstVisibleItem.coerceAtLeast(0), initialFirstVisibleOffset.coerceAtLeast(0))
+            restored = true
+        }
+    }
     val flatItems = remember(groupedDates) { groupedDates.flatMap { it.value } }
     LazyGridMediaPrefetch(state, flatItems)
     var pullDistance by remember { mutableFloatStateOf(0f) }
@@ -175,8 +221,8 @@ private fun OptimizedTimelineGrid(
     val scrollJob = remember { arrayOfNulls<Job>(1) }
     val metrics by remember(state) { derivedStateOf { timelineGridScrollMetrics(state) } }
     val density = LocalDensity.current
-    val triggerPull = with(density) { 68.dp.toPx() }
-    val maxPull = with(density) { 116.dp.toPx() }
+    val triggerPull = with(density) { 96.dp.toPx() }
+    val maxPull = with(density) { 144.dp.toPx() }
     val pullRefreshing = loading
     LaunchedEffect(loading) {
         if (!loading) pullDistance = 0f
@@ -223,7 +269,17 @@ private fun OptimizedTimelineGrid(
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns.coerceIn(1, 6)),
             state = state,
-            modifier = Modifier.fillMaxSize().graphicsLayer { translationY = pullOffset }.nestedScroll(pullConnection),
+            modifier = Modifier.fillMaxSize().graphicsLayer { translationY = pullOffset }.nestedScroll(pullConnection).batchSelectionGesture(
+                state = state,
+                items = flatItems,
+                keyOf = { it.uri.toString() },
+                onStart = { item ->
+                    onScrollPositionChanged(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset)
+                    (onSelectionGestureStartMedia ?: onLongPressMedia)(item)
+                },
+                onSelectRange = onBatchSelectMedia,
+                onEnd = onSelectionGestureEnd
+            ),
             contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(3.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp)
@@ -263,7 +319,7 @@ private fun OptimizedTimelineGrid(
                             Modifier.fillMaxWidth().aspectRatio(1f),
                             favorite = item.uri.toString() in favoriteUris,
                             showFavoriteBadge = showFavoriteBadge,
-                            onLongClick = { onLongPressMedia(item) },
+                            onLongClick = {},
                             sharedElementEnabled = sharedElementEnabled
                         ) { onOpenMedia(item) }
                     }
@@ -297,15 +353,33 @@ private fun AdaptiveTimeline(
     onJumpConsumed: () -> Unit,
     onOpenMedia: (MediaItem) -> Unit,
     onLongPressMedia: (MediaItem) -> Unit,
+    onSelectionGestureStartMedia: ((MediaItem) -> Unit)?,
+    onBatchSelectMedia: (List<MediaItem>) -> Unit,
+    onSelectionGestureEnd: () -> Unit,
     onRefresh: () -> Unit,
     sharedElementEnabled: Boolean = true,
     favoriteUris: Set<String> = emptySet(),
-    showFavoriteBadge: Boolean = true
+    showFavoriteBadge: Boolean = true,
+    initialFirstVisibleItem: Int = 0,
+    initialFirstVisibleOffset: Int = 0,
+    onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
     val state = rememberLazyStaggeredGridState()
+    LaunchedEffect(state) {
+        snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
+            .sample(80L)
+            .collectLatest { (index, offset) -> onScrollPositionChanged(index, offset) }
+    }
+    var restored by remember { mutableStateOf(false) }
+    LaunchedEffect(groupedDates) {
+        if (!restored && groupedDates.isNotEmpty()) {
+            state.scrollToItem(initialFirstVisibleItem.coerceAtLeast(0), initialFirstVisibleOffset.coerceAtLeast(0))
+            restored = true
+        }
+    }
     val flatItems = remember(groupedDates) { groupedDates.flatMap { it.value } }
     LazyStaggeredGridMediaPrefetch(state, flatItems)
     val scope = rememberCoroutineScope()
@@ -313,8 +387,8 @@ private fun AdaptiveTimeline(
     val metrics by remember(state) { derivedStateOf { timelineStaggeredGridScrollMetrics(state) } }
     var pullDistance by remember { mutableFloatStateOf(0f) }
     val density = LocalDensity.current
-    val triggerPull = with(density) { 68.dp.toPx() }
-    val maxPull = with(density) { 116.dp.toPx() }
+    val triggerPull = with(density) { 96.dp.toPx() }
+    val maxPull = with(density) { 144.dp.toPx() }
     val pullRefreshing = loading
     LaunchedEffect(loading) {
         if (!loading) pullDistance = 0f
@@ -356,7 +430,17 @@ private fun AdaptiveTimeline(
         LazyVerticalStaggeredGrid(
             columns = StaggeredGridCells.Fixed(columns),
             state = state,
-            modifier = Modifier.fillMaxSize().graphicsLayer { translationY = pullOffset }.nestedScroll(pullConnection),
+            modifier = Modifier.fillMaxSize().graphicsLayer { translationY = pullOffset }.nestedScroll(pullConnection).batchSelectionStaggeredGesture(
+                state = state,
+                items = flatItems,
+                keyOf = { it.uri.toString() },
+                onStart = { item ->
+                    onScrollPositionChanged(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset)
+                    (onSelectionGestureStartMedia ?: onLongPressMedia)(item)
+                },
+                onSelectRange = onBatchSelectMedia,
+                onEnd = onSelectionGestureEnd
+            ),
             contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(3.dp),
             verticalItemSpacing = 3.dp
@@ -388,7 +472,7 @@ private fun AdaptiveTimeline(
                             Modifier.fillMaxWidth().aspectRatio(mediaItem.displayAspectRatio),
                             favorite = mediaItem.uri.toString() in favoriteUris,
                             showFavoriteBadge = showFavoriteBadge,
-                            onLongClick = { onLongPressMedia(mediaItem) },
+                            onLongClick = {},
                             sharedElementEnabled = sharedElementEnabled
                         ) { onOpenMedia(mediaItem) }
                     }

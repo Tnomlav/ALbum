@@ -36,10 +36,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.example.album.ui.components.batchSelectionListGesture
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.Icons
@@ -90,11 +93,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.documentfile.provider.DocumentFile
+import org.json.JSONArray
+import org.json.JSONObject
 import com.example.album.data.DuplicateGroup
 import com.example.album.data.MediaItem
+import com.example.album.data.displayAddress
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
 import com.example.album.data.PixivArchiveRecord
+import com.example.album.data.PixivMetadata
 import com.example.album.data.PixivArchivePhase
 import com.example.album.data.PixivArchiveProgress
 import com.example.album.data.PixivArchiveRepository
@@ -108,8 +115,10 @@ import com.example.album.ui.components.MediaThumbnail
 import com.example.album.ui.components.VaultConfirmationSheet
 import com.example.album.ui.components.VaultChoiceConfirmationSheet
 import com.example.album.ui.components.VaultTextInputDialog
+import com.example.album.ui.components.VaultInfoSheet
 import com.example.album.ui.components.SelectionTopBar
 import com.example.album.ui.components.SelectionSubBar
+import com.example.album.ui.components.ListScrollHandle
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -137,26 +146,40 @@ fun CleanupScreen(
     findDuplicates: suspend () -> List<DuplicateGroup>,
     confirmMediaDeletion: Boolean = true,
     recycleMediaDeletion: Boolean = true,
-    onDeleteMedia: (List<MediaItem>) -> Unit,
+    onDeleteMedia: suspend (List<MediaItem>) -> Unit,
     onRestoreRecycle: (List<RecycleEntry>) -> Unit,
     onDeleteRecycle: (List<RecycleEntry>) -> Unit,
-    onRestoreExcluded: (String) -> Unit
+    onRestoreExcluded: (String) -> Unit,
+    onOpenMedia: (MediaItem) -> Unit = {},
+    onOpenExcludedFolder: (String, Boolean) -> Unit = { _, _ -> }
 ) {
     val english = LocalAppEnglish.current
     var selectedTab by remember { mutableStateOf(CleanupTab.Recycle) }
     var groups by remember { mutableStateOf<List<DuplicateGroup>>(emptyList()) }
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var scanning by remember { mutableStateOf(false) }
+    var deletingMedia by remember { mutableStateOf(false) }
     var confirmDuplicateDelete by remember { mutableStateOf<List<MediaItem>?>(null) }
     var confirmRestore by remember { mutableStateOf<List<RecycleEntry>?>(null) }
-    var confirmDelete by remember { mutableStateOf<RecycleEntry?>(null) }
+    var confirmDelete by remember { mutableStateOf<List<RecycleEntry>?>(null) }
     var confirmEmptyRecycle by remember { mutableStateOf(false) }
+    var selectedRecycleIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedExcludedFolders by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var infoItem by remember { mutableStateOf<MediaItem?>(null) }
+    var infoRecycleEntry by remember { mutableStateOf<RecycleEntry?>(null) }
     val scope = rememberCoroutineScope()
 
     fun submitDuplicateDelete(deleting: List<MediaItem>) {
         if (deleting.isEmpty()) return
-        onDeleteMedia(deleting)
         selectedUris = selectedUris - deleting.mapTo(hashSetOf()) { it.uri.toString() }
+        scope.launch {
+            deletingMedia = true
+            try {
+                onDeleteMedia(deleting)
+            } finally {
+                deletingMedia = false
+            }
+        }
     }
 
     fun requestDuplicateDelete(deleting: List<MediaItem>) {
@@ -168,12 +191,15 @@ fun CleanupScreen(
         CleanupToolbar(selectedTab = selectedTab, onTabSelected = { selectedTab = it }, onBack = onBack)
 
         when (selectedTab) {
-            CleanupTab.Duplicates -> DuplicateContent(media, groups, selectedUris, scanning, onScan = {
+            CleanupTab.Duplicates -> DuplicateContent(media, groups, selectedUris, scanning, deletingMedia, onScan = {
                 scanning = true
                 scope.launch {
-                    groups = findDuplicates()
-                    selectedUris = groups.flatMap { it.items.drop(1) }.mapTo(mutableSetOf()) { it.uri.toString() }
-                    scanning = false
+                    try {
+                        groups = findDuplicates()
+                        selectedUris = groups.flatMap { it.items.drop(1) }.mapTo(mutableSetOf()) { it.uri.toString() }
+                    } finally {
+                        scanning = false
+                    }
                 }
             }, onToggle = { uri -> selectedUris = if (uri in selectedUris) selectedUris - uri else selectedUris + uri }, onDelete = { requestedUris ->
                 val liveUris = media.mapTo(hashSetOf()) { it.uri.toString() }
@@ -188,15 +214,35 @@ fun CleanupScreen(
                 if (deleting.isNotEmpty()) {
                     requestDuplicateDelete(deleting)
                 }
-            })
+            }, onLongClick = { infoItem = it })
             CleanupTab.Recycle -> RecycleContent(
                 entries = recycleEntries,
+                selectedIds = selectedRecycleIds,
+                onToggle = { entry -> selectedRecycleIds = if (entry.id in selectedRecycleIds) selectedRecycleIds - entry.id else selectedRecycleIds + entry.id },
+                onOpen = { entry ->
+                    val uri = if (entry.systemTrashed) Uri.parse(entry.sourceUri) else Uri.fromFile(File(entry.storedPath))
+                    onOpenMedia(MediaItem(entry.id.hashCode().toLong(), uri, entry.originalName, entry.originalFolder, entry.dateTaken, entry.mimeType, entry.originalRelativePath, isVideo = entry.isVideo))
+                },
+                onLongClick = { infoRecycleEntry = it },
                 onRestore = { entry -> confirmRestore = listOf(entry) },
-                onDelete = { confirmDelete = it },
-                onRestoreAll = { if (recycleEntries.isNotEmpty()) confirmRestore = recycleEntries },
-                onDeleteAll = { confirmEmptyRecycle = true }
+                onDelete = { confirmDelete = listOf(it) },
+                onRestoreAll = {
+                    val selected = recycleEntries.filter { it.id in selectedRecycleIds }
+                    confirmRestore = if (selected.isNotEmpty()) selected else recycleEntries
+                },
+                onDeleteAll = {
+                    val selected = recycleEntries.filter { it.id in selectedRecycleIds }
+                    if (selected.isNotEmpty()) confirmDelete = selected else confirmEmptyRecycle = true
+                }
             )
-            CleanupTab.Excluded -> ExcludedContent(excludedMedia, onRestoreExcluded)
+            CleanupTab.Excluded -> ExcludedContent(
+                excludedMedia,
+                selectedExcludedFolders,
+                onToggleFolder = { folder -> selectedExcludedFolders = if (folder in selectedExcludedFolders) selectedExcludedFolders - folder else selectedExcludedFolders + folder },
+                onOpenFolder = { folder, isVideo -> onOpenExcludedFolder(folder, isVideo) },
+                onRestore = onRestoreExcluded,
+                onRestoreSelected = { selectedExcludedFolders.forEach(onRestoreExcluded); selectedExcludedFolders = emptySet() }
+            )
         }
     }
 
@@ -240,17 +286,22 @@ fun CleanupScreen(
             onConfirm = {
                 confirmRestore = null
                 onRestoreRecycle(entries)
+                selectedRecycleIds = selectedRecycleIds - entries.mapTo(hashSetOf()) { it.id }
             }
         )
     }
-    confirmDelete?.let { entry ->
+    confirmDelete?.let { entries ->
         VaultConfirmationSheet(
             title = appText("彻底删除", english),
-            body = if (english) "\"${entry.originalName}\" cannot be recovered." else "“${entry.originalName}”将无法恢复。",
-            confirmLabel = appText("彻底删除", english),
+            body = if (english) {
+                if (entries.size == 1) "\"${entries.first().originalName}\" cannot be recovered." else "${entries.size} items cannot be recovered."
+            } else {
+                if (entries.size == 1) "“${entries.first().originalName}”将无法恢复。" else "选中的 ${entries.size} 项将无法恢复。"
+            },
+            confirmLabel = if (entries.size == 1) appText("彻底删除", english) else appText("清除选中", english),
             danger = true,
             onDismiss = { confirmDelete = null },
-            onConfirm = { onDeleteRecycle(listOf(entry)); confirmDelete = null }
+            onConfirm = { onDeleteRecycle(entries); selectedRecycleIds -= entries.mapTo(hashSetOf()) { it.id }; confirmDelete = null }
         )
     }
     if (confirmEmptyRecycle) {
@@ -260,8 +311,20 @@ fun CleanupScreen(
             confirmLabel = appText("全部清除", english),
             danger = true,
             onDismiss = { confirmEmptyRecycle = false },
-            onConfirm = { onDeleteRecycle(recycleEntries); confirmEmptyRecycle = false }
+            onConfirm = {
+                val deleting = recycleEntries.filter { it.id in selectedRecycleIds }.ifEmpty { recycleEntries }
+                onDeleteRecycle(deleting)
+                selectedRecycleIds = selectedRecycleIds - deleting.mapTo(hashSetOf()) { it.id }
+                confirmEmptyRecycle = false
+            }
         )
+    }
+
+    infoItem?.let { item ->
+        VaultInfoSheet(appText("信息", english), cleanupMediaInfo(item), onDismiss = { infoItem = null })
+    }
+    infoRecycleEntry?.let { entry ->
+        VaultInfoSheet(appText("信息", english), cleanupRecycleInfo(entry), onDismiss = { infoRecycleEntry = null })
     }
 }
 
@@ -271,6 +334,7 @@ fun PixivArchiveScreen(
     onStartScan: (Uri, Int) -> Unit,
     onBack: () -> Unit,
     onArchiveComplete: suspend (completed: Int, failed: Int) -> Unit,
+    archiveMediaRefreshing: Boolean = false,
     favoriteSelected: (List<MediaItem>) -> Boolean = { false },
     onFavorite: (List<MediaItem>) -> Unit = {},
     onCopy: (List<MediaItem>) -> Unit = {},
@@ -287,6 +351,13 @@ fun PixivArchiveScreen(
     var renameItem by remember { mutableStateOf<MediaItem?>(null) }
     var renameText by remember { mutableStateOf("") }
     var deleteItems by remember { mutableStateOf<List<MediaItem>?>(null) }
+    var infoRecordUri by remember { mutableStateOf<String?>(null) }
+    var selectionMode by remember { mutableStateOf(false) }
+
+    fun exitSelectionMode() {
+        selectionMode = false
+        session.selectedUris.value = emptySet()
+    }
 
     fun selectedUrls(): List<String> = records
         .filter { it.uri.toString() in selectedUris }
@@ -318,7 +389,7 @@ fun PixivArchiveScreen(
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        if (selectedUris.isEmpty()) {
+        if (!selectionMode) {
             Row(
                 modifier = Modifier.fillMaxWidth().statusBarsPadding().height(58.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -337,11 +408,11 @@ fun PixivArchiveScreen(
             val selectedItems = selectedMedia()
             SelectionTopBar(
                 selected = selectedUris.size,
-                onClose = { session.selectedUris.value = emptySet() },
+                onClose = ::exitSelectionMode,
                 favoriteSelected = selectedItems.isNotEmpty() && favoriteSelected(selectedItems),
-                onFavorite = { onFavorite(selectedItems); session.selectedUris.value = emptySet() },
-                onCopy = { onCopy(selectedItems); session.selectedUris.value = emptySet() },
-                onMove = { onMove(selectedItems); session.selectedUris.value = emptySet() },
+                onFavorite = { onFavorite(selectedItems); exitSelectionMode() },
+                onCopy = { onCopy(selectedItems); exitSelectionMode() },
+                onMove = { onMove(selectedItems); exitSelectionMode() },
                 onRename = {
                     selectedItems.singleOrNull()?.let {
                         renameItem = it
@@ -354,9 +425,35 @@ fun PixivArchiveScreen(
             )
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
-            ArchiveContent(session, onStartScan, onArchiveComplete)
+            ArchiveContent(
+                session = session,
+                selectionMode = selectionMode,
+                onEnterSelection = { selectionMode = true },
+                onExitSelection = ::exitSelectionMode,
+                onStartScan = onStartScan,
+                onArchiveComplete = onArchiveComplete,
+                onInfo = { infoRecordUri = it.uri.toString() }
+            )
+            if (archiveMediaRefreshing) {
+                Box(
+                    Modifier.fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background.copy(alpha = .92f))
+                        .clickable(enabled = true) { },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                        Text(
+                            appText("正在整理媒体库，请稍候", english),
+                            modifier = Modifier.padding(top = 12.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
         }
-        if (selectedUris.isNotEmpty()) {
+        if (selectionMode) {
             SelectionSubBar(
                 selected = selectedUris.size,
                 total = selectableUris.size,
@@ -367,6 +464,15 @@ fun PixivArchiveScreen(
                 }
             )
         }
+    }
+    infoRecordUri?.let { uri ->
+        records.firstOrNull { it.uri.toString() == uri }?.let { record ->
+            VaultInfoSheet(
+                title = appText("文件信息", english),
+                body = pixivArchiveInfo(record, english),
+                onDismiss = { infoRecordUri = null }
+            )
+        } ?: run { infoRecordUri = null }
     }
     renameItem?.let { item ->
         VaultTextInputDialog(
@@ -387,7 +493,7 @@ fun PixivArchiveScreen(
                     }
                 }
                 renameItem = null
-                session.selectedUris.value = emptySet()
+                exitSelectionMode()
             }
         )
     }
@@ -401,7 +507,7 @@ fun PixivArchiveScreen(
             onConfirm = {
                 onDelete(items)
                 deleteItems = null
-                session.selectedUris.value = emptySet()
+                exitSelectionMode()
             }
         )
     }
@@ -471,18 +577,24 @@ private fun DuplicateContent(
     groups: List<DuplicateGroup>,
     selectedUris: Set<String>,
     scanning: Boolean,
+    deleting: Boolean,
     onScan: () -> Unit,
     onToggle: (String) -> Unit,
     onDelete: (Set<String>) -> Unit,
-    onDeleteAll: () -> Unit
+    onDeleteAll: () -> Unit,
+    onLongClick: (MediaItem) -> Unit = {}
 ) {
     val english = LocalAppEnglish.current
     val liveUris = media.mapTo(hashSetOf()) { it.uri.toString() }
     val liveGroups = groups.map { it.copy(items = it.items.filter { item -> item.uri.toString() in liveUris }) }.filter { it.items.size > 1 }
     var collapsedGroups by remember { mutableStateOf<Set<String>>(emptySet()) }
     val allCollapsed = liveGroups.isNotEmpty() && liveGroups.all { it.hash in collapsedGroups }
+    val listState = rememberLazyListState()
+    val scrollMetrics = cleanupScrollMetrics(listState)
 
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 7.dp, end = 7.dp, bottom = 28.dp)
     ) {
@@ -507,42 +619,55 @@ private fun DuplicateContent(
                         Text(if (english) "${liveGroups.size} duplicate groups" else "${liveGroups.size} 组重复图片", fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        CleanupCommand("全盘查重", color = Color(0xFF22A447), enabled = !scanning, onClick = onScan)
-                        if (liveGroups.isNotEmpty()) CleanupCommand("清理全部", color = Color(0xFFFF453A), onClick = onDeleteAll)
+                        CleanupCommand("全盘查重", color = Color(0xFF22A447), enabled = !scanning && !deleting, onClick = onScan)
+                        if (liveGroups.isNotEmpty()) CleanupCommand("清理全部", color = Color(0xFFFF453A), enabled = !deleting, onClick = onDeleteAll)
                     }
                 }
             }
         }
-        if (scanning) {
+        if (deleting) {
+            item { CleanupBusy("正在删除重复图片…") }
+        } else if (scanning) {
             item { CleanupBusy("正在计算文件哈希…") }
         } else if (liveGroups.isEmpty()) {
             item { CleanupEmpty("没有发现重复图片") }
         }
-        items(liveGroups, key = { it.hash }) { group ->
+        liveGroups.forEachIndexed { groupIndex, group ->
             val collapsed = group.hash in collapsedGroups
-            Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 14.dp)) {
-                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = {
-                            collapsedGroups = if (collapsed) collapsedGroups - group.hash else collapsedGroups + group.hash
-                        },
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Icon(
-                            Icons.Outlined.ChevronRight,
-                            appText(if (collapsed) "展开" else "折叠", english),
-                            modifier = Modifier.size(17.dp).graphicsLayer { rotationZ = if (collapsed) 0f else 90f }
+            item(key = "${group.hash}:header") {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 14.dp)) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                collapsedGroups = if (collapsed) collapsedGroups - group.hash else collapsedGroups + group.hash
+                            },
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Icon(
+                                Icons.Outlined.ChevronRight,
+                                appText(if (collapsed) "展开" else "折叠", english),
+                                modifier = Modifier.size(17.dp).graphicsLayer { rotationZ = if (collapsed) 0f else 90f }
+                            )
+                        }
+                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (english) "Duplicate group ${groupIndex + 1}" else "重复组${groupIndex + 1}", fontSize = 13.sp)
+                            Text(if (english) "  ${group.items.size} photos" else "  ${group.items.size}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                        }
+                        val selectedInGroup = group.items
+                            .mapTo(mutableSetOf()) { it.uri.toString() }
+                            .intersect(selectedUris)
+                        CleanupCommand(
+                            label = "清理所选",
+                            color = Color(0xFFFF453A),
+                            enabled = selectedInGroup.isNotEmpty(),
+                            onClick = { onDelete(selectedInGroup) }
                         )
                     }
-                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (english) "Duplicate group ${liveGroups.indexOf(group) + 1}" else "重复组 ${liveGroups.indexOf(group) + 1}", fontSize = 13.sp)
-                        Text(if (english) "  ${group.items.size} photos" else "  ${group.items.size}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                    }
-                    val selectedInGroup = group.items.mapTo(mutableSetOf()) { it.uri.toString() }.intersect(selectedUris)
-                    CleanupCommand("清理所选", color = Color(0xFFFF453A), enabled = selectedInGroup.isNotEmpty()) { onDelete(selectedInGroup) }
                 }
-                if (collapsed) {
-                    group.items.chunked(4).forEach { rowItems ->
+            }
+            if (collapsed) {
+                group.items.chunked(4).forEachIndexed { rowIndex, rowItems ->
+                    item(key = "${group.hash}:grid:$rowIndex") {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                             rowItems.forEach { item ->
                                 val key = item.uri.toString()
@@ -554,18 +679,24 @@ private fun DuplicateContent(
                             repeat(4 - rowItems.size) { Spacer(Modifier.weight(1f).aspectRatio(1f)) }
                         }
                     }
-                } else {
-                    group.items.forEach { item -> DuplicateMediaRow(item, item.uri.toString() in selectedUris) { onToggle(item.uri.toString()) } }
+                }
+            } else {
+                items(group.items, key = { "${group.hash}:${it.uri}" }) { item ->
+                    DuplicateMediaRow(item, item.uri.toString() in selectedUris, onLongClick = { onLongClick(item) }) {
+                        onToggle(item.uri.toString())
+                    }
                 }
             }
         }
     }
+    CleanupScrollBar(listState, scrollMetrics, Modifier.align(Alignment.CenterEnd))
+    }
 }
 
 @Composable
-private fun DuplicateMediaRow(item: MediaItem, selected: Boolean, onClick: () -> Unit) {
+private fun DuplicateMediaRow(item: MediaItem, selected: Boolean, onLongClick: () -> Unit, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().height(72.dp).clickable(onClick = onClick),
+        Modifier.fillMaxWidth().height(72.dp).combinedClickable(onClick = onClick, onLongClick = onLongClick),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.size(72.dp)) {
@@ -615,6 +746,33 @@ private fun CleanupProperty(text: String, modifier: Modifier = Modifier, primary
 private fun formatCleanupDate(time: Long): String =
     SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(Date(time.coerceAtLeast(0L)))
 
+private fun cleanupMediaInfo(item: MediaItem): String = buildString {
+    appendLine("名称：${item.name}")
+    appendLine("文件夹：${item.folder}")
+    appendLine("相对路径：${item.relativePath.orEmpty()}")
+    appendLine("类型：${item.mimeType}")
+    appendLine("地址：${item.displayAddress()}")
+    appendLine("大小：${formatMediaSize(item.size)}")
+    appendLine("拍摄日期：${formatCleanupDate(item.dateTaken)}")
+    appendLine("修改日期：${formatCleanupDate(item.dateModified)}")
+    if (item.duration > 0) appendLine("时长：${item.duration} ms")
+    if (item.width > 0 || item.height > 0) appendLine("尺寸：${item.width} × ${item.height}")
+}
+
+private fun cleanupRecycleInfo(entry: RecycleEntry): String = buildString {
+    appendLine("名称：${entry.originalName}")
+    appendLine("原文件夹：${entry.originalFolder}")
+    appendLine("原相对路径：${entry.originalRelativePath.orEmpty()}")
+    appendLine("类型：${entry.mimeType}")
+    appendLine("原始地址：${entry.sourceUri}")
+    appendLine("回收站文件：${entry.storedPath}")
+    appendLine("大小：${formatMediaSize(runCatching { File(entry.storedPath).length() }.getOrDefault(0L))}")
+    appendLine("拍摄日期：${formatCleanupDate(entry.dateTaken)}")
+    appendLine("删除日期：${formatCleanupDate(entry.deletedAt)}")
+    appendLine("回收站类型：${if (entry.systemTrashed) "系统回收站" else "应用回收站"}")
+    if (entry.duration > 0) appendLine("时长：${entry.duration} ms")
+}
+
 @Composable
 private fun CleanupSummary(content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
     Row(
@@ -641,10 +799,20 @@ private fun CleanupCommand(
             .background(color)
             .clickable(enabled = enabled, onClick = onClick)
             .alpha(if (enabled) 1f else .42f)
+            .widthIn(min = 72.dp)
             .padding(horizontal = 10.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(appText(label, english), color = Color.White, fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(
+            text = appText(label, english),
+            color = Color.White,
+            fontSize = 12.sp,
+            lineHeight = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            softWrap = false
+        )
     }
 }
 
@@ -773,9 +941,51 @@ private fun formatMediaSize(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
+private data class CleanupScrollMetrics(
+    val total: Int,
+    val progress: Float,
+    val visibleFraction: Float
+)
+
 @Composable
+private fun cleanupScrollMetrics(state: androidx.compose.foundation.lazy.LazyListState): CleanupScrollMetrics {
+    val total = state.layoutInfo.totalItemsCount
+    val visible = state.layoutInfo.visibleItemsInfo.size
+    return CleanupScrollMetrics(
+        total = total,
+        progress = if (total <= visible) 0f else state.firstVisibleItemIndex.toFloat() / (total - visible),
+        visibleFraction = if (total == 0) 1f else (visible.toFloat() / total).coerceIn(0f, 1f)
+    )
+}
+
+@Composable
+private fun CleanupScrollBar(
+    state: androidx.compose.foundation.lazy.LazyListState,
+    metrics: CleanupScrollMetrics,
+    modifier: Modifier
+) {
+    val scope = rememberCoroutineScope()
+    ListScrollHandle(
+        progress = metrics.progress,
+        visibleFraction = metrics.visibleFraction,
+        scrolling = state.isScrollInProgress,
+        onFraction = { fraction ->
+            scope.launch {
+                state.scrollToItem((fraction * (metrics.total - 1).coerceAtLeast(0)).toInt())
+            }
+        },
+        modifier = modifier
+    )
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun RecycleContent(
     entries: List<RecycleEntry>,
+    selectedIds: Set<String>,
+    onToggle: (RecycleEntry) -> Unit,
+    onOpen: (RecycleEntry) -> Unit,
+    onLongClick: (RecycleEntry) -> Unit,
     onRestore: (RecycleEntry) -> Unit,
     onDelete: (RecycleEntry) -> Unit,
     onRestoreAll: () -> Unit,
@@ -783,8 +993,20 @@ private fun RecycleContent(
 ) {
     val english = LocalAppEnglish.current
     var collapsed by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val scrollMetrics = cleanupScrollMetrics(listState)
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        state = listState,
+        modifier = Modifier.fillMaxSize().then(
+            if (!collapsed) Modifier.batchSelectionListGesture(
+                state = listState,
+                items = entries,
+                keyOf = { it.id },
+                onStart = { entry -> if (entry.id !in selectedIds) onToggle(entry) },
+                onSelectRange = { range -> range.forEach { entry -> if (entry.id !in selectedIds) onToggle(entry) } }
+            ) else Modifier
+        ),
         contentPadding = PaddingValues(start = 7.dp, end = 7.dp, bottom = 28.dp)
     ) {
         item {
@@ -805,8 +1027,8 @@ private fun RecycleContent(
                     Text(if (english) "Items are kept for 60 days" else "项目保留60天", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        CleanupCommand("全部还原", onClick = onRestoreAll)
-                        CleanupCommand("全部清除", color = Color(0xFFFF453A), onClick = onDeleteAll)
+                        CleanupCommand(if (selectedIds.isEmpty()) "全部还原" else "还原选中", onClick = onRestoreAll)
+                        CleanupCommand(if (selectedIds.isEmpty()) "全部清除" else "清除选中", color = Color(0xFFFF453A), onClick = onDeleteAll)
                     }
                 }
             }
@@ -817,8 +1039,9 @@ private fun RecycleContent(
             items(entries.chunked(4), key = { row -> row.joinToString { it.id } }) { rowEntries ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     rowEntries.forEach { entry ->
-                        Box(Modifier.weight(1f).aspectRatio(1f)) {
+                        Box(Modifier.weight(1f).aspectRatio(1f).combinedClickable(onClick = { onToggle(entry) }, onLongClick = { onLongClick(entry) })) {
                             RecycleThumbnail(entry, Modifier.fillMaxSize())
+                            CleanupSelectionMark(entry.id in selectedIds, Modifier.align(Alignment.TopEnd).padding(5.dp).clickable { onToggle(entry) })
                             Row(
                                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(34.dp)
                                     .background(MaterialTheme.colorScheme.surface.copy(alpha = .82f)),
@@ -838,17 +1061,23 @@ private fun RecycleContent(
                 }
             }
         } else {
-            items(entries, key = { it.id }) { entry -> RecycleMediaRow(entry, { onRestore(entry) }, { onDelete(entry) }) }
+            items(entries, key = { it.id }) { entry -> RecycleMediaRow(entry, entry.id in selectedIds, { onToggle(entry) }, { onOpen(entry) }, { onLongClick(entry) }, { onRestore(entry) }, { onDelete(entry) }) }
         }
+    }
+    CleanupScrollBar(listState, scrollMetrics, Modifier.align(Alignment.CenterEnd))
     }
 }
 
 @Composable
-private fun RecycleMediaRow(entry: RecycleEntry, onRestore: () -> Unit, onDelete: () -> Unit) {
+@OptIn(ExperimentalFoundationApi::class)
+private fun RecycleMediaRow(entry: RecycleEntry, selected: Boolean, onToggle: () -> Unit, onOpen: () -> Unit, onLongClick: () -> Unit, onRestore: () -> Unit, onDelete: () -> Unit) {
     val english = LocalAppEnglish.current
     val bytes = remember(entry.id, entry.storedPath) { runCatching { File(entry.storedPath).length() }.getOrDefault(0L) }
-    Row(Modifier.fillMaxWidth().height(72.dp), verticalAlignment = Alignment.CenterVertically) {
-        RecycleThumbnail(entry, Modifier.size(72.dp))
+    Row(Modifier.fillMaxWidth().height(72.dp).combinedClickable(onClick = onOpen, onLongClick = onLongClick), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(72.dp).clickable { onToggle() }) {
+            RecycleThumbnail(entry, Modifier.fillMaxSize())
+            CleanupSelectionMark(selected, Modifier.align(Alignment.TopEnd).padding(4.dp).clickable { onToggle() })
+        }
         Column(Modifier.weight(1f).padding(start = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CleanupProperty(entry.originalFolder, Modifier.weight(1f), primary = true)
@@ -871,23 +1100,44 @@ private fun RecycleMediaRow(entry: RecycleEntry, onRestore: () -> Unit, onDelete
 }
 
 @Composable
-private fun ExcludedContent(media: List<MediaItem>, onRestore: (String) -> Unit) {
+@OptIn(ExperimentalFoundationApi::class)
+private fun ExcludedContent(
+    media: List<MediaItem>,
+    selectedFolders: Set<String>,
+    onToggleFolder: (String) -> Unit,
+    onOpenFolder: (String, Boolean) -> Unit,
+    onRestore: (String) -> Unit,
+    onRestoreSelected: () -> Unit
+) {
     val english = LocalAppEnglish.current
     val folders = remember(media) { media.groupBy { it.folder } }
+    val listState = rememberLazyListState()
+    val scrollMetrics = cleanupScrollMetrics(listState)
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        state = listState,
+        modifier = Modifier.fillMaxSize().batchSelectionListGesture(
+            state = listState,
+            items = folders.entries.toList(),
+            keyOf = { it.key },
+            onStart = { entry -> if (entry.key !in selectedFolders) onToggleFolder(entry.key) },
+            onSelectRange = { range -> range.forEach { entry -> if (entry.key !in selectedFolders) onToggleFolder(entry.key) } }
+        ),
         contentPadding = PaddingValues(start = 7.dp, end = 7.dp, bottom = 28.dp)
     ) {
         item {
             CleanupSummary {
                 Text(if (english) "${folders.size} folders" else "${folders.size} 个文件夹", modifier = Modifier.weight(1f), fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                if (folders.isNotEmpty()) CleanupCommand("全部还原") { folders.keys.forEach(onRestore) }
+                if (folders.isNotEmpty()) CleanupCommand(if (selectedFolders.isEmpty()) "全部还原" else "还原选中") { if (selectedFolders.isEmpty()) folders.keys.forEach(onRestore) else onRestoreSelected() }
             }
         }
         if (folders.isEmpty()) item { CleanupEmpty("没有已排除文件夹") }
         items(folders.entries.toList(), key = { it.key }) { (folder, items) ->
-            Row(Modifier.fillMaxWidth().heightIn(min = 72.dp), verticalAlignment = Alignment.CenterVertically) {
-                MediaThumbnail(items.first(), Modifier.size(72.dp))
+            Row(Modifier.fillMaxWidth().heightIn(min = 72.dp).combinedClickable(onClick = { onOpenFolder(folder, items.all(MediaItem::isVideo)) }, onLongClick = {}), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(72.dp).clickable { onToggleFolder(folder) }) {
+                    MediaThumbnail(items.first(), Modifier.fillMaxSize())
+                    CleanupSelectionMark(folder in selectedFolders, Modifier.align(Alignment.TopEnd).padding(4.dp).clickable { onToggleFolder(folder) })
+                }
                 Column(Modifier.weight(1f).padding(start = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(folder, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(if (english) "${items.size} items" else "${items.size} 项", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
@@ -897,6 +1147,8 @@ private fun ExcludedContent(media: List<MediaItem>, onRestore: (String) -> Unit)
                 }
             }
         }
+    }
+    CleanupScrollBar(listState, scrollMetrics, Modifier.align(Alignment.CenterEnd))
     }
 }
 
@@ -911,15 +1163,15 @@ data class ArchiveActivity(
     val failed: Int = 0,
     val currentFile: String = "",
     val currentArtist: String = "",
-    val itemProgress: Float = 0f,
     val message: String = "等待开始",
     val logs: List<String> = emptyList()
 )
 
 /** Keeps archive work and its result alive while the archive page is not visible. */
-class PixivArchiveSession {
-    val records = mutableStateOf<List<PixivArchiveRecord>>(emptyList())
-    val state = mutableStateOf(ArchiveUiState.Idle)
+class PixivArchiveSession(context: Context) {
+    private val preferences = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
+    val records = mutableStateOf(loadRecords())
+    val state = mutableStateOf(if (records.value.isEmpty()) ArchiveUiState.Idle else ArchiveUiState.Ready)
     val completed = mutableStateOf(0)
     val failed = mutableStateOf(0)
     val activity = mutableStateOf(ArchiveActivity())
@@ -927,9 +1179,99 @@ class PixivArchiveSession {
     val selectableUris = mutableStateOf<Set<String>>(emptySet())
     var scanJob: Job? = null
 
+    fun persistRecords() {
+        val json = JSONArray().apply {
+            records.value.forEach { record ->
+                put(JSONObject().apply {
+                    put("uri", record.uri.toString())
+                    put("filename", record.filename)
+                    put("mimeType", record.mimeType)
+                    put("pid", record.pid ?: "")
+                    put("page", record.page)
+                    put("status", record.status.name)
+                    put("message", record.message)
+                    put("dateModified", record.dateModified)
+                    record.metadata?.let { metadata ->
+                        put("metadata", JSONObject().apply {
+                            put("title", metadata.title)
+                            put("artist", metadata.artist)
+                            put("artistId", metadata.artistId)
+                            put("tags", JSONArray(metadata.tags))
+                            put("tagTranslations", JSONObject().apply {
+                                metadata.tagTranslations.forEach { (source, translations) ->
+                                    put(source, JSONObject(translations))
+                                }
+                            })
+                        })
+                    }
+                })
+            }
+        }
+        preferences.edit().putString(KEY_SCAN_RECORDS, json.toString()).apply()
+    }
+
+    fun upsertRecord(record: PixivArchiveRecord) {
+        records.value = records.value.filterNot { it.uri == record.uri } + record
+    }
+
+    fun mergeRecords(scanned: List<PixivArchiveRecord>) {
+        val byUri = linkedMapOf<String, PixivArchiveRecord>()
+        records.value.forEach { byUri[it.uri.toString()] = it }
+        scanned.forEach { byUri[it.uri.toString()] = it }
+        records.value = byUri.values.toList()
+        persistRecords()
+    }
+
+    private fun loadRecords(): List<PixivArchiveRecord> = runCatching {
+        val array = JSONArray(preferences.getString(KEY_SCAN_RECORDS, "[]"))
+        buildList {
+            repeat(array.length()) { index ->
+                val json = array.getJSONObject(index)
+                val metadataJson = json.optJSONObject("metadata")
+                add(
+                    PixivArchiveRecord(
+                        uri = Uri.parse(json.getString("uri")),
+                        filename = json.optString("filename"),
+                        mimeType = json.optString("mimeType", "image/*"),
+                        pid = json.optString("pid").takeIf { it.isNotBlank() },
+                        page = json.optInt("page", 0),
+                        metadata = metadataJson?.let {
+                            PixivMetadata(
+                                title = it.optString("title"),
+                                artist = it.optString("artist"),
+                                artistId = it.optString("artistId"),
+                                tags = buildList {
+                                    val tags = it.optJSONArray("tags") ?: JSONArray()
+                                    repeat(tags.length()) { tagIndex -> add(tags.optString(tagIndex)) }
+                                },
+                                tagTranslations = buildMap {
+                                    val translations = it.optJSONObject("tagTranslations") ?: return@buildMap
+                                    translations.keys().forEach { source ->
+                                        val values = translations.optJSONObject(source) ?: return@forEach
+                                        put(source, buildMap {
+                                            values.keys().forEach { language ->
+                                                values.optString(language).takeIf(String::isNotBlank)?.let { value ->
+                                                    put(language, value)
+                                                }
+                                            }
+                                        })
+                                    }
+                                }
+                            )
+                        },
+                        status = PixivArchiveStatus.valueOf(json.optString("status", PixivArchiveStatus.Ready.name)),
+                        message = json.optString("message"),
+                        dateModified = json.optLong("dateModified")
+                    )
+                )
+            }
+        }
+    }.getOrDefault(emptyList())
+
     fun reset() {
         if (scanJob?.isActive == true) return
         records.value = emptyList()
+        preferences.edit().remove(KEY_SCAN_RECORDS).apply()
         state.value = ArchiveUiState.Idle
         completed.value = 0
         failed.value = 0
@@ -937,14 +1279,22 @@ class PixivArchiveSession {
         selectedUris.value = emptySet()
         selectableUris.value = emptySet()
     }
+
+    private companion object {
+        const val KEY_SCAN_RECORDS = "scan_records"
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ArchiveContent(
     session: PixivArchiveSession,
+    selectionMode: Boolean,
+    onEnterSelection: () -> Unit,
+    onExitSelection: () -> Unit,
     onStartScan: (Uri, Int) -> Unit,
-    onArchiveComplete: suspend (completed: Int, failed: Int) -> Unit
+    onArchiveComplete: suspend (completed: Int, failed: Int) -> Unit,
+    onInfo: (PixivArchiveRecord) -> Unit
 ) {
     val context = LocalContext.current
     val english = LocalAppEnglish.current
@@ -964,7 +1314,14 @@ private fun ArchiveContent(
     var keepName by remember { mutableStateOf(preferences.getBoolean("keep_name", true)) }
     var writeTags by remember { mutableStateOf(preferences.getBoolean("write_tags", true)) }
     var copyInsteadOfMove by remember { mutableStateOf(preferences.getBoolean("copy_instead_of_move", false)) }
-    var maxBatchSize by remember { mutableIntStateOf(preferences.getInt("max_batch_size", 200).coerceIn(50, 1000)) }
+    val scanBatchOptions = remember { listOf(10, 20, 30, 50, 100, 150, 200, 300, 500) }
+    var maxBatchSize by remember {
+        mutableIntStateOf(
+            preferences.getInt("max_batch_size", 200).let { saved ->
+                scanBatchOptions.minByOrNull { option -> kotlin.math.abs(option - saved) } ?: 200
+            }
+        )
+    }
     var records by session.records
     var state by session.state
     var completed by session.completed
@@ -984,7 +1341,9 @@ private fun ArchiveContent(
 
     fun toggleRecordSelection(record: PixivArchiveRecord) {
         val key = record.uri.toString()
-        selectedUris = if (key in selectedUris) selectedUris - key else selectedUris + key
+        val removing = key in selectedUris
+        selectedUris = if (removing) selectedUris - key else selectedUris + key
+        if (!removing) onEnterSelection()
     }
 
     LaunchedEffect(Unit) {
@@ -1039,7 +1398,6 @@ private fun ArchiveContent(
             failed = progress.failed,
             currentFile = progress.currentFile,
             currentArtist = progress.currentArtist,
-            itemProgress = progress.itemProgress,
             message = progress.message,
             logs = if (progress.log.isBlank()) activity.logs else (listOf(progress.log) + activity.logs).take(4)
         )
@@ -1061,7 +1419,6 @@ private fun ArchiveContent(
         }
         storeTree("source_uri", uri)
         sourceUri = uri
-        session.reset()
     }
     val targetLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
@@ -1109,6 +1466,7 @@ private fun ArchiveContent(
                 records = records.map { current ->
                     result.records.firstOrNull { it.uri == current.uri } ?: current
                 }
+                session.persistRecords()
                 completed = result.completed
                 failed = result.failed
                 state = if (result.failed == 0) ArchiveUiState.Ready else ArchiveUiState.Error
@@ -1175,6 +1533,7 @@ private fun ArchiveContent(
     // The slider limits discovery only; every record returned by that scan can be archived.
     val batchRecords = records
     val readyCount = batchRecords.count { it.canArchive }
+    val allArchived = batchRecords.isNotEmpty() && batchRecords.all { it.status == PixivArchiveStatus.Archived }
     val warningCount = batchRecords.count { it.status == PixivArchiveStatus.Warning }
     val retryCount = records.count { it.status == PixivArchiveStatus.Warning }
     val failedRecords = batchRecords.filter {
@@ -1193,6 +1552,7 @@ private fun ArchiveContent(
     }
 
     fun requestArchive() {
+        if (allArchived) return
         if (!pixivSessionConnected) {
             showPixivLoginPrompt = true
         } else if (readyCount == 0) {
@@ -1222,8 +1582,30 @@ private fun ArchiveContent(
     }
 
     Box(Modifier.fillMaxSize()) {
+    val listState = rememberLazyListState()
+    val scrollMetrics = cleanupScrollMetrics(listState)
+    val archiveThumbnailWidth = with(LocalDensity.current) { 90.dp.toPx() }
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        state = listState,
+        // Archive rows own their long-press targets: thumbnail selects,
+        // text copies the Pixiv address. A list-wide gesture would capture
+        // the text long press before the row can dispatch it.
+        modifier = Modifier.fillMaxSize().batchSelectionListGesture(
+            state = listState,
+            items = visibleBatchRecords,
+            keyOf = { it.uri.toString() },
+            onStart = { record ->
+                if (record.uri.toString() !in session.selectedUris.value) toggleRecordSelection(record)
+            },
+            onSelectRange = { range ->
+                range.forEach { record ->
+                    if (record.uri.toString() !in session.selectedUris.value) toggleRecordSelection(record)
+                }
+            },
+            canStartAt = { x, _ -> x <= archiveThumbnailWidth },
+            // A plain long press belongs to the thumbnail. The list gesture
+            // takes ownership only after the pointer continues dragging.
+        ),
         contentPadding = PaddingValues(start = 9.dp, top = 2.dp, end = 9.dp, bottom = 28.dp)
     ) {
         item {
@@ -1286,14 +1668,14 @@ private fun ArchiveContent(
                     val trackStrokeWidth = with(LocalDensity.current) { 12.dp.toPx() }
                     val thumbTrackGap = with(LocalDensity.current) { 3.dp.toPx() }
                     Slider(
-                        value = maxBatchSize.toFloat(),
+                        value = scanBatchOptions.indexOf(maxBatchSize).coerceAtLeast(0).toFloat(),
                         onValueChange = { value ->
-                            val next = (value / 50f).roundToInt() * 50
-                            maxBatchSize = next.coerceIn(50, 1000)
+                            val next = scanBatchOptions[value.roundToInt().coerceIn(scanBatchOptions.indices)]
+                            maxBatchSize = next
                             preferences.edit().putInt("max_batch_size", maxBatchSize).apply()
                         },
-                        valueRange = 50f..1000f,
-                        steps = 0,
+                        valueRange = 0f..scanBatchOptions.lastIndex.toFloat(),
+                        steps = scanBatchOptions.size - 2,
                         enabled = sliderEnabled,
                         modifier = Modifier.fillMaxWidth(),
                         track = { sliderState ->
@@ -1346,7 +1728,11 @@ private fun ArchiveContent(
         item {
             Row(Modifier.fillMaxWidth().padding(start = 10.dp, top = 12.dp, end = 10.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ArchivePrimaryButton(
-                    label = if (state == ArchiveUiState.Scanning) "重新开始" else "开始扫描",
+                    label = when {
+                        state == ArchiveUiState.Scanning -> "重新开始"
+                        records.isNotEmpty() -> "重新扫描"
+                        else -> "开始扫描"
+                    },
                     onClick = {
                         if (!pixivSessionConnected) {
                             showPixivLoginPrompt = true
@@ -1365,9 +1751,13 @@ private fun ArchiveContent(
                     filled = false
                 )
                 ArchivePrimaryButton(
-                    label = if (state == ArchiveUiState.Archiving) "正在归档..." else "开始归档",
+                    label = when {
+                        allArchived -> "已归档"
+                        state == ArchiveUiState.Archiving -> "正在归档..."
+                        else -> "开始归档"
+                    },
                     onClick = { requestArchive() },
-                    enabled = state != ArchiveUiState.Scanning && state != ArchiveUiState.Archiving,
+                    enabled = !allArchived && state != ArchiveUiState.Scanning && state != ArchiveUiState.Archiving,
                     modifier = Modifier.weight(1f),
                     filled = true
                 )
@@ -1457,13 +1847,14 @@ private fun ArchiveContent(
                 writeTags = writeTags,
                 archiving = state == ArchiveUiState.Archiving,
                 selected = record.uri.toString() in selectedUris,
-                selectionMode = selectedUris.isNotEmpty(),
+                selectionMode = selectionMode,
                 onSelect = { toggleRecordSelection(record) },
                 onArchive = { archiveSingle(record) },
                 onOpen = {
                     record.pid?.let { pid -> launchPixiv("https://www.pixiv.net/artworks/$pid") }
                 },
-                onCopyUrl = { copyPixivUrl(record) }
+                onCopyUrl = { copyPixivUrl(record) },
+                onInfo = { onInfo(record) }
             )
         }
         else items(visibleBatchRecords.chunked(3), key = { row -> row.firstOrNull()?.uri.toString() }) { row ->
@@ -1473,13 +1864,15 @@ private fun ArchiveContent(
                     record,
                     Modifier.weight(1f),
                     selected = record.uri.toString() in selectedUris,
-                    onSelect = { toggleRecordSelection(record) }
+                    onSelect = { toggleRecordSelection(record) },
+                    onCopyUrl = { copyPixivUrl(record) }
                 )
                 }
                 repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
+    CleanupScrollBar(listState, scrollMetrics, Modifier.align(Alignment.CenterEnd))
     if (!pixivSessionConnected) {
         Box(
             Modifier.fillMaxSize()
@@ -1513,6 +1906,7 @@ private fun ArchiveContent(
                                     }
                                 }
                                 records = result.records
+                                session.persistRecords()
                                 completed = result.completed
                                 failed = result.failed
                                 state = if (result.failed == 0) ArchiveUiState.Complete else ArchiveUiState.Error
@@ -1706,14 +2100,7 @@ private fun ArchiveActivityPanel(activity: ArchiveActivity, progress: Float, ind
         }
         if (indeterminate) LinearProgressIndicator(Modifier.fillMaxWidth().height(3.dp))
         else LinearProgressIndicator(
-            progress = {
-                if (activity.phase == PixivArchivePhase.Metadata ||
-                    activity.phase == PixivArchivePhase.Folders ||
-                    activity.phase == PixivArchivePhase.Tags ||
-                    activity.phase == PixivArchivePhase.Move
-                ) activity.itemProgress.coerceIn(0f, 1f)
-                else progress.coerceIn(0f, 1f)
-            },
+            progress = { progress.coerceIn(0f, 1f) },
             modifier = Modifier.fillMaxWidth().height(3.dp)
         )
         ArchiveStageGrid(activity.phase)
@@ -1830,20 +2217,27 @@ private fun ArchiveRecordRow(
     onSelect: () -> Unit,
     onArchive: () -> Unit,
     onOpen: () -> Unit,
-    onCopyUrl: () -> Unit
+    onCopyUrl: () -> Unit,
+    onInfo: () -> Unit
 ) {
     val english = LocalAppEnglish.current
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 5.dp)
-            .combinedClickable(onClick = {}, onLongClick = onCopyUrl),
+        Modifier.fillMaxWidth().padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(68.dp)) {
+        Box(
+            Modifier.size(68.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .combinedClickable(
+                    onClick = { if (selectionMode) onSelect() else onInfo() },
+                    // The list-level gesture enters selection at the long
+                    // press timeout and continues the drag selection.
+                    onLongClick = {}
+                )
+        ) {
             ArchiveThumbnail(
                 record,
                 Modifier.fillMaxSize()
-                    .clip(RoundedCornerShape(5.dp))
-                    .combinedClickable(onClick = { if (selectionMode) onSelect() }, onLongClick = onSelect)
             )
             if (selectionMode) {
                 Box(
@@ -1924,13 +2318,17 @@ private fun ArchiveGridItem(
     record: PixivArchiveRecord,
     modifier: Modifier,
     selected: Boolean,
-    onSelect: () -> Unit
+    onSelect: () -> Unit,
+    onCopyUrl: () -> Unit
 ) {
     Column(
         modifier.padding(vertical = 5.dp)
-            .combinedClickable(onClick = onSelect, onLongClick = onSelect)
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(5.dp))) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(1f)
+                .clip(RoundedCornerShape(5.dp))
+                .combinedClickable(onClick = onSelect, onLongClick = onSelect)
+        ) {
             ArchiveThumbnail(record, Modifier.fillMaxSize())
             Box(
                 Modifier.align(Alignment.TopStart).padding(6.dp).size(20.dp)
@@ -1960,6 +2358,7 @@ private fun ArchiveGridItem(
             overflow = TextOverflow.Ellipsis,
             fontSize = 10.sp,
             modifier = Modifier.padding(horizontal = 2.dp, vertical = 3.dp)
+                .combinedClickable(onClick = {}, onLongClick = onCopyUrl)
         )
     }
 }
@@ -1970,6 +2369,26 @@ private fun archiveStatusMessage(message: String, english: Boolean): String {
         "Archived to ${message.removePrefix(archivedPrefix)}"
     } else {
         appText(message, english)
+    }
+}
+
+private fun pixivArchiveInfo(record: PixivArchiveRecord, english: Boolean): String = buildString {
+    val metadata = record.metadata
+    appendLine(if (english) "Name: ${record.filename}" else "名称：${record.filename}")
+    appendLine(if (english) "Address: ${record.uri}" else "地址：${record.uri}")
+    appendLine(if (english) "Type: ${record.mimeType}" else "类型：${record.mimeType}")
+    appendLine(if (english) "PID: ${record.pid ?: "Unknown"}" else "PID：${record.pid ?: "未识别"}")
+    appendLine(if (english) "Page: ${record.page}" else "页码：${record.page}")
+    appendLine(if (english) "Status: ${record.status.name}" else "状态：${archiveStatusMessage(record.status.name, false)}")
+    appendLine(if (english) "Result: ${archiveStatusMessage(record.message, true)}" else "结果：${archiveStatusMessage(record.message, false)}")
+    if (record.dateModified > 0) {
+        appendLine(if (english) "Modified: ${formatCleanupDate(record.dateModified)}" else "修改日期：${formatCleanupDate(record.dateModified)}")
+    }
+    if (metadata != null) {
+        appendLine(if (english) "Title: ${metadata.title}" else "标题：${metadata.title}")
+        appendLine(if (english) "Artist: ${metadata.artist}" else "画师：${metadata.artist}")
+        appendLine(if (english) "Artist ID: ${metadata.artistId}" else "画师 ID：${metadata.artistId}")
+        appendLine(if (english) "Tags: ${metadata.tags.joinToString(" · ")}" else "Tags：${metadata.tags.joinToString(" · ")}")
     }
 }
 

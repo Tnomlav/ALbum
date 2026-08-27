@@ -47,11 +47,11 @@ import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Settings as SettingsIcon
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MenuDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.AlertDialog
@@ -85,6 +85,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.viewinterop.AndroidView
@@ -106,6 +108,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.hypot
 
 private fun frameAlignedPosition(player: ExoPlayer, requestedPositionMs: Long): Long {
     val duration = player.duration.takeIf { it > 0L }
@@ -426,8 +431,17 @@ internal fun Media3VideoPlayer(
             putExtra(MediaPlaybackService.EXTRA_POSITION, player.currentPosition)
         }
         runCatching { ContextCompat.startForegroundService(context, intent) }
-        player.pause()
-        exitPlayer()
+            .onSuccess {
+                player.pause()
+                exitPlayer()
+            }
+            .onFailure {
+                Toast.makeText(
+                    context,
+                    if (english) "Unable to start background playback" else "无法启动后台播放",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
     }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -604,29 +618,62 @@ internal fun Media3VideoPlayer(
                         )
                     }
                     .pointerInput(controlsLocked, duration, gestureSkip, temporaryFastPlayback) {
+                        var totalDragX = 0f
+                        var totalDragY = 0f
+                        var gestureStartX = 0f
+                        var gestureMode = 0 // 0=pending, 1=seek, 2=brightness, 3=volume
                         detectDragGestures(
-                            onDragStart = { gestureHud = null },
+                            onDragStart = { startOffset ->
+                                totalDragX = 0f
+                                totalDragY = 0f
+                                gestureStartX = startOffset.x
+                                gestureMode = 0
+                                gestureHud = null
+                            },
                             onDrag = { change, dragAmount ->
                                 if (controlsLocked || temporaryFastPlayback) return@detectDragGestures
                                 change.consume()
-                                val x = change.position.x
-                                val horizontal = kotlin.math.abs(dragAmount.x) > kotlin.math.abs(dragAmount.y)
-                                if (horizontal) {
-                                    val next = (player.currentPosition + (dragAmount.x / gestureWidth.coerceAtLeast(1) * gestureSkip).toLong())
-                                        .coerceIn(0L, player.duration.coerceAtLeast(0L))
-                                    seekToVideoFrame(player, next)
-                                    val alignedNext = frameAlignedPosition(player, next)
-                                    gestureHud = timeText(alignedNext)
-                                } else if (x < gestureWidth / 2f) {
-                                    setBrightness(brightness - dragAmount.y / gestureHeight.coerceAtLeast(1))
-                                    gestureHud = "亮度 ${(brightness * 100).roundToInt()}%"
-                                } else {
-                                    setVolume(volume - dragAmount.y / gestureHeight.coerceAtLeast(1))
-                                    gestureHud = "音量 ${(volume * 100).roundToInt()}%"
+                                totalDragX += dragAmount.x
+                                totalDragY += dragAmount.y
+                                if (gestureMode == 0 && hypot(totalDragX.toDouble(), totalDragY.toDouble()) > 10.0) {
+                                    val angleFromHorizontal = Math.toDegrees(
+                                        atan2(abs(totalDragY).toDouble(), abs(totalDragX).toDouble())
+                                    )
+                                    gestureMode = if (angleFromHorizontal <= 60.0) {
+                                        1
+                                    } else if (gestureStartX < gestureWidth / 2f) {
+                                        2
+                                    } else {
+                                        3
+                                    }
+                                }
+                                when (gestureMode) {
+                                    1 -> {
+                                        val next = (player.currentPosition + (dragAmount.x / gestureWidth.coerceAtLeast(1) * gestureSkip).toLong())
+                                            .coerceIn(0L, player.duration.coerceAtLeast(0L))
+                                        seekToVideoFrame(player, next)
+                                        val alignedNext = frameAlignedPosition(player, next)
+                                        gestureHud = timeText(alignedNext)
+                                    }
+                                    2 -> {
+                                        setBrightness(brightness - dragAmount.y / gestureHeight.coerceAtLeast(1) * 0.5f)
+                                        gestureHud = "亮度 ${(brightness * 100).roundToInt()}%"
+                                    }
+                                    3 -> {
+                                        setVolume(volume - dragAmount.y / gestureHeight.coerceAtLeast(1) * 0.5f)
+                                        gestureHud = "音量 ${(volume * 100).roundToInt()}%"
+                                    }
                                 }
                                 refreshControls()
                             },
-                            onDragEnd = { refreshControls() }
+                            onDragEnd = {
+                                gestureMode = 0
+                                refreshControls()
+                            },
+                            onDragCancel = {
+                                gestureMode = 0
+                                refreshControls()
+                            }
                         )
                     }
             )
@@ -687,31 +734,6 @@ internal fun Media3VideoPlayer(
                 Box {
                     IconButton(onClick = { refreshControls(); playerMenuOpen = true }, modifier = Modifier.size(46.dp)) {
                         Icon(Icons.Outlined.MoreVert, appText("菜单", english), tint = Color.White)
-                    }
-                    DropdownMenu(
-                        expanded = playerMenuOpen,
-                        onDismissRequest = { playerMenuOpen = false },
-                        containerColor = Color.Black.copy(alpha = .88f),
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(appText("分享", english), color = Color.White) },
-                            leadingIcon = { Icon(Icons.Outlined.Share, null, tint = Color.White) },
-                            colors = MenuDefaults.itemColors(
-                                textColor = Color.White,
-                                leadingIconColor = Color.White
-                            ),
-                            onClick = { playerMenuOpen = false; onShare() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(appText("设置", english), color = Color.White) },
-                            leadingIcon = { Icon(Icons.Outlined.SettingsIcon, null, tint = Color.White) },
-                            colors = MenuDefaults.itemColors(
-                                textColor = Color.White,
-                                leadingIconColor = Color.White
-                            ),
-                            onClick = { playerMenuOpen = false; onSettings() }
-                        )
                     }
                 }
             }
@@ -814,12 +836,51 @@ internal fun Media3VideoPlayer(
                 modifier = Modifier.align(Alignment.CenterEnd).padding(end = 10.dp).zIndex(10f)
             ) { Icon(HtmlLockIcon, appText("解锁控件", english), tint = Color.White, modifier = Modifier.size(25.dp)) }
         }
+        if (playerMenuOpen) {
+            Dialog(
+                onDismissRequest = { playerMenuOpen = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(
+                    Modifier.fillMaxSize().padding(horizontal = 24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        color = Color.Black.copy(alpha = .82f),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                    ) {
+                        Column(Modifier.padding(vertical = 8.dp)) {
+                            DropdownMenuItem(
+                                text = { Text(appText("分享", english), color = Color.White) },
+                                leadingIcon = { Icon(Icons.Outlined.Share, null, tint = Color.White) },
+                                colors = MenuDefaults.itemColors(
+                                    textColor = Color.White,
+                                    leadingIconColor = Color.White
+                                ),
+                                onClick = { playerMenuOpen = false; onShare() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(appText("设置", english), color = Color.White) },
+                                leadingIcon = { Icon(Icons.Outlined.SettingsIcon, null, tint = Color.White) },
+                                colors = MenuDefaults.itemColors(
+                                    textColor = Color.White,
+                                    leadingIconColor = Color.White
+                                ),
+                                onClick = { playerMenuOpen = false; onSettings() }
+                            )
+                        }
+                    }
+                }
+            }
+        }
         if (showSpeed) {
             val speedOptions = remember { listOf("0.25x", "0.5x", "0.75x", "1x", "1.25x", "1.5x", "2x", "4x") }
             VaultWheelChoiceSheet(
                 title = appText("播放速度", english),
                 options = speedOptions,
                 selected = if (speed == 1f) "1x" else "${speed}x",
+                playerStyle = true,
                 onDismiss = { showSpeed = false },
                 onApply = { selected ->
                     speed = selected.removeSuffix("x").toFloatOrNull() ?: 1f

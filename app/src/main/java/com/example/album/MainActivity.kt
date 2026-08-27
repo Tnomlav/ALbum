@@ -4,6 +4,7 @@ import android.app.PictureInPictureParams
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.net.Uri
 import android.util.Rational
@@ -28,6 +29,12 @@ class MainActivity : ComponentActivity() {
     private var playbackResumeRequest by mutableStateOf<PlaybackResumeRequest?>(null)
     private var externalMediaUri by mutableStateOf<Uri?>(null)
     private var pictureInPictureMode by mutableStateOf(false)
+    @Suppress("DEPRECATION")
+    private val memoryCallbacks = object : ComponentCallbacks2 {
+        override fun onTrimMemory(level: Int) = com.example.album.data.ThumbnailRepository.trimMemory(level)
+        override fun onConfigurationChanged(newConfig: Configuration) = Unit
+        override fun onLowMemory() = com.example.album.data.ThumbnailRepository.trimMemory(TRIM_MEMORY_RUNNING_CRITICAL)
+    }
 
     private fun enterVideoPictureInPicture(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || isInPictureInPictureMode) return false
@@ -52,6 +59,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        application.registerComponentCallbacks(memoryCallbacks)
         playbackResumeRequest = intent.toPlaybackResumeRequest()
         externalMediaUri = intent.toExternalMediaUri()
         enableEdgeToEdge()
@@ -109,6 +117,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        application.unregisterComponentCallbacks(memoryCallbacks)
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {

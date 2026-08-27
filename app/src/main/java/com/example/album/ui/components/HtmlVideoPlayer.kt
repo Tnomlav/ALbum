@@ -11,6 +11,7 @@ import android.media.AudioManager
 import android.provider.Settings
 import android.view.View
 import android.view.OrientationEventListener
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -382,8 +383,17 @@ internal fun HtmlVideoPlayer(
             putExtra(MediaPlaybackService.EXTRA_POSITION, player.currentPosition)
         }
         runCatching { androidx.core.content.ContextCompat.startForegroundService(context, intent) }
-        player.pause()
-        onBack()
+            .onSuccess {
+                player.pause()
+                onBack()
+            }
+            .onFailure {
+                Toast.makeText(
+                    context,
+                    if (english) "Unable to start background playback" else "无法启动后台播放",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
     }
     if (miniMode) {
         HtmlMiniVideoPlayer(
@@ -518,6 +528,7 @@ internal fun HtmlVideoPlayer(
             title = appText("播放速度", english),
             options = speedOptions,
             selected = if (speed == 1f) "1x" else "${speed}x",
+            playerStyle = true,
             onDismiss = { showSpeed = false; if (wasPlayingForSpeed) player.play() },
             onApply = { selected ->
                 speed = selected.removeSuffix("x").toFloatOrNull() ?: 1f

@@ -28,6 +28,12 @@ class PixivArchiveRepositoryTest {
     }
 
     @Test
+    fun parsesPixivDownloadNameWithRepeatedExtension() {
+        assertEquals("148347665" to 0, parsePixivFilename("illust_148347665_20260814_004504..jpg.jpg"))
+        assertEquals("148346505" to 0, parsePixivFilename("illust_148346505_20260812_230557..png.png"))
+    }
+
+    @Test
     fun rejectsBarePidToAvoidMisidentifyingOrdinaryFiles() {
         assertNull(parsePixivFilename("147958029.jpg"))
     }

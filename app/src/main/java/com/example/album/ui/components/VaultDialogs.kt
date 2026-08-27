@@ -53,6 +53,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -251,7 +253,7 @@ fun VaultInfoSheet(title: String, body: String, dismissLabel: String = "知道�
     VaultBottomSheet(title, onDismiss) {
         Text(
             body,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 10.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp,
             lineHeight = 21.sp
@@ -569,6 +571,7 @@ fun VaultTextInputDialog(
     confirmLabel: String,
     confirmEnabled: Boolean = value.isNotBlank(),
     singleLine: Boolean = true,
+    initialSelection: TextRange? = null,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
@@ -626,7 +629,7 @@ fun VaultTextInputDialog(
                         }
                     }
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp)) {
-                        VaultActionInput(value, onValueChange, label, Modifier.fillMaxWidth(), singleLine)
+                          VaultActionInput(value, onValueChange, label, Modifier.fillMaxWidth(), singleLine, initialSelection)
                     }
                     Row(
                         Modifier.fillMaxWidth().height(54.dp),
@@ -657,12 +660,24 @@ private fun VaultActionInput(
     onValueChange: (String) -> Unit,
     label: String,
     modifier: Modifier = Modifier,
-    singleLine: Boolean = true
+    singleLine: Boolean = true,
+    initialSelection: TextRange? = null
 ) {
     val shape = RoundedCornerShape(6.dp)
+    var fieldValue by remember {
+        mutableStateOf(TextFieldValue(value, initialSelection ?: TextRange(value.length)))
+    }
+    LaunchedEffect(value, initialSelection) {
+        if (fieldValue.text != value) {
+            fieldValue = TextFieldValue(value, initialSelection ?: TextRange(value.length))
+        }
+    }
     BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
+        value = fieldValue,
+        onValueChange = {
+            fieldValue = it
+            onValueChange(it.text)
+        },
         singleLine = singleLine,
         textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
         modifier = modifier

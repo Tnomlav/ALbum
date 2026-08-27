@@ -66,11 +66,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
 import android.widget.Toast
@@ -106,6 +104,7 @@ import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -115,7 +114,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.example.album.data.MediaItem
-import com.example.album.data.RecycleEntry
 import com.example.album.data.displayAddress
 import com.example.album.data.PixivArchiveRepository
 import com.example.album.data.TransferMode
@@ -248,11 +246,15 @@ fun AlbumApp(
     val english = LocalAppEnglish.current
     val scope = rememberCoroutineScope()
     val library = remember { MediaLibraryState(context) }
+    DisposableEffect(library) {
+        onDispose { library.close() }
+    }
     val lifecycleOwner = context as? LifecycleOwner
     val pixivRepository = remember { PixivArchiveRepository(context) }
-    val pixivArchiveSession = remember { PixivArchiveSession() }
+    val pixivArchiveSession = remember { PixivArchiveSession(context) }
     val preferences = remember { context.getSharedPreferences("album_preferences", android.content.Context.MODE_PRIVATE) }
     val albumSettings = remember { context.getSharedPreferences("album_settings", android.content.Context.MODE_PRIVATE) }
+    var showRenameExtension by remember { mutableStateOf(albumSettings.getBoolean("rename_show_extension", false)) }
     val transferPreferences = remember { context.getSharedPreferences("transfer_preferences", android.content.Context.MODE_PRIVATE) }
     val pixivEnabledAtStart = albumSettings.getBoolean("pixiv_tab_enabled", false)
     val initialTab = when (albumSettings.getString("default_home", "相册")) {
@@ -292,10 +294,9 @@ fun AlbumApp(
     var pendingDeletes by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var pixivArchivePendingDeleteUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pendingAppDelete by remember { mutableStateOf<List<MediaItem>?>(null) }
-    val snackbarHostState = remember { SnackbarHostState() }
-    var undoRecycleEntries by remember { mutableStateOf<List<RecycleEntry>>(emptyList()) }
     var pendingRename by remember { mutableStateOf<Pair<MediaItem, String>?>(null) }
     var pendingRecycleIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var externalDeleteRequestInFlight by remember { mutableStateOf(false) }
     var pendingTrashRestore by remember { mutableStateOf<List<com.example.album.data.RecycleEntry>>(emptyList()) }
     var pendingTrashDelete by remember { mutableStateOf<List<com.example.album.data.RecycleEntry>>(emptyList()) }
     var cleanupOpen by rememberSaveable { mutableStateOf(false) }
@@ -315,14 +316,31 @@ fun AlbumApp(
     var timelineJumpDate by rememberSaveable { mutableStateOf<String?>(null) }
     var timelineShowsVideos by rememberSaveable { mutableStateOf(false) }
     var showExcludeDialog by remember { mutableStateOf(false) }
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var createFolderName by rememberSaveable { mutableStateOf("") }
     var favoriteUris by remember { mutableStateOf(preferences.getStringSet("favorites", emptySet()).orEmpty().toSet()) }
     var showFavoriteBadge by remember { mutableStateOf(albumSettings.getBoolean("show_favorite_badge", true)) }
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var selectingFolders by rememberSaveable { mutableStateOf(false) }
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedFolders by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var suspendedSearchQuery by rememberSaveable { mutableStateOf<String?>(null) }
+    var searchOpen by rememberSaveable { mutableStateOf(true) }
+    LaunchedEffect(selectionMode) {
+        if (!selectionMode) {
+            selectedUris = emptySet()
+            selectedFolders = emptySet()
+            selectingFolders = false
+        }
+    }
     var selectionFolderFirstVisibleItem by remember { mutableIntStateOf(0) }
     var selectionFolderFirstVisibleOffset by remember { mutableIntStateOf(0) }
+    var albumFirstVisibleItem by remember { mutableIntStateOf(0) }
+    var albumFirstVisibleOffset by remember { mutableIntStateOf(0) }
+    var selectionMediaFirstVisibleItem by remember { mutableIntStateOf(0) }
+    var selectionMediaFirstVisibleOffset by remember { mutableIntStateOf(0) }
+    var timelineFirstVisibleItem by remember { mutableIntStateOf(0) }
+    var timelineFirstVisibleOffset by remember { mutableIntStateOf(0) }
     var folderScope by remember { mutableStateOf<List<MediaItem>?>(null) }
     var openedFolder by rememberSaveable { mutableStateOf<String?>(null) }
     var selectionRenameItem by remember { mutableStateOf<MediaItem?>(null) }
@@ -338,7 +356,11 @@ fun AlbumApp(
     var pixivFolderNames by remember { mutableStateOf(setOf("Pixiv")) }
     var pixivSourceFolderName by remember { mutableStateOf("Pixiv") }
     var pixivTagsByUri by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
+    var pixivTagsLoading by remember { mutableStateOf(false) }
+    var pixivPageRefreshing by remember { mutableStateOf(false) }
     var pixivRefreshKey by remember { mutableIntStateOf(0) }
+    var archiveMediaRefreshPending by remember { mutableStateOf(false) }
+    var archiveMediaRefreshing by remember { mutableStateOf(false) }
     var pixivSearchMode by rememberSaveable { mutableStateOf(PixivSearchMode.Artist) }
     var backgroundOptimizationEnabled by remember {
         mutableStateOf(albumSettings.getBoolean("background_optimization", true))
@@ -359,11 +381,21 @@ fun AlbumApp(
     val currentTabOrder by rememberUpdatedState(tabOrder)
     val hapticFeedback = LocalHapticFeedback.current
     val visibleImages by remember { derivedStateOf {
-        val source = if (query.isBlank()) library.images else (library.images + library.localImages).distinctBy { it.uri }
+        // The remembered query is not an active search. Returning from search
+        // must restore the exact same source as the initial page.
+        val source = if (query.isBlank()) {
+            library.images
+        } else {
+            (library.images + library.localImages).distinctBy { it.uri }
+        }
         if (favoriteFilter) source.filter { it.uri.toString() in favoriteUris } else source
     } }
     val visibleVideos by remember { derivedStateOf {
-        val source = if (query.isBlank()) library.videos else (library.videos + library.localVideos).distinctBy { it.uri }
+        val source = if (query.isBlank()) {
+            (library.videos + library.localVideos).distinctBy { it.uri }
+        } else {
+            (library.videos + library.localVideos).distinctBy { it.uri }
+        }
         if (favoriteFilter) source.filter { it.uri.toString() in favoriteUris } else source
     } }
     val defaultPixivImages by remember { derivedStateOf {
@@ -371,41 +403,130 @@ fun AlbumApp(
             .filter { it.folder.equals("Pixiv", ignoreCase = true) }
             .distinctBy { it.uri.toString() }
     } }
-    LaunchedEffect(pixivTabEnabled, pixivRefreshKey, cleanupOpen, defaultPixivImages) {
-        if (pixivTabEnabled && !cleanupOpen) {
+    suspend fun reloadPixivPage() {
+        if (!pixivTabEnabled || cleanupOpen) return
+        pixivPageRefreshing = true
+        try {
             val snapshot = pixivRepository.loadLibrary(defaultPixivImages)
-            // Include archived artist folders in the P page; Pixiv itself is
-            // pinned separately below so it remains the first folder.
             pixivLibraryImages = snapshot.items
             pixivTagsByUri = snapshot.tagsByUri
             pixivFolderNames = snapshot.folderNames
             pixivSourceFolderName = snapshot.sourceFolderName
+        } finally {
+            pixivPageRefreshing = false
+        }
+    }
+    LaunchedEffect(pixivTabEnabled, pixivRefreshKey, cleanupOpen, defaultPixivImages) {
+        // Include archived artist folders in the P page; Pixiv itself is
+        // pinned separately below so it remains the first folder.
+        reloadPixivPage()
+    }
+    val needsFolderSearchIndex by remember {
+        derivedStateOf {
+            query.isNotBlank() &&
+                selectedTab in setOf(MainTab.Albums, MainTab.Videos) &&
+                openedFolder == null &&
+                (!selectionMode || selectingFolders)
+        }
+    }
+    LaunchedEffect(needsFolderSearchIndex) {
+        if (needsFolderSearchIndex) {
+            library.loadSearchableFolderNames()
         }
     }
     val pixivImages by remember { derivedStateOf {
         val source = pixivLibraryImages ?: defaultPixivImages
         if (favoriteFilter) source.filter { it.uri.toString() in favoriteUris } else source
     } }
+    val pixivSearchImages by remember { derivedStateOf {
+        val allowedFolders = pixivFolderNames + pixivSourceFolderName
+        pixivImages.filter { it.folder in allowedFolders }
+    } }
+    LaunchedEffect(pixivSearchMode, pixivImages, query.trim()) {
+        if (pixivSearchMode == PixivSearchMode.Tag && query.isNotBlank()) {
+            pixivTagsLoading = true
+            try {
+                pixivTagsByUri = pixivRepository.loadTags(pixivImages)
+            } finally {
+                pixivTagsLoading = false
+            }
+        } else if (pixivSearchMode == PixivSearchMode.Tag) {
+            pixivTagsLoading = false
+        } else if (pixivSearchMode != PixivSearchMode.Tag) {
+            pixivTagsByUri = emptyMap()
+            pixivTagsLoading = false
+        }
+    }
     val albumImages by remember { derivedStateOf {
-        visibleImages
+        (visibleImages + library.localImages).distinctBy { it.uri }
     } }
     val pixivTagResults by remember { derivedStateOf {
-        if (query.isBlank()) emptyList() else pixivImages.filter { item ->
-            pixivTagsByUri[item.uri.toString()].orEmpty().any { tag -> tag.contains(query, ignoreCase = true) }
+        if (query.isBlank()) emptyList() else pixivSearchImages.filter { item ->
+            pixivRepository.matchesTagQuery(pixivTagsByUri[item.uri.toString()].orEmpty(), query)
         }
     } }
     val currentSelectionMedia by remember { derivedStateOf {
+        val openedMediaScope = if (openedFolder != null) {
+            folderScope?.takeIf { items -> items.all { it.folder == openedFolder } }
+        } else null
         when (selectedTab) {
-            MainTab.Videos -> folderScope ?: visibleVideos
-            MainTab.Albums -> folderScope ?: albumImages
+            MainTab.Videos -> openedMediaScope
+                ?: openedFolder?.let { folder -> visibleVideos.filter { it.folder == folder } }
+                ?: visibleVideos
+            MainTab.Albums -> openedMediaScope
+                ?: openedFolder?.let { folder -> albumImages.filter { it.folder == folder } }
+                ?: albumImages
             MainTab.Timeline -> if (timelineShowsVideos) visibleVideos else visibleImages
-            MainTab.Pixiv -> if (pixivSearchMode == PixivSearchMode.Tag && query.isNotBlank()) pixivTagResults else folderScope ?: pixivImages
+            MainTab.Pixiv -> if (pixivSearchMode == PixivSearchMode.Tag && query.isNotBlank()) {
+                pixivTagResults
+            } else {
+                openedMediaScope
+                    ?: openedFolder?.let { folder -> pixivSearchImages.filter { it.folder == folder } }
+                    ?: pixivSearchImages
+            }
             MainTab.Settings -> emptyList()
         }
     } }
-    val selectedItems by remember { derivedStateOf {
-        if (selectingFolders) currentSelectionMedia.filter { it.folder in selectedFolders }
-        else currentSelectionMedia.filter { it.uri.toString() in selectedUris }
+    val selectionMedia by remember { derivedStateOf {
+        val text = query.trim()
+        if (text.isBlank() || (selectedTab == MainTab.Pixiv && pixivSearchMode == PixivSearchMode.Tag)) {
+            currentSelectionMedia
+        } else {
+            // A search is global. Do not keep using folderScope here: it is a
+            // transient view state and can otherwise hide matches after the
+            // user enters multi-select from a folder or returns from search.
+            val searchSource = when (selectedTab) {
+                MainTab.Videos -> visibleVideos
+                MainTab.Albums -> albumImages
+                MainTab.Timeline -> if (timelineShowsVideos) visibleVideos else visibleImages
+                MainTab.Pixiv -> pixivSearchImages
+                MainTab.Settings -> emptyList()
+            }
+            searchMedia(text, searchSource)
+        }
+    } }
+    // Search is a view over the source; it must never become the source of
+    // truth for a selection. Actions resolve selected keys from the complete
+    // media set so items hidden by the current query remain actionable.
+    val completeSelectionMedia by remember { derivedStateOf {
+        val source = when (selectedTab) {
+            MainTab.Videos -> library.videos + library.localVideos
+            MainTab.Albums -> library.images + library.videos + library.localImages + library.localVideos
+            MainTab.Timeline -> if (timelineShowsVideos) {
+                library.videos + library.localVideos
+            } else {
+                library.images + library.localImages
+            }
+            MainTab.Pixiv -> pixivSearchImages
+            MainTab.Settings -> emptyList()
+        }
+        // favoriteFilter is a display filter, just like query. Do not apply
+        // it here or changing the view can silently shrink the action set.
+        source.distinctBy { it.uri.toString() }
+    } }
+    val selectedItemsForAction by remember { derivedStateOf {
+        if (selectingFolders) completeSelectionMedia.filter { it.folder in selectedFolders }
+        else completeSelectionMedia.filter { it.uri.toString() in selectedUris }
     } }
     val observerRefreshJob = remember { arrayOfNulls<Job>(1) }
     var suppressObserverRefreshUntil by remember { mutableLongStateOf(0L) }
@@ -413,10 +534,18 @@ fun AlbumApp(
 
     DisposableEffect(lifecycleOwner, backgroundOptimizationEnabled) {
         val lifecycleObserver = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                // Do not keep decoding thumbnails while the app is in the
-                // background. Visible screens still load on demand later.
-                com.example.album.data.ThumbnailRepository.cancelBackgroundOptimization()
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    // Re-check permissions after returning from Settings; users
+                    // can revoke image/video access while this activity is stopped.
+                    scope.launch { library.refresh(library.permissionGranted) }
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    // Do not keep decoding thumbnails while the app is in the
+                    // background. Visible screens still load on demand later.
+                    com.example.album.data.ThumbnailRepository.cancelBackgroundOptimization()
+                }
+                else -> Unit
             }
         }
         lifecycleOwner?.lifecycle?.addObserver(lifecycleObserver)
@@ -511,6 +640,7 @@ fun AlbumApp(
         openedFolder = null
         folderScope = null
         query = ""
+        searchOpen = true
     }
 
     fun clearSelection() {
@@ -524,6 +654,8 @@ fun AlbumApp(
         if (selectedTab == tab) return
         selectedTab = tab
         query = ""
+        suspendedSearchQuery = null
+        searchOpen = true
         openedFolder = null
         folderScope = null
         clearSelection()
@@ -535,7 +667,25 @@ fun AlbumApp(
         closeFolder()
         timelineJumpDate = null
         favoriteFilter = false
+        suspendedSearchQuery = null
+        searchOpen = true
         if (selectedTab != MainTab.Albums) selectedTab = MainTab.Albums
+    }
+
+    fun suspendSearch() {
+        if (query.isNotBlank()) {
+            suspendedSearchQuery = query
+            query = ""
+            // Keep the draft visible in the always-expanded home search field,
+            // while removing it from the active filter until search resumes.
+            searchOpen = false
+        }
+    }
+
+    fun resumeSearch() {
+        query = suspendedSearchQuery ?: query
+        suspendedSearchQuery = null
+        searchOpen = true
     }
 
     val appBackEnabled by remember {
@@ -558,6 +708,7 @@ fun AlbumApp(
                         selectionMode ||
                         openedFolder != null ||
                         query.isNotBlank() ||
+                        searchOpen ||
                         favoriteFilter ||
                         timelineJumpDate != null ||
                         selectedTab != MainTab.Albums
@@ -575,10 +726,17 @@ fun AlbumApp(
             cleanupOpen -> {
                 cleanupOpen = false
                 pixivRefreshKey++
+                if (archiveMediaRefreshPending) {
+                    archiveMediaRefreshPending = false
+                    scope.launch {
+                        library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
+                    }
+                }
             }
             selectionMode -> clearSelection()
             openedFolder != null -> closeFolder()
-            query.isNotBlank() -> query = ""
+            query.isNotBlank() -> suspendSearch()
+            searchOpen -> suspendSearch()
             favoriteFilter -> favoriteFilter = false
             timelineJumpDate != null -> timelineJumpDate = null
             selectedTab != MainTab.Albums -> returnToPrimaryTab()
@@ -586,8 +744,9 @@ fun AlbumApp(
     }
 
     val deleteLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        externalDeleteRequestInFlight = false
         if (result.resultCode == Activity.RESULT_OK) {
-            pendingDeletes.forEach(library::remove)
+            library.remove(pendingDeletes)
             val deletedUris = pendingDeletes.mapTo(hashSetOf()) { it.uri.toString() }
             pixivArchiveSession.records.value = pixivArchiveSession.records.value.filterNot {
                 it.uri.toString() in deletedUris && it.uri.toString() in pixivArchivePendingDeleteUris
@@ -604,8 +763,9 @@ fun AlbumApp(
         pendingRecycleIds = emptySet()
     }
     val trashLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        externalDeleteRequestInFlight = false
         if (result.resultCode == Activity.RESULT_OK) {
-            pendingDeletes.forEach(library::remove)
+            library.remove(pendingDeletes)
             val deletedUris = pendingDeletes.mapTo(hashSetOf()) { it.uri.toString() }
             pixivArchiveSession.records.value = pixivArchiveSession.records.value.filterNot {
                 it.uri.toString() in deletedUris && it.uri.toString() in pixivArchivePendingDeleteUris
@@ -684,18 +844,36 @@ fun AlbumApp(
     val folderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
         val flags = FLAG_GRANT_READ_URI_PERMISSION or FLAG_GRANT_WRITE_URI_PERMISSION
-        runCatching { context.contentResolver.takePersistableUriPermission(uri, flags) }
-            .recoverCatching { context.contentResolver.takePersistableUriPermission(uri, FLAG_GRANT_READ_URI_PERMISSION) }
+        val persisted = runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, flags)
+            true
+        }.getOrElse {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, FLAG_GRANT_READ_URI_PERMISSION)
+                true
+            }.getOrDefault(false)
+        }
+        if (!persisted) {
+            Toast.makeText(
+                context,
+                if (english) "Folder access could not be saved; please choose it again" else "无法保存文件夹访问权限，请重新选择",
+                Toast.LENGTH_LONG
+            ).show()
+            return@rememberLauncherForActivityResult
+        }
         scope.launch {
             library.addLocalFolder(uri)
             Toast.makeText(context, if (english) "Local folder added" else "已添加本地文件夹", Toast.LENGTH_SHORT).show()
         }
     }
-    val requestDelete: (List<MediaItem>) -> Unit = requestDelete@ { deleting ->
-        if (deleting.isEmpty()) return@requestDelete
-        scope.launch {
+    suspend fun performDelete(deleting: List<MediaItem>) {
+        if (deleting.isEmpty() || externalDeleteRequestInFlight) return
             val recycleEnabled = albumSettings.getBoolean("recycle_bin", true)
-            val useSystemTrash = recycleEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && deleting.none { it.isDocument }
+            // Keep the app's recycle bin authoritative. Using MediaStore's
+            // system Trash here makes the persisted recycle records depend on
+            // OEM-specific Trash URI and permission behavior, which can make
+            // items disappear from this screen or fail to restore.
+            val useSystemTrash = false
             val staged = when {
                 useSystemTrash -> library.stageForSystemRecycle(deleting)
                 recycleEnabled -> library.stageForRecycle(deleting)
@@ -710,7 +888,7 @@ fun AlbumApp(
             }
             if (deletable.isEmpty()) {
                 pixivArchivePendingDeleteUris = emptySet()
-                return@launch
+                return
             }
             if (useSystemTrash) {
                 val directlyTrashed = withContext(Dispatchers.IO) {
@@ -725,7 +903,7 @@ fun AlbumApp(
                         }.getOrDefault(false)
                     }
                 }
-                directlyTrashed.forEach(library::remove)
+                library.remove(directlyTrashed)
                 val directlyDeletedUris = directlyTrashed.mapTo(hashSetOf()) { it.uri.toString() }
                 pixivArchiveSession.records.value = pixivArchiveSession.records.value.filterNot {
                     it.uri.toString() in directlyDeletedUris && it.uri.toString() in pixivArchivePendingDeleteUris
@@ -736,10 +914,12 @@ fun AlbumApp(
                     pendingDeletes = remaining
                     val remainingUris = remaining.mapTo(mutableSetOf()) { it.uri.toString() }
                     pendingRecycleIds = staged.filter { it.sourceUri in remainingUris }.mapTo(mutableSetOf()) { it.id }
-                    runCatching {
+                runCatching {
                     val request = MediaStore.createTrashRequest(context.contentResolver, remaining.map { it.uri }, true)
+                    externalDeleteRequestInFlight = true
                     trashLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
                 }.onFailure {
+                    externalDeleteRequestInFlight = false
                     library.discardRecycle(pendingRecycleIds)
                     pendingDeletes = emptyList()
                     pendingRecycleIds = emptySet()
@@ -760,29 +940,42 @@ fun AlbumApp(
             ) {
                 pendingDeletes = deletable
                 pendingRecycleIds = staged.mapTo(mutableSetOf()) { it.id }
-                val request = MediaStore.createDeleteRequest(context.contentResolver, deletable.map { it.uri })
-                deleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                runCatching {
+                    val request = MediaStore.createDeleteRequest(context.contentResolver, deletable.map { it.uri })
+                    externalDeleteRequestInFlight = true
+                    deleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                }.onFailure {
+                    externalDeleteRequestInFlight = false
+                    library.discardRecycle(pendingRecycleIds)
+                    pendingDeletes = emptyList()
+                    pendingRecycleIds = emptySet()
+                    pixivArchivePendingDeleteUris = emptySet()
+                    Toast.makeText(
+                        context,
+                        if (english) "Unable to request deletion; originals were kept" else "无法请求系统删除，已保留原文件",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             } else {
                 val failedUris = mutableSetOf<String>()
-                deletable.forEach { media ->
-                    if (library.deleteLegacy(media)) library.remove(media) else failedUris += media.uri.toString()
-                }
-                val deletedUris = deletable.mapTo(hashSetOf()) { it.uri.toString() } - failedUris
-                val undoEntries = staged.filter { it.sourceUri in deletedUris && !it.systemTrashed }
-                if (undoEntries.isNotEmpty()) {
-                    undoRecycleEntries = undoEntries
-                    scope.launch {
-                        val result = snackbarHostState.showSnackbar(
-                            message = if (english) "Moved ${undoEntries.size} items to Trash" else "已将 ${undoEntries.size} 项移到回收站",
-                            actionLabel = if (english) "Undo" else "撤销",
-                            withDismissAction = true
-                        )
-                        if (result == SnackbarResult.ActionPerformed && undoRecycleEntries == undoEntries) {
-                            undoEntries.forEach { library.restoreRecycle(it) }
-                            undoRecycleEntries = emptyList()
-                            Toast.makeText(context, if (english) "Restored ${undoEntries.size} items" else "已还原 ${undoEntries.size} 项", Toast.LENGTH_SHORT).show()
-                        }
+                val deletedMedia = deletable.filter { media ->
+                    if (library.deleteLegacy(media)) true else {
+                        failedUris += media.uri.toString()
+                        false
                     }
+                }
+                library.remove(deletedMedia)
+                val deletedUris = deletable.mapTo(hashSetOf()) { it.uri.toString() } - failedUris
+                if (deletedUris.isNotEmpty()) {
+                    Toast.makeText(
+                        context,
+                        if (recycleEnabled) {
+                            if (english) "Moved ${deletedUris.size} items to Trash" else "已将 ${deletedUris.size} 项移到回收站"
+                        } else {
+                            if (english) "Permanently deleted ${deletedUris.size} items" else "已彻底删除 ${deletedUris.size} 项"
+                        },
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
                 pixivArchiveSession.records.value = pixivArchiveSession.records.value.filterNot {
                     it.uri.toString() in deletedUris && it.uri.toString() in pixivArchivePendingDeleteUris
@@ -795,7 +988,9 @@ fun AlbumApp(
                 selectionMode = false
                 pixivArchivePendingDeleteUris = emptySet()
             }
-        }
+    }
+    val requestDelete: (List<MediaItem>) -> Unit = { deleting ->
+        scope.launch { performDelete(deleting) }
     }
     val requestDeleteWithConfirmation: (List<MediaItem>) -> Unit = { deleting ->
         if (deleting.isNotEmpty()) {
@@ -861,6 +1056,15 @@ fun AlbumApp(
             }
         }
     }
+    LaunchedEffect(library.refreshError) {
+        library.refreshError?.let { message ->
+            Toast.makeText(
+                context,
+                if (english) "Some media could not be read: $message" else message,
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
 
     DisposableEffect(library.permissionGranted) {
         if (!library.permissionGranted) {
@@ -893,21 +1097,31 @@ fun AlbumApp(
     }
 
     transferRequest?.let { request ->
-        val transferMedia = library.images + library.videos
+        LaunchedEffect(Unit) {
+            library.loadSearchableFolderNames()
+        }
+        val transferMedia = (library.images + library.videos + library.localImages + library.localVideos)
+            .distinctBy { it.uri.toString() }
         val mediaFolders = transferMedia.map { it.folder }
+        val searchableTransferFolders = library.searchableFolderNames +
+            library.searchableFolderChildren.values.flatten()
         val folderCovers = transferMedia
             .groupBy { it.folder }
             .mapValues { (_, media) -> media.firstOrNull() }
             .filterValues { it != null }
             .mapValues { (_, item) -> item!! }
+        val folderItems = transferMedia.groupBy { it.folder }
         val recentFolders = transferPreferences.getString("recent_folders", "").orEmpty()
             .split('\u001f').filter { it.isNotBlank() }.take(8)
         DestinationScreen(
             mode = request.mode,
             itemCount = request.items.size,
             items = request.items,
-            folders = mediaFolders.distinct(),
+            folders = (mediaFolders + searchableTransferFolders).distinct(),
             folderCovers = folderCovers,
+            folderItems = folderItems,
+            folderChildren = library.searchableFolderChildren,
+            searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
             recentFolders = recentFolders,
             defaultConflictPolicy = when (albumSettings.getString("conflict", "保留两者")) {
                 "覆盖" -> com.example.album.data.ConflictPolicy.Overwrite
@@ -916,7 +1130,13 @@ fun AlbumApp(
             },
             defaultPreserveDate = albumSettings.getBoolean("preserve_date", true),
             onBack = { transferRequest = null },
+            onCreateFolder = { parent, name ->
+                library.createTransferFolder(parent, request.items, name)
+            },
             onConfirm = { destination, policy, preserveDate ->
+                // Leave the destination screen immediately. The transfer and
+                // any follow-up refresh/delete work continue in this scope.
+                transferRequest = null
                 val transferErrorHandler = CoroutineExceptionHandler { _, error ->
                     transferRequest = null
                     pixivArchiveMoveUris = emptySet()
@@ -927,21 +1147,23 @@ fun AlbumApp(
                     ).show()
                 }
                 scope.launch(transferErrorHandler) {
-                    val results = library.transfer(request.items, destination, policy, preserveDate)
-                    val completed = results.filter { it.success && !it.skipped }.map { it.item }
+                    val results = library.transfer(request.items, destination, policy, preserveDate, request.mode)
+                    val completed = results.filter { it.success && !it.skipped }
+                    val completedItems = completed.map { it.item }
                     val skipped = results.count { it.skipped }
                     val failed = results.count { !it.success }
                     val updatedRecent = (listOf(destination) + recentFolders).distinct().take(8)
                     transferPreferences.edit().putString("recent_folders", updatedRecent.joinToString("\u001f")).apply()
-                    transferRequest = null
-                    library.refresh(library.permissionGranted)
+                    library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
 
-                    if (request.mode == TransferMode.Move && completed.isNotEmpty()) {
-                        val documents = completed.filter { it.isDocument }
+                    var sourceDeleteRequestFailed = false
+                    var sourceDeletePending = false
+                    if (request.mode == TransferMode.Move && completedItems.isNotEmpty()) {
+                        val documents = completed.filter { !it.movedDirectly && it.item.isDocument }.map { it.item }
                         val deletedDocuments = withContext(Dispatchers.IO) {
                             documents.filter { media -> library.deleteLegacy(media) }
                         }
-                        deletedDocuments.forEach(library::remove)
+                        library.remove(deletedDocuments)
                         if (pixivArchiveMoveUris.isNotEmpty()) {
                             val deletedUris = deletedDocuments.mapTo(hashSetOf()) { it.uri.toString() }
                             pixivArchiveSession.records.value = pixivArchiveSession.records.value.filterNot {
@@ -949,11 +1171,11 @@ fun AlbumApp(
                             }
                             pixivArchiveMoveUris = emptySet()
                         }
-                        val systemMedia = completed.filterNot { it.isDocument }
+                        val systemMedia = completed.filter { !it.movedDirectly && !it.item.isDocument }.map { it.item }
                         val deletedSystemMedia = withContext(Dispatchers.IO) {
                             systemMedia.filter { media -> library.deleteLegacy(media) }
                         }
-                        deletedSystemMedia.forEach(library::remove)
+                        library.remove(deletedSystemMedia)
                         val requiresSystemConfirmation = systemMedia.filterNot { media ->
                             deletedSystemMedia.any { it.uri == media.uri }
                         }
@@ -962,8 +1184,21 @@ fun AlbumApp(
                         !canModifyMediaDirectly(context)
                     ) {
                             pendingDeletes = requiresSystemConfirmation
-                            val deleteRequest = MediaStore.createDeleteRequest(context.contentResolver, requiresSystemConfirmation.map { it.uri })
-                            deleteLauncher.launch(IntentSenderRequest.Builder(deleteRequest.intentSender).build())
+                            runCatching {
+                                val deleteRequest = MediaStore.createDeleteRequest(context.contentResolver, requiresSystemConfirmation.map { it.uri })
+                                externalDeleteRequestInFlight = true
+                                deleteLauncher.launch(IntentSenderRequest.Builder(deleteRequest.intentSender).build())
+                                sourceDeletePending = true
+                            }.onFailure {
+                                externalDeleteRequestInFlight = false
+                                sourceDeleteRequestFailed = true
+                                pendingDeletes = emptyList()
+                                Toast.makeText(
+                                    context,
+                                    if (english) "Copied, but the original files were kept" else "已完成复制，但源文件已保留",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
                         } else {
                             selectedUris = emptySet()
                             selectionMode = false
@@ -974,9 +1209,13 @@ fun AlbumApp(
                     }
 
                     val action = if (english) {
-                        if (request.mode == TransferMode.Copy) "Copied" else "Moved"
-                    } else if (request.mode == TransferMode.Copy) "复制" else "移动"
-                    val done = results.count { it.success && !it.skipped }
+                        if (request.mode == TransferMode.Copy || sourceDeleteRequestFailed) "Copied"
+                        else if (sourceDeletePending) "Awaiting source deletion confirmation"
+                        else "Moved"
+                    } else if (request.mode == TransferMode.Copy || sourceDeleteRequestFailed) "复制"
+                    else if (sourceDeletePending) "等待确认删除源文件"
+                    else "移动"
+                    val done = completed.size
                     val details = buildList {
                         add(if (english) "$action $done items" else "$action $done 项")
                         if (skipped > 0) add(if (english) "Skipped $skipped items" else "跳过 $skipped 项")
@@ -994,20 +1233,17 @@ fun AlbumApp(
             session = pixivArchiveSession,
             onStartScan = { source, maxBatchSize ->
                 pixivArchiveSession.scanJob?.cancel()
-                pixivArchiveSession.scanJob = null
+                    pixivArchiveSession.scanJob = null
                     pixivArchiveSession.state.value = ArchiveUiState.Scanning
-                    pixivArchiveSession.records.value = emptyList()
                     pixivArchiveSession.completed.value = 0
                     pixivArchiveSession.failed.value = 0
                     pixivArchiveSession.activity.value = ArchiveActivity(
                         message = if (english) "Reading source folder" else "正在读取来源目录"
                     )
-                    pixivArchiveSession.scanJob = scope.launch {
+                pixivArchiveSession.scanJob = scope.launch {
                     runCatching {
-                        pixivRepository.scan(
-                            source,
-                            maxItems = maxBatchSize,
-                            onProgress = { update ->
+                        val existingRecords = pixivArchiveSession.records.value
+                        val onProgress: suspend (com.example.album.data.PixivArchiveProgress) -> Unit = { update ->
                             withContext(Dispatchers.Main) {
                                 val current = pixivArchiveSession.activity.value
                                 pixivArchiveSession.completed.value = update.completed
@@ -1024,16 +1260,29 @@ fun AlbumApp(
                                     else (listOf(update.log) + current.logs).take(4)
                                 )
                             }
-                            },
-                            onRecord = { record ->
+                        }
+                        val onRecord: suspend (com.example.album.data.PixivArchiveRecord) -> Unit = { record ->
                             withContext(Dispatchers.Main) {
-                                pixivArchiveSession.records.value =
-                                    pixivArchiveSession.records.value + record
+                                pixivArchiveSession.upsertRecord(record)
                             }
-                            }
-                        )
+                        }
+                        if (existingRecords.isNotEmpty()) {
+                            pixivRepository.rescan(
+                                existingRecords,
+                                maxItems = existingRecords.size,
+                                onProgress = onProgress,
+                                onRecord = onRecord
+                            )
+                        } else {
+                            pixivRepository.scan(
+                                source,
+                                maxItems = maxBatchSize,
+                                onProgress = onProgress,
+                                onRecord = onRecord
+                            )
+                        }
                     }.onSuccess { scanned ->
-                        pixivArchiveSession.records.value = scanned
+                        pixivArchiveSession.mergeRecords(scanned)
                         pixivArchiveSession.state.value = ArchiveUiState.Ready
                         Toast.makeText(
                             context,
@@ -1054,20 +1303,24 @@ fun AlbumApp(
                     if (pixivArchiveSession.scanJob === coroutineContext[Job]) pixivArchiveSession.scanJob = null
                 }
             },
-            onBack = { pixivArchiveOpen = false; pixivRefreshKey++ },
-            onArchiveComplete = { completed, failed ->
-                // Let the archive screen finish its final state update before
-                // rebuilding the global media index. Doing both in the same
-                // frame can make several newly archived thumbnails decode at
-                // once and destabilize lower-memory devices.
-                observerRefreshJob[0]?.cancel()
+            onBack = {
+                pixivArchiveOpen = false
                 pixivRefreshKey++
-                scope.launch {
-                    delay(1_000L)
-                    runCatching {
-                        suppressObserverRefreshUntil = android.os.SystemClock.uptimeMillis() + 1_500L
-                        library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
-                    }
+            },
+            onArchiveComplete = { completed, failed ->
+                observerRefreshJob[0]?.cancel()
+                archiveMediaRefreshPending = false
+                archiveMediaRefreshing = true
+                try {
+                    // Refresh while the archive page is temporarily locked so
+                    // the next user action does not pay this cost.
+                    library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
+                    // Reload directly after the media index and SAF target
+                    // folders are current, so new folders and their ordering
+                    // appear on the P page immediately.
+                    reloadPixivPage()
+                } finally {
+                    archiveMediaRefreshing = false
                 }
                 Toast.makeText(
                     context,
@@ -1079,6 +1332,7 @@ fun AlbumApp(
                     Toast.LENGTH_SHORT
                 ).show()
             },
+            archiveMediaRefreshing = archiveMediaRefreshing,
             favoriteSelected = { items -> items.isNotEmpty() && items.all { it.uri.toString() in favoriteUris } },
             onFavorite = { items ->
                 val keys = items.mapTo(mutableSetOf()) { it.uri.toString() }
@@ -1091,22 +1345,11 @@ fun AlbumApp(
                 if (renamed == null) {
                     Toast.makeText(context, appText("重命名失败", english), Toast.LENGTH_SHORT).show()
                 }
-                if (renamed != null) scope.launch { library.refresh(library.permissionGranted) }
+                if (renamed != null) scope.launch { library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false) }
                 renamed?.uri
             },
             onShare = { items ->
-                val uris = ArrayList(items.map { it.uri })
-                if (uris.isNotEmpty()) runCatching {
-                    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                        type = when {
-                            items.all(MediaItem::isVideo) -> "video/*"
-                            items.none(MediaItem::isVideo) -> "image/*"
-                            else -> "*/*"
-                        }
-                        putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }, appText("分享媒体", english)))
-                }
+                shareMedia(context, items, english)
             },
             onMove = { items ->
                 if (items.isNotEmpty()) {
@@ -1127,16 +1370,25 @@ fun AlbumApp(
             media = (library.images + library.videos).distinctBy { it.uri },
             recycleEntries = library.recycleEntries,
             excludedMedia = library.excludedMedia,
-            onBack = { cleanupOpen = false; pixivRefreshKey++ },
+            onBack = {
+                cleanupOpen = false
+                pixivRefreshKey++
+                if (archiveMediaRefreshPending) {
+                    archiveMediaRefreshPending = false
+                    scope.launch {
+                        library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
+                    }
+                }
+            },
             findDuplicates = library::findDuplicates,
             confirmMediaDeletion = albumSettings.getBoolean("delete_confirmation", true),
             recycleMediaDeletion = albumSettings.getBoolean("recycle_bin", true),
-            onDeleteMedia = requestDelete,
+            onDeleteMedia = { entries -> performDelete(entries) },
             onRestoreRecycle = { entries ->
                 val systemEntries = entries.filter { it.systemTrashed }
                 val privateEntries = entries.filterNot { it.systemTrashed }
                 if (privateEntries.isNotEmpty()) scope.launch {
-                    val restored = privateEntries.count { library.restoreRecycle(it) }
+                    val restored = library.restoreRecycle(privateEntries).size
                     Toast.makeText(context, if (english) "Restored $restored items" else "已还原 $restored 项", Toast.LENGTH_SHORT).show()
                 }
                 if (systemEntries.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -1167,7 +1419,10 @@ fun AlbumApp(
             },
             onDeleteRecycle = { entries ->
                 val systemEntries = entries.filter { it.systemTrashed }
-                entries.filterNot { it.systemTrashed }.forEach(library::permanentlyDeleteRecycle)
+                val privateEntries = entries.filterNot { it.systemTrashed }
+                if (privateEntries.isNotEmpty()) {
+                    scope.launch { library.permanentlyDeleteRecycle(privateEntries) }
+                }
                 val directlyDeleted = systemEntries.filter { entry ->
                     runCatching {
                         context.contentResolver.delete(Uri.parse(entry.sourceUri), null, null) > 0
@@ -1201,7 +1456,16 @@ fun AlbumApp(
                     }
                 }
             },
-            onRestoreExcluded = library::restoreExcludedFolder
+            onRestoreExcluded = library::restoreExcludedFolder,
+            onOpenMedia = ::openMedia,
+            onOpenExcludedFolder = { folder, isVideo ->
+                cleanupOpen = false
+                selectedTab = if (isVideo) MainTab.Videos else MainTab.Albums
+                openedFolder = folder
+                folderScope = null
+                query = ""
+                searchOpen = false
+            }
         )
         return
     }
@@ -1213,86 +1477,59 @@ fun AlbumApp(
                 LocalActiveSharedMediaKey provides activeSharedMediaKey
             ) {
                 Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
+                modifier = Modifier.fillMaxSize(),
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                topBar = {
             if (selectionMode) SelectionTopBar(
-                selected = if (selectingFolders) selectedFolders.size else selectedItems.size,
+                selected = if (selectingFolders) selectedFolders.size else selectedItemsForAction.size,
                 selectingFolders = selectingFolders,
                 onClose = { clearSelection() },
-                favoriteSelected = selectedItems.isNotEmpty() && selectedItems.all { it.uri.toString() in favoriteUris },
+                query = query,
+                onQueryChange = { query = it },
+                favoriteSelected = selectedItemsForAction.isNotEmpty() && selectedItemsForAction.all { it.uri.toString() in favoriteUris },
                 onFavorite = {
-                    val selectedKeys = selectedItems.mapTo(mutableSetOf()) { it.uri.toString() }
+                    val selectedKeys = selectedItemsForAction.mapTo(mutableSetOf()) { it.uri.toString() }
                     favoriteUris = if (selectedKeys.all { it in favoriteUris }) favoriteUris - selectedKeys else favoriteUris + selectedKeys
                     preferences.edit().putStringSet("favorites", favoriteUris).apply()
                 },
                 onCopy = {
-                    if (selectedItems.isNotEmpty()) transferRequest = TransferRequest(selectedItems, TransferMode.Copy)
+                    if (selectedItemsForAction.isNotEmpty()) transferRequest = TransferRequest(selectedItemsForAction, TransferMode.Copy)
                 },
                 onMove = {
-                    if (selectedItems.isNotEmpty()) transferRequest = TransferRequest(selectedItems, TransferMode.Move)
+                    if (selectedItemsForAction.isNotEmpty()) transferRequest = TransferRequest(selectedItemsForAction, TransferMode.Move)
                 },
                 onRename = {
                     if (selectingFolders) {
                         selectionRenameFolder = selectedFolders.singleOrNull()
                         selectionRenameText = selectionRenameFolder.orEmpty()
-                    } else selectedItems.singleOrNull()?.let {
+                    } else selectedItemsForAction.singleOrNull()?.let {
                         selectionRenameItem = it
                         selectionRenameText = it.name
                     }
                 },
                 renameEnabled = !selectingFolders || selectedFolders.size == 1,
                 onShare = {
-                    val uris = ArrayList(selectedItems.map { it.uri })
-                    if (uris.isNotEmpty()) runCatching {
-                        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                            type = when {
-                                selectedItems.all(MediaItem::isVideo) -> "video/*"
-                                selectedItems.none(MediaItem::isVideo) -> "image/*"
-                                else -> "*/*"
-                            }
-                            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }, appText("分享媒体", english)))
-                    }.onFailure {
-                        Toast.makeText(context, if (english) "No app can share these files" else "没有可分享这些文件的应用", Toast.LENGTH_SHORT).show()
-                    }
+                    shareMedia(context, selectedItemsForAction, english)
                 },
                 onDelete = {
-                    requestDeleteWithConfirmation(selectedItems)
+                    requestDeleteWithConfirmation(selectedItemsForAction)
                 },
-                onSlideshow = selectedItems.takeIf { items -> items.any { !it.isVideo } }?.let {{
-                    selectionSlideshow = selectedItems.filterNot { it.isVideo }
+                onSlideshow = selectedItemsForAction.takeIf { items -> items.any { !it.isVideo } }?.let {{
+                    selectionSlideshow = selectedItemsForAction.filterNot { it.isVideo }
                     selectionMode = false
                     selectingFolders = false
                 }},
-                onOpenWith = selectedItems.singleOrNull()?.takeIf { !selectingFolders }?.let { selected -> {
-                    runCatching {
-                        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(selected.uri, selected.mimeType)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }, appText("打开方式", english)))
-                    }.onFailure {
-                        Toast.makeText(context, if (english) "No app can open this file" else "没有可打开此文件的应用", Toast.LENGTH_SHORT).show()
-                    }
+                onOpenWith = selectedItemsForAction.singleOrNull()?.takeIf { !selectingFolders }?.let { selected -> {
+                    openMediaWith(context, selected, english)
                 }},
-                onInfo = selectedItems.singleOrNull()?.takeIf { !selectingFolders }?.let { selected -> { selectionInfoItem = selected }},
-                onEditTags = selectedItems.singleOrNull()?.takeIf { !selectingFolders && !it.isVideo }?.let { selected -> { openTagEditor(selected) }},
-                onEdit = selectedItems.singleOrNull()?.takeIf { !selectingFolders && !it.isVideo }?.let { selected -> {
+                onInfo = selectedItemsForAction.singleOrNull()?.takeIf { !selectingFolders }?.let { selected -> { selectionInfoItem = selected }},
+                onEditTags = selectedItemsForAction.singleOrNull()?.takeIf { !selectingFolders && !it.isVideo }?.let { selected -> { openTagEditor(selected) }},
+                onEdit = selectedItemsForAction.singleOrNull()?.takeIf { !selectingFolders && !it.isVideo }?.let { selected -> {
                     selectionMode = false
                     beginEditing(selected)
                 }},
-                onWallpaper = selectedItems.singleOrNull()?.takeIf { !selectingFolders && !it.isVideo }?.let { selected -> {
-                    runCatching {
-                        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_ATTACH_DATA).apply {
-                            setDataAndType(selected.uri, selected.mimeType)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            putExtra("mimeType", selected.mimeType)
-                        }, appText("设置为壁纸", english)))
-                    }.onFailure {
-                        Toast.makeText(context, if (english) "Unable to open wallpaper settings" else "无法打开壁纸设置", Toast.LENGTH_SHORT).show()
-                    }
+                onWallpaper = selectedItemsForAction.singleOrNull()?.takeIf { !selectingFolders && !it.isVideo }?.let { selected -> {
+                    setWallpaper(context, selected, english)
                 }},
                 onExclude = if (selectingFolders && selectedFolders.isNotEmpty()) {{
                     selectedFolders.forEach(library::excludeFolder)
@@ -1319,14 +1556,18 @@ fun AlbumApp(
                 label = "main-tab-topbar-transition"
             ) { tab ->
                 if (tab != MainTab.Settings) VaultTopBar(
-                title = if (tab == MainTab.Timeline) {
-                    if (appLanguage == "English") {
-                        if (timelineShowsVideos) "Videos" else "Pictures"
-                    } else if (timelineShowsVideos) "视频" else "图片"
+                title = if (openedFolder != null) {
+                    openedFolder.orEmpty()
+                } else if (tab == MainTab.Timeline) {
+                    if (appLanguage == "English") "Timeline" else "时间轴"
                 } else tabLabel(tab),
                 query = query,
-                searchEnabled = true,
+                searchEnabled = searchOpen || openedFolder == null,
+                onSearchClick = { resumeSearch() },
+                onSearchFocus = { resumeSearch() },
                 onQueryChange = {
+                    suspendedSearchQuery = null
+                    searchOpen = true
                     query = it
                     if (tab == MainTab.Pixiv && it.isNotBlank()) {
                         openedFolder = null
@@ -1338,10 +1579,10 @@ fun AlbumApp(
                 menuItems = when (tab) {
                     MainTab.Albums, MainTab.Videos -> if (appLanguage == "English") {
                         if (openedFolder == null) listOf("Scan", "Add local folder", "Columns", "Sort", "Select")
-                        else listOf("Scan", "Columns", "Layout", "Sort", "Select")
+                        else listOf("Scan", "New folder", "Columns", "Layout", "Sort", "Select")
                     } else {
                         if (openedFolder == null) listOf("扫描刷新", "添加本地文件夹", "列数", "排序方式", "进入多选")
-                        else listOf("扫描刷新", "列数", "排布方式", "排序方式", "进入多选")
+                        else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
                     }
                     MainTab.Timeline -> if (appLanguage == "English") {
                         listOf("Scan", "Add local folder", "Jump to date", "Columns", "Layout", "Select")
@@ -1349,12 +1590,12 @@ fun AlbumApp(
                     MainTab.Pixiv -> if (appLanguage == "English") {
                         if (pixivSearchMode == PixivSearchMode.Tag) listOf("Scan", "Columns", "Layout", "Sort", "Select")
                         else if (openedFolder == null) listOf("Scan", "Columns", "Sort", "Select")
-                        else listOf("Scan", "Columns", "Layout", "Sort", "Select")
+                        else listOf("Scan", "New folder", "Columns", "Layout", "Sort", "Select")
                     } else if (pixivSearchMode == PixivSearchMode.Tag) {
                         listOf("扫描刷新", "列数", "排布方式", "排序方式", "进入多选")
                     } else if (openedFolder == null) {
                         listOf("扫描刷新", "列数", "排序方式", "进入多选")
-                    } else listOf("扫描刷新", "列数", "排布方式", "排序方式", "进入多选")
+                    } else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
                     MainTab.Settings -> emptyList()
                 },
                 onMenuItemClick = { action ->
@@ -1364,6 +1605,12 @@ fun AlbumApp(
                             if (selectedTab == MainTab.Pixiv) pixivRefreshKey++
                         }
                         MainMenuAction.AddLocalFolder -> folderLauncher.launch(null)
+                        MainMenuAction.CreateFolder -> {
+                            if (openedFolder != null) {
+                                createFolderName = ""
+                                showCreateFolderDialog = true
+                            }
+                        }
                         MainMenuAction.Columns -> showColumnDialog = true
                         MainMenuAction.Layout -> showLayoutDialog = true
                         MainMenuAction.Sort -> showSortDialog = true
@@ -1388,9 +1635,11 @@ fun AlbumApp(
                         ).show()
                     }
                 },
-                onBack = if (openedFolder != null && tab != MainTab.Timeline) {
-                    ::closeFolder
-                } else null,
+                onBack = when {
+                    searchOpen && (query.isNotBlank() || openedFolder != null) -> ::suspendSearch
+                    openedFolder != null && tab != MainTab.Timeline -> ::closeFolder
+                    else -> null
+                },
                 searchPlaceholder = if (tab == MainTab.Pixiv) {
                     if (pixivSearchMode == PixivSearchMode.Tag) {
                         if (appLanguage == "English") "Search tags" else "搜索 Tag"
@@ -1402,25 +1651,31 @@ fun AlbumApp(
                 } else if (tab == MainTab.Timeline) {
                     if (appLanguage == "English") "Search names and dates" else "搜索${if (timelineShowsVideos) "视频" else "图片"}名称、日期"
                 } else null,
-                searchModeLabels = if (tab == MainTab.Pixiv) {
-                    listOf(if (appLanguage == "English") "Artist" else "画师", "Tag")
-                } else emptyList(),
-                selectedSearchMode = if (pixivSearchMode == PixivSearchMode.Artist) 0 else 1,
-                onSearchModeChange = { index ->
-                    val mode = if (index == 0) PixivSearchMode.Artist else PixivSearchMode.Tag
-                    if (mode != pixivSearchMode) pixivSearchMode = mode
+                searchModeLabels = when (tab) {
+                    MainTab.Pixiv -> listOf(if (appLanguage == "English") "Artist" else "画师", "Tag")
+                    MainTab.Timeline -> listOf(if (appLanguage == "English") "Pictures" else "图片", if (appLanguage == "English") "Videos" else "视频")
+                    else -> emptyList()
                 },
-                onTitleClick = if (tab == MainTab.Timeline) ({
-                    timelineShowsVideos = !timelineShowsVideos
-                    query = ""
-                    timelineJumpDate = null
-                    Toast.makeText(
-                        context,
-                        if (appLanguage == "English") "Timeline switched to ${if (timelineShowsVideos) "videos" else "pictures"}"
-                        else "时间轴已切换为${if (timelineShowsVideos) "视频" else "图片"}",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }) else null,
+                selectedSearchMode = when {
+                    tab == MainTab.Timeline && timelineShowsVideos -> 1
+                    tab == MainTab.Timeline -> 0
+                    pixivSearchMode == PixivSearchMode.Artist -> 0
+                    else -> 1
+                },
+                onSearchModeChange = { index ->
+                    if (tab == MainTab.Timeline) {
+                        val showVideos = index == 1
+                        if (timelineShowsVideos != showVideos) {
+                            timelineShowsVideos = showVideos
+                            query = ""
+                            timelineJumpDate = null
+                        }
+                    } else {
+                        val mode = if (index == 0) PixivSearchMode.Artist else PixivSearchMode.Tag
+                        if (mode != pixivSearchMode) pixivSearchMode = mode
+                    }
+                },
+                onTitleClick = null,
                 chromeAlpha = pageChromeAlpha
                 )
             }
@@ -1428,15 +1683,23 @@ fun AlbumApp(
         bottomBar = {
             androidx.compose.foundation.layout.Column {
                 if (selectionMode) SelectionSubBar(
-                    selected = if (selectingFolders) selectedFolders.size else selectedItems.size,
-                    total = if (selectingFolders) currentSelectionMedia.map { it.folder }.distinct().size else currentSelectionMedia.size,
+                    selected = if (selectingFolders) selectedFolders.size else selectedItemsForAction.size,
+                    total = if (selectingFolders) selectionMedia.map { it.folder }.distinct().size else selectionMedia.size,
                     onSelectAll = {
                         if (selectingFolders) {
-                            val all = currentSelectionMedia.mapTo(mutableSetOf()) { it.folder }
-                            selectedFolders = if (selectedFolders.size == all.size) emptySet() else all
+                            val all = selectionMedia.mapTo(mutableSetOf()) { it.folder }
+                            selectedFolders = if (all.isNotEmpty() && all.all { it in selectedFolders }) {
+                                selectedFolders - all
+                            } else {
+                                selectedFolders + all
+                            }
                         } else {
-                            selectedUris = if (selectedItems.size == currentSelectionMedia.size) emptySet()
-                            else currentSelectionMedia.mapTo(mutableSetOf()) { it.uri.toString() }
+                            val visibleKeys = selectionMedia.mapTo(mutableSetOf()) { it.uri.toString() }
+                            selectedUris = if (visibleKeys.isNotEmpty() && visibleKeys.all { it in selectedUris }) {
+                                selectedUris - visibleKeys
+                            } else {
+                                selectedUris + visibleKeys
+                            }
                         }
                     },
                     chromeAlpha = pageChromeAlpha
@@ -1699,11 +1962,25 @@ fun AlbumApp(
             ) { tab ->
                 Box(Modifier.fillMaxSize()) {
             if (selectionMode && selectingFolders) AlbumSelectionScreen(
-                media = currentSelectionMedia,
+                // Use the same global search media source as normal search;
+                // the directory index below adds empty/non-media folders.
+                // Folder multi-select uses the same media source and folder
+                // matcher as the normal AlbumsScreen search.
+                media = when (selectedTab) {
+                    MainTab.Videos -> visibleVideos
+                    else -> albumImages
+                },
                 selectedFolders = selectedFolders,
                 columns = albumColumns,
                 sort = mediaSort,
                 sortDirection = sortDirection,
+                // Folder selection must use the exact same directory index as
+                // the normal album search, including empty/non-media folders.
+                additionalFolderNames = library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
+                additionalFileNames = library.searchableFolderFiles,
+                pinnedFolderName = pixivSourceFolderName.takeIf { selectedTab == MainTab.Pixiv },
+                query = suspendedSearchQuery ?: query,
+                searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                 initialFirstVisibleItem = selectionFolderFirstVisibleItem,
                 initialFirstVisibleOffset = selectionFolderFirstVisibleOffset,
                 onScrollPositionChanged = { index, offset ->
@@ -1712,13 +1989,21 @@ fun AlbumApp(
                 },
                 onToggle = { folder -> selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder }
             ) else if (selectionMode) SelectionScreen(
-                    media = currentSelectionMedia,
+                    media = selectionMedia,
                     selectedUris = selectedUris,
                     columns = when {
                         tab == MainTab.Timeline -> timelineColumns
                         tab == MainTab.Pixiv -> folderColumns
                         openedFolder != null -> folderColumns
                         else -> albumColumns
+                    },
+                    query = query,
+                    searching = library.loading,
+                    initialFirstVisibleItem = selectionMediaFirstVisibleItem,
+                    initialFirstVisibleOffset = selectionMediaFirstVisibleOffset,
+                    onScrollPositionChanged = { index, offset ->
+                        selectionMediaFirstVisibleItem = index
+                        selectionMediaFirstVisibleOffset = offset
                     },
                     sort = mediaSort,
                     sortDirection = sortDirection,
@@ -1731,6 +2016,7 @@ fun AlbumApp(
                     media = albumImages,
                     isVideo = false,
                     query = query,
+                    searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                     loading = library.loading,
                     scanning = library.scanning,
                     permissionGranted = library.permissionGranted,
@@ -1739,26 +2025,53 @@ fun AlbumApp(
                     albumColumns = albumColumns,
                     folderColumns = folderColumns,
                     layout = folderLayout,
-                    initialAlbumFirstVisibleItem = selectionFolderFirstVisibleItem,
-                    initialAlbumFirstVisibleOffset = selectionFolderFirstVisibleOffset,
+                    initialAlbumFirstVisibleItem = albumFirstVisibleItem,
+                    initialAlbumFirstVisibleOffset = albumFirstVisibleOffset,
+                    onAlbumScrollPositionChanged = { index, offset ->
+                        albumFirstVisibleItem = index
+                        albumFirstVisibleOffset = offset
+                        selectionFolderFirstVisibleItem = index
+                        selectionFolderFirstVisibleOffset = offset
+                    },
+                    initialMediaFirstVisibleItem = selectionMediaFirstVisibleItem,
+                    initialMediaFirstVisibleOffset = selectionMediaFirstVisibleOffset,
+                    onMediaScrollPositionChanged = { index, offset ->
+                        selectionMediaFirstVisibleItem = index
+                        selectionMediaFirstVisibleOffset = offset
+                    },
                     onRequestPermission = requestPermission,
                     onOpenMedia = ::openMedia,
-                    onLongPressMedia = { pressed -> selectionMode = true; selectingFolders = false; selectedUris = setOf(pressed.uri.toString()) },
+                    onLongPressMedia = { pressed -> selectionMode = true; selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onBatchSelectMedia = { items ->
+                        selectingFolders = false
+                        selectedUris = selectedUris + items.map { it.uri.toString() }
+                    },
+                    onSelectionGestureStartMedia = { pressed -> selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onSelectionGestureEnd = { selectionMode = true },
                     onLongPressAlbum = { album, index, offset ->
+                        albumFirstVisibleItem = index
+                        albumFirstVisibleOffset = offset
                         selectionFolderFirstVisibleItem = index
                         selectionFolderFirstVisibleOffset = offset
                         selectionMode = true
                         selectingFolders = true
-                        selectedFolders = setOf(album.name)
+                        selectedFolders = selectedFolders + album.name
                     },
+                    onBatchSelectAlbums = { albums ->
+                        selectingFolders = true
+                        selectedFolders = selectedFolders + albums.map { it.name }
+                    },
+                    onAlbumSelectionGestureEnd = { selectionMode = true },
                     onRefresh = { requestMediaScan(false) },
                     openedFolder = openedFolder,
-                    onOpenedFolderChange = { openedFolder = it },
+                    onOpenedFolderChange = { openedFolder = it; if (it != null) searchOpen = false },
                     onVisibleScopeChanged = { folderScope = it },
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
-                    additionalAlbumNames = if (query.isBlank()) emptySet() else library.searchableFolderNames,
+                    additionalAlbumNames = if (query.isBlank()) emptySet() else library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
+                    additionalFileNames = if (query.isBlank()) emptyMap() else library.searchableFolderFiles,
+                    additionalChildFolderNames = if (openedFolder == null) emptySet() else library.searchableFolderChildren[openedFolder].orEmpty(),
                     onClearQuery = { query = "" }
                     ,onOpenPixivArchive = {
                         pixivArchiveOpen = true
@@ -1768,6 +2081,7 @@ fun AlbumApp(
                     media = visibleVideos,
                     isVideo = true,
                     query = query,
+                    searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                     loading = library.loading,
                     scanning = library.scanning,
                     permissionGranted = library.permissionGranted,
@@ -1776,26 +2090,53 @@ fun AlbumApp(
                     albumColumns = albumColumns,
                     folderColumns = folderColumns,
                     layout = folderLayout,
-                    initialAlbumFirstVisibleItem = selectionFolderFirstVisibleItem,
-                    initialAlbumFirstVisibleOffset = selectionFolderFirstVisibleOffset,
+                    initialAlbumFirstVisibleItem = albumFirstVisibleItem,
+                    initialAlbumFirstVisibleOffset = albumFirstVisibleOffset,
+                    onAlbumScrollPositionChanged = { index, offset ->
+                        albumFirstVisibleItem = index
+                        albumFirstVisibleOffset = offset
+                        selectionFolderFirstVisibleItem = index
+                        selectionFolderFirstVisibleOffset = offset
+                    },
+                    initialMediaFirstVisibleItem = selectionMediaFirstVisibleItem,
+                    initialMediaFirstVisibleOffset = selectionMediaFirstVisibleOffset,
+                    onMediaScrollPositionChanged = { index, offset ->
+                        selectionMediaFirstVisibleItem = index
+                        selectionMediaFirstVisibleOffset = offset
+                    },
                     onRequestPermission = requestPermission,
                     onOpenMedia = ::openMedia,
-                    onLongPressMedia = { pressed -> selectionMode = true; selectingFolders = false; selectedUris = setOf(pressed.uri.toString()) },
+                    onLongPressMedia = { pressed -> selectionMode = true; selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onBatchSelectMedia = { items ->
+                        selectingFolders = false
+                        selectedUris = selectedUris + items.map { it.uri.toString() }
+                    },
+                    onSelectionGestureStartMedia = { pressed -> selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onSelectionGestureEnd = { selectionMode = true },
                     onLongPressAlbum = { album, index, offset ->
+                        albumFirstVisibleItem = index
+                        albumFirstVisibleOffset = offset
                         selectionFolderFirstVisibleItem = index
                         selectionFolderFirstVisibleOffset = offset
                         selectionMode = true
                         selectingFolders = true
-                        selectedFolders = setOf(album.name)
+                        selectedFolders = selectedFolders + album.name
                     },
+                    onBatchSelectAlbums = { albums ->
+                        selectingFolders = true
+                        selectedFolders = selectedFolders + albums.map { it.name }
+                    },
+                    onAlbumSelectionGestureEnd = { selectionMode = true },
                     onRefresh = { requestMediaScan(false) },
                     openedFolder = openedFolder,
-                    onOpenedFolderChange = { openedFolder = it },
+                    onOpenedFolderChange = { openedFolder = it; if (it != null) searchOpen = false },
                     onVisibleScopeChanged = { folderScope = it },
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
-                    additionalAlbumNames = if (query.isBlank()) emptySet() else library.searchableFolderNames,
+                    additionalAlbumNames = if (query.isBlank()) emptySet() else library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
+                    additionalFileNames = if (query.isBlank()) emptyMap() else library.searchableFolderFiles,
+                    additionalChildFolderNames = if (openedFolder == null) emptySet() else library.searchableFolderChildren[openedFolder].orEmpty(),
                     onClearQuery = { query = "" }
                 )
                 MainTab.Timeline -> TimelineScreen(
@@ -1807,11 +2148,31 @@ fun AlbumApp(
                     isVideo = timelineShowsVideos,
                     columns = timelineColumns,
                     layout = timelineLayout,
+                    initialFirstVisibleItem = timelineFirstVisibleItem,
+                    initialFirstVisibleOffset = timelineFirstVisibleOffset,
+                    onScrollPositionChanged = { index, offset ->
+                        timelineFirstVisibleItem = index
+                        timelineFirstVisibleOffset = offset
+                        selectionMediaFirstVisibleItem = index
+                        selectionMediaFirstVisibleOffset = offset
+                    },
                     jumpToDate = timelineJumpDate,
                     onJumpConsumed = { timelineJumpDate = null },
                     onRequestPermission = requestPermission,
                     onOpenMedia = ::openMedia,
-                    onLongPressMedia = { pressed -> selectionMode = true; selectingFolders = false; selectedUris = setOf(pressed.uri.toString()) },
+                    onLongPressMedia = { pressed ->
+                        selectionMediaFirstVisibleItem = timelineFirstVisibleItem
+                        selectionMediaFirstVisibleOffset = timelineFirstVisibleOffset
+                        selectionMode = true
+                        selectingFolders = false
+                        selectedUris = selectedUris + pressed.uri.toString()
+                    },
+                    onBatchSelectMedia = { items ->
+                        selectingFolders = false
+                        selectedUris = selectedUris + items.map { it.uri.toString() }
+                    },
+                    onSelectionGestureStartMedia = { pressed -> selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onSelectionGestureEnd = { selectionMode = true },
                     onRefresh = { requestMediaScan(false) },
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
@@ -1826,10 +2187,11 @@ fun AlbumApp(
                     }
                     Box(Modifier.fillMaxWidth().weight(1f)) {
                 AlbumsScreen(
-                    media = if (pixivSearchMode == PixivSearchMode.Tag && query.isNotBlank()) pixivTagResults else pixivImages,
+                    media = if (pixivSearchMode == PixivSearchMode.Tag && query.isNotBlank()) pixivTagResults else pixivSearchImages,
                     isVideo = false,
                     query = if (pixivSearchMode == PixivSearchMode.Tag) "" else query,
-                    loading = library.loading,
+                    searchingFolders = false,
+                    loading = library.loading || pixivTagsLoading || pixivPageRefreshing,
                     scanning = library.scanning,
                     permissionGranted = true,
                     sort = mediaSort,
@@ -1844,19 +2206,29 @@ fun AlbumApp(
                         selectingFolders = false
                         selectedUris = setOf(pressed.uri.toString())
                     },
+                    onBatchSelectMedia = { items ->
+                        selectingFolders = false
+                        selectedUris = selectedUris + items.map { it.uri.toString() }
+                    },
+                    onSelectionGestureStartMedia = { pressed -> selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onSelectionGestureEnd = { selectionMode = true },
                     onLongPressAlbum = { album, index, offset ->
                         selectionFolderFirstVisibleItem = index
                         selectionFolderFirstVisibleOffset = offset
                         selectionMode = true
                         selectingFolders = true
-                        selectedFolders = setOf(album.name)
+                        selectedFolders = selectedFolders + album.name
                     },
+                    onBatchSelectAlbums = { albums ->
+                        selectingFolders = true
+                        selectedFolders = selectedFolders + albums.map { it.name }
+                    },
+                    onAlbumSelectionGestureEnd = { selectionMode = true },
                     onRefresh = {
-                        requestMediaScan(false)
-                        pixivRefreshKey++
+                        scope.launch { reloadPixivPage() }
                     },
                     openedFolder = openedFolder,
-                    onOpenedFolderChange = { openedFolder = it },
+                    onOpenedFolderChange = { openedFolder = it; if (it != null) searchOpen = false },
                     onVisibleScopeChanged = { folderScope = it },
                     sharedElementEnabled = tab == selectedTab,
                     onOpenPixivArchive = {
@@ -1867,7 +2239,6 @@ fun AlbumApp(
                     flatMode = pixivSearchMode == PixivSearchMode.Tag && query.isNotBlank(),
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
-                    additionalAlbumNames = pixivFolderNames,
                     emptyMessage = if (query.isBlank()) {
                         if (english) "Enter a tag to search images" else "输入 Tag 搜索图片"
                     } else if (english) "No images match this tag" else "没有匹配该 Tag 的图片"
@@ -1906,8 +2277,19 @@ fun AlbumApp(
                     onShowHiddenMediaChange = { enabled ->
                         scope.launch { library.setShowHiddenMedia(enabled) }
                     },
+                    onRenameExtensionChange = { showRenameExtension = it },
                     onLanguageChange = onAppLanguageChange
                 )
+            }
+            if (selectionMode && selectingFolders && query.isNotBlank() && library.searchableFoldersLoading) {
+                Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
             }
                 }
             }
@@ -2105,6 +2487,35 @@ fun AlbumApp(
             Toast.makeText(context, if (english) "Excluded \"$folder\"" else "已排除“$folder”", Toast.LENGTH_SHORT).show()
         }
     }
+    if (showCreateFolderDialog) {
+        val normalized = createFolderName.trim()
+        val valid = normalized.isNotBlank() && normalized.none { it in "\\/:*?\"<>|" }
+        VaultTextInputDialog(
+            title = appText("新建文件夹", english),
+            value = createFolderName,
+            onValueChange = { createFolderName = it },
+            label = appText("文件夹名称", english),
+            confirmLabel = appText("创建", english),
+            confirmEnabled = valid,
+            onDismiss = { showCreateFolderDialog = false },
+            onConfirm = {
+                val parentItems = currentSelectionMedia.toList()
+                showCreateFolderDialog = false
+                scope.launch {
+                    val created = library.createFolder(parentItems, normalized)
+                    Toast.makeText(
+                        context,
+                        if (created) {
+                            if (english) "Folder created" else "文件夹已创建"
+                        } else {
+                            if (english) "Unable to create folder" else "文件夹创建失败"
+                        },
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        )
+    }
     pendingAppDelete?.let { deleting ->
         val recycleEnabled = albumSettings.getBoolean("recycle_bin", true)
         VaultConfirmationSheet(
@@ -2132,15 +2543,25 @@ fun AlbumApp(
         )
     }
     selectionRenameItem?.let { item ->
+        val extension = item.name.substringAfterLast('.', "").takeIf { it.isNotBlank() }
+        val editableName = if (showRenameExtension || extension == null) {
+            item.name
+        } else {
+            item.name.removeSuffix(".$extension")
+        }
         VaultTextInputDialog(
             title = appText("重命名", english),
-            value = selectionRenameText,
+            value = if (selectionRenameText == item.name) editableName else selectionRenameText,
             onValueChange = { selectionRenameText = it },
             label = appText("文件名", english),
             confirmLabel = appText("保存", english),
+            initialSelection = TextRange(0, (if (showRenameExtension && extension != null) editableName.length - extension.length - 1 else editableName.length).coerceAtLeast(0)),
             onDismiss = { selectionRenameItem = null },
             onConfirm = {
-                    val newName = selectionRenameText.trim()
+                    val enteredName = selectionRenameText.trim()
+                    val newName = if (!showRenameExtension && extension != null && !enteredName.endsWith(".$extension", ignoreCase = true)) {
+                        "$enteredName.$extension"
+                    } else enteredName
                     if (newName.isNotEmpty() && newName != item.name) {
                         val renamed = library.rename(item, newName)
                         if (

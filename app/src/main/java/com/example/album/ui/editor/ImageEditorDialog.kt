@@ -292,8 +292,12 @@ fun ImageEditorDialog(
             !(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && MediaStore.canManageMedia(context)) &&
             !(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())
         ) {
-            val request = MediaStore.createWriteRequest(context.contentResolver, listOf(item.uri))
-            writeLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+            runCatching {
+                val request = MediaStore.createWriteRequest(context.contentResolver, listOf(item.uri))
+                writeLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+            }.onFailure {
+                Toast.makeText(context, if (english) "Unable to request file access" else "无法请求文件访问权限", Toast.LENGTH_SHORT).show()
+            }
         } else {
             performSave(true)
         }
@@ -2744,48 +2748,15 @@ private fun DoodleControls(
                     }
                     }
             }
-            // Opaque backing for the fixed eraser card, above the moving
-            // brush layer and below the eraser itself.
-            Box(
-                Modifier
-                    .align(Alignment.CenterStart)
-                    .size(100.dp)
-                    .background(Color.White)
-            )
-            // Keep the fixed eraser separated from the moving brush cards.
-            // The right edge fades outward across the same 10dp spacing as
-            // the gray tool cards; the left edge stays fully opaque.
-            Canvas(
-                Modifier
-                    .align(Alignment.CenterStart)
-                    .offset(x = (-10).dp)
-                    .size(114.dp, 98.dp)
-            ) {
-                val fade = 10.dp.toPx()
-                drawRect(
-                    color = Color.White,
-                    topLeft = Offset(0f, 0f),
-                    size = androidx.compose.ui.geometry.Size(fade, size.height)
-                )
-                drawRect(
-                    brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-                        colors = listOf(Color.Transparent, Color.White.copy(alpha = .55f), Color.White),
-                        startX = size.width,
-                        endX = size.width - fade
-                    ),
-                    topLeft = Offset(size.width - fade, 0f),
-                    size = androidx.compose.ui.geometry.Size(fade, size.height)
-                )
-            }
+            // The eraser is a fixed top-level control. It deliberately sits
+            // outside the carousel, so it never moves with the brush row.
             Surface(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .width(94.dp)
                     .height(98.dp)
                     .zIndex(10f)
-                    .clickable {
-                        onBrush(EditorBrush.Eraser)
-                    }
+                    .clickable { onBrush(EditorBrush.Eraser) }
                     .border(
                         2.dp,
                         if (brush == EditorBrush.Eraser) accent else Color.Transparent,
@@ -2795,10 +2766,18 @@ private fun DoodleControls(
                 color = if (brush == EditorBrush.Eraser) Color(0xFFF7FFF9) else EditorTile,
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
                     EditorBrushMark(EditorBrush.Eraser, if (brush == EditorBrush.Eraser) accent else Color(0xFF777B79))
                     Spacer(Modifier.height(5.dp))
-                    Text(appText("橡皮", english), color = if (brush == EditorBrush.Eraser) accent else Color(0xFF353937), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    Text(
+                        appText("橡皮", english),
+                        color = if (brush == EditorBrush.Eraser) accent else Color(0xFF353937),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1
+                    )
                 }
             }
         }
