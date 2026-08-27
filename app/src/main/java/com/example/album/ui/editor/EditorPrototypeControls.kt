@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.snapping.SnapPosition
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
@@ -18,9 +19,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -32,6 +36,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 
 internal val EditorAccent: Color
     @Composable get() = MaterialTheme.colorScheme.primary
@@ -143,40 +149,74 @@ internal fun EditorCenterCarousel(
         lazyListState = state,
         snapPosition = SnapPosition.Center
     )
+    val outlineColor = EditorAccent
     val indices = remember(itemCount) { (0 until itemCount).toList() }
-    BoxWithConstraints(modifier, contentAlignment = Alignment.TopCenter) {
+    val latestSelectedIndex by rememberUpdatedState(selectedIndex)
+    val latestOnCentered by rememberUpdatedState(onCentered)
+    BoxWithConstraints(
+        modifier = modifier.drawWithContent {
+            drawContent()
+            if (showCenterOutline) {
+                val frameWidth = itemWidth.toPx()
+                val frameHeight = itemHeight.toPx()
+                val strokeWidth = outlineWidth.toPx()
+                drawRoundRect(
+                    color = outlineColor,
+                    topLeft = Offset(
+                        (size.width - frameWidth) / 2f + strokeWidth / 2f,
+                        strokeWidth / 2f
+                    ),
+                    size = androidx.compose.ui.geometry.Size(
+                        (frameWidth - strokeWidth).coerceAtLeast(0f),
+                        (frameHeight - strokeWidth).coerceAtLeast(0f)
+                    ),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx()),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth)
+                )
+            }
+        },
+        contentAlignment = Alignment.TopCenter
+    ) {
         val side = ((maxWidth - itemWidth) / 2).coerceAtLeast(0.dp)
         val sidePx = with(LocalDensity.current) { side.roundToPx() }
         val maxSelectableIndex = if (centerLastItem) itemCount - 1 else (itemCount - 2).coerceAtLeast(0)
-        LaunchedEffect(selectedIndex, sidePx, maxSelectableIndex) {
-            if (!state.isScrollInProgress) {
-                val target = selectedIndex.coerceIn(0, maxSelectableIndex)
-                val center = (state.layoutInfo.viewportStartOffset + state.layoutInfo.viewportEndOffset) / 2
-                val current = state.layoutInfo.visibleItemsInfo.minByOrNull {
-                    kotlin.math.abs(it.offset + it.size / 2 - center)
-                }?.index
-                // A fling already settles the row. Do not animate it a second
-                // time after the callback reports the item that just centered.
-                if (current == null || current != target) {
-                    // animateScrollToItem aligns the item start. Offset it by
-                    // the side inset so the final item can also sit at center.
-                    state.animateScrollToItem(target, -sidePx)
-                }
-            }
+        var initialized by remember(itemCount, sidePx) { mutableStateOf(false) }
+        LaunchedEffect(itemCount, sidePx, maxSelectableIndex) {
+            snapshotFlow { state.layoutInfo.totalItemsCount }.first { it == itemCount }
+            // contentPadding already places the item's start at the centered
+            // inset. A second negative offset would move it past the outline.
+            state.scrollToItem(latestSelectedIndex.coerceIn(0, maxSelectableIndex), 0)
+            initialized = true
         }
-        val scrolling = state.isScrollInProgress
-        LaunchedEffect(scrolling, itemCount, selectedIndex, maxSelectableIndex) {
-            if (scrolling) return@LaunchedEffect
-            val info = state.layoutInfo
-            val center = (info.viewportStartOffset + info.viewportEndOffset) / 2
-            val centered = info.visibleItemsInfo.minByOrNull {
+        LaunchedEffect(selectedIndex, sidePx, maxSelectableIndex, initialized) {
+            if (!initialized || state.isScrollInProgress) return@LaunchedEffect
+            val target = selectedIndex.coerceIn(0, maxSelectableIndex)
+            val center = (state.layoutInfo.viewportStartOffset + state.layoutInfo.viewportEndOffset) / 2
+            val current = state.layoutInfo.visibleItemsInfo.minByOrNull {
                 kotlin.math.abs(it.offset + it.size / 2 - center)
-            }?.index?.coerceIn(0, maxSelectableIndex) ?: return@LaunchedEffect
-            if (centered != selectedIndex.coerceIn(0, maxSelectableIndex)) onCentered(centered)
+            }?.index
+            if (current != target) state.animateScrollToItem(target, 0)
+        }
+        LaunchedEffect(itemCount, sidePx, maxSelectableIndex, initialized) {
+            if (!initialized) return@LaunchedEffect
+            snapshotFlow { state.isScrollInProgress }
+                .distinctUntilChanged()
+                .collect { scrolling ->
+                    if (scrolling) return@collect
+                    val info = state.layoutInfo
+                    val center = (info.viewportStartOffset + info.viewportEndOffset) / 2
+                    val centered = info.visibleItemsInfo.minByOrNull {
+                        kotlin.math.abs(it.offset + it.size / 2 - center)
+                    }?.index?.coerceIn(0, maxSelectableIndex) ?: return@collect
+                    if (centered != latestSelectedIndex.coerceIn(0, maxSelectableIndex)) {
+                        latestOnCentered(centered)
+                    }
+                }
         }
         LazyRow(
             state = state,
             flingBehavior = flingBehavior,
+            userScrollEnabled = true,
             contentPadding = if (centerLastItem) PaddingValues(horizontal = side)
             else PaddingValues(start = side, end = 0.dp),
             horizontalArrangement = Arrangement.spacedBy(itemSpacing)
@@ -187,18 +227,10 @@ internal fun EditorCenterCarousel(
                     // this callback additionally brings a clicked card to the
                     // same centered position used by drag snapping.
                     content(index) {
-                        scope.launch { state.animateScrollToItem(index, -sidePx) }
+                        scope.launch { state.animateScrollToItem(index, 0) }
                     }
                 }
             }
-        }
-        if (showCenterOutline) androidx.compose.foundation.BorderStroke(outlineWidth, EditorAccent).let { stroke ->
-            androidx.compose.material3.Surface(
-                modifier = Modifier.width(itemWidth).height(itemHeight),
-                color = Color.Transparent,
-                shape = RoundedCornerShape(8.dp),
-                border = stroke
-            ) {}
         }
     }
 }

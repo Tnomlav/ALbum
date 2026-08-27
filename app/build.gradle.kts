@@ -17,6 +17,10 @@ val releaseVersionName = listOf(
     releaseVersionProperties.getProperty("VERSION_MINOR", "0"),
     releaseVersionProperties.getProperty("VERSION_PATCH", "0")
 ).joinToString(".")
+val releaseStoreFile = providers.gradleProperty("ALBUM_STORE_FILE").orElse("").get()
+val releaseStorePassword = providers.gradleProperty("ALBUM_STORE_PASSWORD").orElse("").get()
+val releaseKeyAlias = providers.gradleProperty("ALBUM_KEY_ALIAS").orElse("").get()
+val releaseKeyPassword = providers.gradleProperty("ALBUM_KEY_PASSWORD").orElse("").get()
 
 android {
     namespace = "com.example.album"
@@ -39,6 +43,14 @@ android {
 
     buildTypes {
         release {
+            if (releaseStoreFile.isNotBlank()) {
+                signingConfig = signingConfigs.create("configuredRelease") {
+                    storeFile = file(releaseStoreFile)
+                    storePassword = releaseStorePassword
+                    keyAlias = releaseKeyAlias
+                    keyPassword = releaseKeyPassword
+                }
+            }
             optimization {
                 enable = true
             }

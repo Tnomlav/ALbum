@@ -13,6 +13,8 @@ import android.media.MediaMetadataRetriever
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.widget.Toast
+import com.example.album.ui.setWallpaper
+import com.example.album.ui.shareMedia
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -142,6 +144,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.IntOffset
@@ -177,6 +180,7 @@ import java.util.Date
 import java.util.Locale
 import java.io.File
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -228,6 +232,7 @@ fun MediaViewer(
     onEnterPictureInPicture: () -> Boolean = { false }
 ) {
     val context = LocalContext.current
+    val showRenameExtension = remember { context.getSharedPreferences("album_settings", android.content.Context.MODE_PRIVATE).getBoolean("rename_show_extension", false) }
     val english = LocalAppEnglish.current
     val thumbnailPreferences = remember {
         context.getSharedPreferences("album_settings", Context.MODE_PRIVATE)
@@ -347,8 +352,10 @@ fun MediaViewer(
 
     fun moveViewer(direction: Int) {
         if (viewerItems.isEmpty()) return
+        val nextIndex = currentIndex + direction
+        if (nextIndex !in viewerItems.indices) return
         viewerDirection = direction
-        currentIndex = (currentIndex + direction + viewerItems.size) % viewerItems.size
+        currentIndex = nextIndex
         onItemChanged(viewerItems[currentIndex])
     }
 
@@ -541,15 +548,19 @@ fun MediaViewer(
         }
 
         if (showRename) {
+            val extension = current.name.substringAfterLast('.', "").takeIf { it.isNotBlank() }
+            val editableName = if (showRenameExtension || extension == null) current.name else current.name.removeSuffix(".$extension")
             VaultTextInputDialog(
                 title = appText("重命名", english),
-                value = renameText,
+                value = if (renameText == current.name) editableName else renameText,
                 onValueChange = { renameText = it },
                 label = appText("文件名", english),
                 confirmLabel = appText("保存", english),
+                initialSelection = TextRange(0, (if (showRenameExtension && extension != null) editableName.length - extension.length - 1 else editableName.length).coerceAtLeast(0)),
                 onDismiss = { showRename = false },
                 onConfirm = {
-                        val newName = renameText.trim()
+                        val enteredName = renameText.trim()
+                        val newName = if (!showRenameExtension && extension != null && !enteredName.endsWith(".$extension", ignoreCase = true)) "$enteredName.$extension" else enteredName
                         if (newName.isNotEmpty() && newName != current.name) onRename(current, newName)
                         showRename = false
                 }
@@ -1396,7 +1407,10 @@ private fun NativeVideoPlayer(
                         val deltaY = position.y - start.y
                         lastPosition = position
                         if (mode == "pending" && hypot(deltaX.toDouble(), deltaY.toDouble()) > 10.0) {
-                            mode = if (abs(deltaX) >= abs(deltaY)) {
+                            val angleFromHorizontal = Math.toDegrees(
+                                atan2(abs(deltaY).toDouble(), abs(deltaX).toDouble())
+                            )
+                            mode = if (angleFromHorizontal <= 60.0) {
                                 if (wasPlaying) player.pause()
                                 "seek"
                             } else if (start.x < gestureViewportWidth / 2f) {
@@ -1420,13 +1434,13 @@ private fun NativeVideoPlayer(
                             }
                             "brightness" -> {
                                 change.consume()
-                                val next = (startBrightness - deltaY / gestureViewportHeight.coerceAtLeast(1)).coerceIn(0f, 1f)
+                                val next = (startBrightness - deltaY / gestureViewportHeight.coerceAtLeast(1) * 0.5f).coerceIn(0f, 1f)
                                 updateGestureBrightness(next)
                                 gestureHud = "亮度 ${roundToInt(next * 100f)}%"
                             }
                             "volume" -> {
                                 change.consume()
-                                val next = (startVolume - deltaY / gestureViewportHeight.coerceAtLeast(1)).coerceIn(0f, 1f)
+                                val next = (startVolume - deltaY / gestureViewportHeight.coerceAtLeast(1) * 0.5f).coerceIn(0f, 1f)
                                 updateGestureVolume(next)
                                 gestureHud = "音量 ${roundToInt(next * 100f)}%"
                             }
@@ -1694,6 +1708,7 @@ private fun NativeVideoPlayer(
             title = appText("播放速度", english),
             options = speedOptions,
             selected = if (speed == 1f) "1x" else "${speed}x",
+            playerStyle = true,
             onDismiss = {
                 showSpeedDialog = false
                 if (speedDialogWasPlaying) player.play()
@@ -2039,27 +2054,7 @@ private fun readDetails(context: Context, item: MediaItem): MediaDetails {
 }
 
 private fun share(context: Context, item: MediaItem, english: Boolean) {
-    runCatching {
-        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-            type = item.mimeType
-            putExtra(Intent.EXTRA_STREAM, item.uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }, appText("分享媒体", english)))
-    }.onFailure {
-        Toast.makeText(context, if (english) "No app can share this file" else "没有可分享此文件的应用", Toast.LENGTH_SHORT).show()
-    }
-}
-
-private fun setWallpaper(context: Context, item: MediaItem, english: Boolean) {
-    runCatching {
-        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_ATTACH_DATA).apply {
-            setDataAndType(item.uri, item.mimeType)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            putExtra("mimeType", item.mimeType)
-        }, appText("设置为壁纸", english)))
-    }.onFailure {
-        Toast.makeText(context, if (english) "Unable to open wallpaper settings" else "无法打开壁纸设置", Toast.LENGTH_SHORT).show()
-    }
+    shareMedia(context, listOf(item), english)
 }
 
 private fun progressKey(item: MediaItem): String = "video_position_${item.uri.toString().hashCode()}"

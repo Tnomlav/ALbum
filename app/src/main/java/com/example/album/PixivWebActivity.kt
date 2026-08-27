@@ -9,6 +9,8 @@ import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
 import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -16,6 +18,9 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,6 +52,7 @@ import kotlinx.coroutines.launch
 class PixivWebActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private var checkingWebSession = false
+    private var pageLoadFailed by mutableStateOf(false)
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,6 +68,11 @@ class PixivWebActivity : ComponentActivity() {
             settings.displayZoomControls = false
             settings.loadsImagesAutomatically = true
             settings.javaScriptCanOpenWindowsAutomatically = true
+            settings.setSupportMultipleWindows(false)
+            settings.allowContentAccess = true
+            settings.allowFileAccess = false
+            settings.cacheMode = WebSettings.LOAD_DEFAULT
+            settings.mediaPlaybackRequiresUserGesture = false
             setOnTouchListener { view, event ->
                 if (event.action == MotionEvent.ACTION_DOWN) view.requestFocusFromTouch()
                 false
@@ -71,13 +82,39 @@ class PixivWebActivity : ComponentActivity() {
                 setAcceptCookie(true)
                 setAcceptThirdPartyCookies(currentWebView, true)
             }
+            webChromeClient = object : WebChromeClient() {
+                override fun onCreateWindow(
+                    view: WebView,
+                    isDialog: Boolean,
+                    isUserGesture: Boolean,
+                    resultMsg: android.os.Message
+                ): Boolean {
+                    // Pixiv occasionally opens OAuth or verification in a new
+                    // target. Reuse this WebView so cookies stay in-session.
+                    val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+                    transport.webView = view
+                    resultMsg.sendToTarget()
+                    return true
+                }
+            }
             webViewClient = object : WebViewClient() {
+                override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                    pageLoadFailed = false
+                }
+
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     val uri = request.url
-                    val host = uri.host.orEmpty()
-                    if (uri.scheme == "https" && (host == "pixiv.net" || host.endsWith(".pixiv.net"))) return false
+                    if (uri.scheme == "http" || uri.scheme == "https") return false
                     runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
                     return true
+                }
+
+                override fun onReceivedError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    error: android.webkit.WebResourceError
+                ) {
+                    if (request.isForMainFrame) pageLoadFailed = true
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
@@ -109,6 +146,8 @@ class PixivWebActivity : ComponentActivity() {
                 PixivBrowser(
                     webView = webView,
                     english = language == "English",
+                    pageLoadFailed = pageLoadFailed,
+                    onRetry = { pageLoadFailed = false; webView.reload() },
                     onClose = ::finish,
                     onDone = ::complete
                 )
@@ -217,6 +256,8 @@ class PixivWebActivity : ComponentActivity() {
 private fun PixivBrowser(
     webView: WebView,
     english: Boolean,
+    pageLoadFailed: Boolean,
+    onRetry: () -> Unit,
     onClose: () -> Unit,
     onDone: () -> Unit
 ) {
@@ -247,6 +288,21 @@ private fun PixivBrowser(
                 factory = { webView },
                 modifier = Modifier.fillMaxWidth().weight(1f)
             )
+            if (pageLoadFailed) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        if (english) "Pixiv page failed to load" else "Pixiv 页面加载失败",
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    TextButton(onClick = onRetry) {
+                        Text(if (english) "Retry" else "重试")
+                    }
+                }
+            }
         }
     }
 }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.StarBorder
@@ -30,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +40,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,6 +63,8 @@ fun VaultTopBar(
     menuItems: List<String>,
     onMenuItemClick: (String) -> Unit,
     onBack: (() -> Unit)? = null,
+    onSearchClick: (() -> Unit)? = null,
+    onSearchFocus: (() -> Unit)? = null,
     searchPlaceholder: String? = null,
     searchModeLabels: List<String> = emptyList(),
     selectedSearchMode: Int = 0,
@@ -66,6 +74,18 @@ fun VaultTopBar(
 ) {
     val english = LocalAppEnglish.current
     var menuExpanded by remember { mutableStateOf(false) }
+    var focusSearchOnExpand by remember { mutableStateOf(false) }
+    val searchFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(searchEnabled, focusSearchOnExpand) {
+        if (searchEnabled && focusSearchOnExpand) {
+            searchFocusRequester.requestFocus()
+            keyboardController?.show()
+            focusSearchOnExpand = false
+        }
+    }
+
     Surface(modifier = Modifier.alpha(chromeAlpha), color = MaterialTheme.colorScheme.surface) {
         Row(
             modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
@@ -79,6 +99,9 @@ fun VaultTopBar(
             if (onBack != null) {
                 IconButton(onClick = onBack, modifier = Modifier.height(48.dp)) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = appText("返回相册", english))
+                }
+                if (!searchEnabled) {
+                    Text(title, modifier = Modifier.weight(1f), fontSize = 16.sp, maxLines = 1)
                 }
             } else {
                 Row(
@@ -114,7 +137,9 @@ fun VaultTopBar(
                     BasicTextField(
                         value = query,
                         onValueChange = onQueryChange,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).focusRequester(searchFocusRequester).onFocusChanged { state ->
+                            if (state.isFocused) onSearchFocus?.invoke()
+                        },
                         singleLine = true,
                         textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface, fontSize = VaultDimens.SearchText),
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -130,6 +155,11 @@ fun VaultTopBar(
                             }
                         }
                     )
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { onQueryChange("") }, modifier = Modifier.width(30.dp).height(40.dp)) {
+                            Icon(Icons.Outlined.Close, contentDescription = appText("清除搜索", english), modifier = Modifier.height(17.dp))
+                        }
+                    }
                 }
                 if (searchModeLabels.isNotEmpty()) {
                     val modeIndex = selectedSearchMode.coerceIn(searchModeLabels.indices)
@@ -166,7 +196,30 @@ fun VaultTopBar(
                     )
                 }
             } else {
-                Spacer(Modifier.weight(1f))
+                // Keep the actions anchored to the right when a search is
+                // suspended after back navigation.
+                if (onBack == null) Spacer(Modifier.weight(1f))
+                if (onSearchClick != null) {
+                    IconButton(onClick = {
+                        focusSearchOnExpand = true
+                        onSearchClick()
+                    }, modifier = Modifier.height(48.dp)) {
+                        Icon(Icons.Outlined.Search, contentDescription = appText("搜索", english))
+                    }
+                }
+                // Keep the favorite filter available when a search is
+                // suspended. The normal page hides the search field in that
+                // state, but hiding this action makes favorites appear lost.
+                IconButton(
+                    onClick = onFavoriteClick,
+                    modifier = Modifier.height(48.dp).width(48.dp)
+                ) {
+                    Icon(
+                        if (favoriteActive) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                        contentDescription = appText(if (favoriteActive) "显示全部" else "仅显示收藏", english),
+                        tint = if (favoriteActive) androidx.compose.ui.graphics.Color(0xFFFFD60A) else MaterialTheme.colorScheme.onSurface
+                    )
+                }
             }
             Box {
                 IconButton(

@@ -22,8 +22,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
@@ -52,6 +58,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.album.data.MediaAlbum
 import com.example.album.data.MediaItem
@@ -244,6 +251,47 @@ fun MediaThumbnail(
                 Icon(Icons.Filled.PlayArrow, contentDescription = appText("视频", english), tint = Color.White, modifier = Modifier.padding(7.dp))
             }
         }
+        if (item.isVideo && item.duration > 0L) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 2.dp, bottom = 2.dp)
+                    .height(17.dp)
+                    .wrapContentWidth(),
+                color = Color.Black.copy(alpha = .72f),
+                shape = RoundedCornerShape(8.5.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .wrapContentSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        formatVideoDuration(item.duration),
+                        color = Color.White,
+                        fontSize = 9.sp,
+                        modifier = Modifier
+                            .offset(y = (-0.8f).dp)
+                            .padding(horizontal = 5.dp),
+                        lineHeight = 9.sp,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatVideoDuration(durationMs: Long): String {
+    val totalSeconds = (durationMs / 1000L).coerceAtLeast(0L)
+    val seconds = totalSeconds % 60L
+    val minutes = (totalSeconds / 60L) % 60L
+    val hours = totalSeconds / 3600L
+    return if (hours > 0L) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
     }
 }
 

@@ -55,17 +55,22 @@ class MediaPlaybackService : Service() {
         mediaName = intent.getStringExtra(EXTRA_NAME).orEmpty().ifBlank { "视频" }
         val position = intent.getLongExtra(EXTRA_POSITION, 0L)
         player?.release()
-        player = ExoPlayer.Builder(this).build().apply {
-            setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
-            prepare()
-            seekTo(position)
-            playWhenReady = true
-            addListener(object : Player.Listener {
-                override fun onIsPlayingChanged(isPlaying: Boolean) = updateNotification()
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == Player.STATE_ENDED) stopSelf()
-                }
-            })
+        player = runCatching {
+            ExoPlayer.Builder(this).build().apply {
+                setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
+                prepare()
+                seekTo(position)
+                playWhenReady = true
+                addListener(object : Player.Listener {
+                    override fun onIsPlayingChanged(isPlaying: Boolean) = updateNotification()
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_ENDED) stopSelf()
+                    }
+                })
+            }
+        }.getOrElse {
+            stopSelf()
+            return
         }
         startForeground(NOTIFICATION_ID, buildNotification())
         handler.removeCallbacks(saveProgress)

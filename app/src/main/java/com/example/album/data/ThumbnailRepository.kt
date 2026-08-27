@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.ImageDecoder
 import android.media.ThumbnailUtils
 import android.os.Build
 import android.provider.MediaStore
@@ -15,6 +14,7 @@ import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -77,6 +77,19 @@ object ThumbnailRepository {
             .putLong("thumbnail_cache_generation", preferences.getLong("thumbnail_cache_generation", 0L) + 1L)
             .apply()
         return cleared
+    }
+
+    /** Release bitmap pressure without deleting the persistent disk cache. */
+    @Suppress("DEPRECATION")
+    fun trimMemory(level: Int) {
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            memory.evictAll()
+        } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            memory.trimToSize((memory.maxSize() / 4).coerceAtLeast(1))
+        }
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
+            cancelBackgroundOptimization()
+        }
     }
 
     fun applyCacheLimit(context: Context, preferences: SharedPreferences) {
@@ -211,9 +224,9 @@ object ThumbnailRepository {
         }
     }
 
-    private fun loadPlatformThumbnail(context: Context, item: MediaItem, size: Int): Bitmap? = runCatching {
+    private fun loadPlatformThumbnail(context: Context, item: MediaItem, size: Int): Bitmap? = try {
         if (item.uri.scheme == "file") {
-            val path = item.uri.path ?: return@runCatching null
+            val path = item.uri.path ?: return null
             if (item.isVideo) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     ThumbnailUtils.createVideoThumbnail(File(path), Size(size, size), null)
@@ -243,7 +256,11 @@ object ThumbnailRepository {
             } }.getOrNull()
             platformThumbnail ?: decodeImageThumbnail(context, item, size)
         }
-    }.getOrNull()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        null
+    }
 
     // SAF files may not be indexed by MediaStore immediately after an archive.
     // Decode the new content URI directly so the thumbnail does not depend on indexing timing.
@@ -261,20 +278,23 @@ object ThumbnailRepository {
     }
 
     private fun decodeOriginalBitmap(context: Context, item: MediaItem): Bitmap? = runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val source = if (item.uri.scheme == "file") {
-                val path = item.uri.path ?: return@runCatching null
-                ImageDecoder.createSource(File(path))
-            } else {
-                ImageDecoder.createSource(context.contentResolver, item.uri)
-            }
-            ImageDecoder.decodeBitmap(source)
-        } else {
-            openMediaInputStream(context, item.uri)?.use { input ->
-                BitmapFactory.decodeStream(input, null, BitmapFactory.Options().apply {
-                    inPreferredConfig = Bitmap.Config.ARGB_8888
-                })
-            }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        openMediaInputStream(context, item.uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, bounds)
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+        var sample = 1
+        while (
+            maxOf(bounds.outWidth, bounds.outHeight) / sample > ORIGINAL_MAX_DIMENSION ||
+                bounds.outWidth.toLong() * bounds.outHeight / (sample.toLong() * sample) > ORIGINAL_MAX_PIXELS
+        ) {
+            sample *= 2
+        }
+        openMediaInputStream(context, item.uri)?.use { input ->
+            BitmapFactory.decodeStream(input, null, BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            })
         }
     }.getOrNull()
 
@@ -283,6 +303,9 @@ object ThumbnailRepository {
         while (width / (sample * 2) >= target && height / (sample * 2) >= target) sample *= 2
         return sample
     }
+
+    private const val ORIGINAL_MAX_DIMENSION = 4096
+    private const val ORIGINAL_MAX_PIXELS = 16_000_000L
 
     private fun persist(target: File, bitmap: Bitmap) {
         runCatching {

@@ -13,6 +13,11 @@ import java.security.MessageDigest
 import java.util.UUID
 import kotlin.math.max
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -135,36 +140,54 @@ class CleanupRepository(private val context: Context) {
 
     suspend fun stageForRecycle(items: List<MediaItem>): List<RecycleEntry> = withContext(Dispatchers.IO) {
         val existing = loadRecycleEntries().toMutableList()
-        val staged = items.mapNotNull { item ->
-            runCatching {
-                val id = UUID.randomUUID().toString()
-                val extension = item.name.substringAfterLast('.', if (item.isVideo) "mp4" else "jpg")
-                val target = File(recycleDirectory, "$id.$extension")
-                openMediaInputStream(context, item.uri).use { input ->
-                    requireNotNull(input)
-                    target.outputStream().use(input::copyTo)
+        val pendingItems = pendingRecycleItems(items, existing)
+        if (pendingItems.isEmpty()) return@withContext emptyList()
+        val gate = Semaphore(3)
+        val staged = coroutineScope {
+            pendingItems.map { item ->
+                async {
+                    gate.withPermit {
+                        if (!hasEnoughBackupSpace(item.size, recycleDirectory.usableSpace)) return@withPermit null
+                        var target: File? = null
+                        runCatching {
+                            val id = UUID.randomUUID().toString()
+                            val extension = item.name.substringAfterLast('.', if (item.isVideo) "mp4" else "jpg")
+                            target = File(recycleDirectory, "$id.$extension")
+                            openMediaInputStream(context, item.uri).use { input ->
+                                requireNotNull(input)
+                                requireNotNull(target).outputStream().use(input::copyTo)
+                            }
+                            RecycleEntry(
+                                id = id,
+                                sourceUri = item.uri.toString(),
+                                storedPath = requireNotNull(target).absolutePath,
+                                originalName = item.name,
+                                originalFolder = item.folder,
+                                originalRelativePath = item.relativePath,
+                                mimeType = item.mimeType,
+                                dateTaken = item.dateTaken,
+                                duration = item.duration,
+                                isVideo = item.isVideo,
+                                deletedAt = System.currentTimeMillis()
+                            )
+                        }.getOrElse {
+                            // A failed copy must not leave an untracked partial backup consuming storage.
+                            runCatching { target?.delete() }
+                            null
+                        }
+                    }
                 }
-                RecycleEntry(
-                    id = id,
-                    sourceUri = item.uri.toString(),
-                    storedPath = target.absolutePath,
-                    originalName = item.name,
-                    originalFolder = item.folder,
-                    originalRelativePath = item.relativePath,
-                    mimeType = item.mimeType,
-                    dateTaken = item.dateTaken,
-                    duration = item.duration,
-                    isVideo = item.isVideo,
-                    deletedAt = System.currentTimeMillis()
-                )
-            }.getOrNull()
+            }.awaitAll().filterNotNull()
         }
         if (staged.isNotEmpty()) saveRecycleEntries(existing + staged)
         staged
     }
 
     suspend fun stageForSystemRecycle(items: List<MediaItem>): List<RecycleEntry> = withContext(Dispatchers.IO) {
-        val staged = items.map { item ->
+        val existing = loadRecycleEntries()
+        val pendingItems = pendingRecycleItems(items, existing)
+        if (pendingItems.isEmpty()) return@withContext emptyList()
+        val staged = pendingItems.map { item ->
             RecycleEntry(
                 id = UUID.randomUUID().toString(),
                 sourceUri = item.uri.toString(),
@@ -180,7 +203,7 @@ class CleanupRepository(private val context: Context) {
                 systemTrashed = true
             )
         }
-        if (staged.isNotEmpty()) saveRecycleEntries(loadRecycleEntries() + staged)
+        if (staged.isNotEmpty()) saveRecycleEntries(existing + staged)
         staged
     }
 
@@ -208,10 +231,29 @@ class CleanupRepository(private val context: Context) {
         }
     }.getOrDefault(emptyList())
 
-    suspend fun restore(entry: RecycleEntry): Boolean = withContext(Dispatchers.IO) {
-        if (entry.systemTrashed) return@withContext false
+    suspend fun restore(entry: RecycleEntry): Boolean = restore(listOf(entry)).isNotEmpty()
+
+    suspend fun restore(entries: List<RecycleEntry>): List<RecycleEntry> = withContext(Dispatchers.IO) {
+        val candidates = entries.filterNot { it.systemTrashed }
+        if (candidates.isEmpty()) return@withContext emptyList()
+        val gate = Semaphore(3)
+        val restored = coroutineScope {
+            candidates.map { entry ->
+                async { gate.withPermit { restoreToMediaStore(entry) } }
+            }.awaitAll().mapNotNull { it }
+        }
+        if (restored.isNotEmpty()) {
+            restored.forEach(::deletePrivateBackup)
+            val restoredIds = restored.mapTo(hashSetOf()) { it.id }
+            saveRecycleEntries(loadRecycleEntries().filterNot { it.id in restoredIds })
+        }
+        restored
+    }
+
+    private suspend fun restoreToMediaStore(entry: RecycleEntry): RecycleEntry? = withContext(Dispatchers.IO) {
+        if (entry.systemTrashed) return@withContext null
         val file = File(entry.storedPath)
-        if (!file.exists()) return@withContext false
+        if (!file.exists()) return@withContext null
         val collection = if (entry.isVideo) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, entry.originalName)
@@ -230,7 +272,7 @@ class CleanupRepository(private val context: Context) {
             }
             if (entry.dateTaken > 0) put(MediaStore.MediaColumns.DATE_TAKEN, entry.dateTaken)
         }
-        val target = context.contentResolver.insert(collection, values) ?: return@withContext false
+        val target = context.contentResolver.insert(collection, values) ?: return@withContext null
         runCatching {
             openMediaOutputStream(context, target).use { output ->
                 requireNotNull(output)
@@ -239,11 +281,10 @@ class CleanupRepository(private val context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 context.contentResolver.update(target, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
             }
-            removeRecycleEntry(entry)
-            true
+            entry
         }.getOrElse {
             context.contentResolver.delete(target, null, null)
-            false
+            null
         }
     }
 
@@ -251,6 +292,14 @@ class CleanupRepository(private val context: Context) {
         deletePrivateBackup(entry)
         val remaining = loadRecycleEntries().filterNot { it.id == entry.id }
         saveRecycleEntries(remaining)
+        return true
+    }
+
+    fun removeRecycleEntries(entries: List<RecycleEntry>): Boolean {
+        if (entries.isEmpty()) return true
+        val ids = entries.mapTo(hashSetOf()) { it.id }
+        entries.forEach(::deletePrivateBackup)
+        saveRecycleEntries(loadRecycleEntries().filterNot { it.id in ids })
         return true
     }
 
@@ -456,3 +505,21 @@ class CleanupRepository(private val context: Context) {
         private const val KEY_RECYCLE = "recycle_entries"
     }
 }
+
+internal fun pendingRecycleItems(items: List<MediaItem>, existing: List<RecycleEntry>): List<MediaItem> {
+    val pendingSources = pendingRecycleSourceUris(
+        requestedSources = items.map { it.uri.toString() },
+        existingSources = existing.map { it.sourceUri }.toSet()
+    ).toHashSet()
+    return items.filter { pendingSources.remove(it.uri.toString()) }
+}
+
+internal fun pendingRecycleSourceUris(
+    requestedSources: List<String>,
+    existingSources: Set<String>
+): List<String> = requestedSources.distinct().filterNot { it in existingSources }
+
+internal fun hasEnoughBackupSpace(fileSize: Long, usableSpace: Long): Boolean =
+    usableSpace >= fileSize.coerceAtLeast(1L) + MIN_BACKUP_FREE_SPACE_BYTES
+
+private const val MIN_BACKUP_FREE_SPACE_BYTES = 8L * 1024L * 1024L
