@@ -28,6 +28,15 @@ This file records release-level changes. Each exported release should have:
 - SHA-256: `4E14E6828B5021CB81522CB944D69FD11C3D2E4CE22C08AED2012B6875677674`
 - Signature: verified with APK Signature Scheme v2; 1 signer.
 
+## v1.1.23 - 2026-08-27
+
+- Made multi-select folder names use the same constrained ellipsis layout as the normal thumbnail view.
+- Fixed Back in the Pixiv archive page to leave multi-select mode before closing the page.
+- Improved global Move to discover persisted SAF source trees and prefer provider-native document moves, avoiding unintended copy behavior.
+- APK: `app/release/app-release.apk`
+- SHA-256: `4ED4C7A99A0F7A232D4564B1B9E41A69CD36DF9D7DB617F336F3686B6DCBFA5C`
+- Signature: verified with APK Signature Scheme v2; 1 signer.
+
 ## Unreleased
 
 - No changes.
