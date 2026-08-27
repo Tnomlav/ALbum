@@ -1210,6 +1210,14 @@ class PixivArchiveSession(context: Context) {
         preferences.edit().putString(KEY_SCAN_RECORDS, json.toString()).apply()
     }
 
+    fun removeRecords(uris: Set<String>) {
+        if (uris.isEmpty()) return
+        val updated = records.value.filterNot { it.uri.toString() in uris }
+        if (updated.size == records.value.size) return
+        records.value = updated
+        if (updated.isEmpty()) reset() else persistRecords()
+    }
+
     fun upsertRecord(record: PixivArchiveRecord) {
         records.value = records.value.filterNot { it.uri == record.uri } + record
     }
@@ -1339,6 +1347,15 @@ private fun ArchiveContent(
     var resultGrid by remember { mutableStateOf(false) }
     var selectedUris by session.selectedUris
 
+    LaunchedEffect(records.isEmpty()) {
+        if (records.isEmpty()) {
+            resultFilter = ArchiveResultFilter.All
+            onExitSelection()
+            confirmArchive = false
+            confirmClearResults = false
+        }
+    }
+
     fun toggleRecordSelection(record: PixivArchiveRecord) {
         val key = record.uri.toString()
         val removing = key in selectedUris
@@ -1463,10 +1480,22 @@ private fun ArchiveContent(
                         applyProgress(update)
                     }
                 }
-                records = records.map { current ->
+                val archiveInputUris = setOf(record.uri.toString())
+                val updatedRecords = records.map { current ->
                     result.records.firstOrNull { it.uri == current.uri } ?: current
                 }
+                records = if (copyInsteadOfMove) updatedRecords else {
+                    val moved = result.records
+                        .filter { it.status == PixivArchiveStatus.Archived && it.uri.toString() in archiveInputUris }
+                        .mapTo(hashSetOf()) { it.uri }
+                    updatedRecords.filterNot { it.uri in moved }
+                }
                 session.persistRecords()
+                if (records.isEmpty()) {
+                    session.reset()
+                    resultFilter = ArchiveResultFilter.All
+                    onExitSelection()
+                }
                 completed = result.completed
                 failed = result.failed
                 state = if (result.failed == 0) ArchiveUiState.Ready else ArchiveUiState.Error
@@ -1484,58 +1513,11 @@ private fun ArchiveContent(
             }
         }
     }
-    fun rescanFailed() {
-        if (!pixivSessionConnected || state == ArchiveUiState.Archiving) return
-        retryJob?.cancel()
-        val pending = records.filter { it.status == PixivArchiveStatus.Warning }.take(maxBatchSize)
-        if (pending.isEmpty()) return
-        completed = 0
-        failed = 0
-        activity = ArchiveActivity(message = if (english) "正在重新查询未成功图片" else "正在重新查询未成功图片")
-        retryJob = scope.launch {
-            state = ArchiveUiState.Scanning
-            activity = ArchiveActivity(
-                phase = PixivArchivePhase.Metadata,
-                total = pending.size,
-                message = if (english) "Retrying artwork lookup" else "正在重新查询未成功图片"
-            )
-            try {
-                val updated = repository.rescan(
-                    pending,
-                    maxItems = maxBatchSize,
-                    onProgress = { update ->
-                    withContext(Dispatchers.Main) {
-                        completed = update.completed
-                        failed = update.failed
-                        applyProgress(update)
-                    }
-                    },
-                    onRecord = { result ->
-                    withContext(Dispatchers.Main) {
-                        records = records.map { current ->
-                            if (current.uri == result.uri) result else current
-                        }
-                    }
-                    }
-                )
-                val byUri = updated.associateBy { it.uri }
-                records = records.map { byUri[it.uri] ?: it }
-                state = ArchiveUiState.Ready
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                val message = error.message ?: if (english) "Retry failed" else "重新扫描失败"
-                activity = activity.copy(phase = PixivArchivePhase.Error, message = message)
-                state = ArchiveUiState.Error
-            }
-        }
-    }
     // The slider limits discovery only; every record returned by that scan can be archived.
     val batchRecords = records
     val readyCount = batchRecords.count { it.canArchive }
     val allArchived = batchRecords.isNotEmpty() && batchRecords.all { it.status == PixivArchiveStatus.Archived }
     val warningCount = batchRecords.count { it.status == PixivArchiveStatus.Warning }
-    val retryCount = records.count { it.status == PixivArchiveStatus.Warning }
     val failedRecords = batchRecords.filter {
         it.status == PixivArchiveStatus.Warning || it.status == PixivArchiveStatus.Failed
     }
@@ -1780,30 +1762,6 @@ private fun ArchiveContent(
                     )
                 }
                  Spacer(Modifier.weight(1f))
-                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.padding(start = 6.dp)) {
-                     if (resultFilter != ArchiveResultFilter.Complete) {
-                        ArchiveResultActionButton(
-                            label = if (state == ArchiveUiState.Scanning) (if (english) "Restart" else "重新开始") else if (english) "Retry" else "重新扫描",
-                            enabled = retryCount > 0 && state != ArchiveUiState.Archiving,
-                            filled = true,
-                            onClick = {
-                                if (!pixivSessionConnected) {
-                                    showPixivLoginPrompt = true
-                                } else if (state == ArchiveUiState.Scanning) {
-                                    val source = sourceUri
-                                    if (source != null && hasPersistedTreePermission(context, source, write = false)) {
-                                        retryJob?.cancel()
-                                        onStartScan(source, maxBatchSize)
-                                    } else {
-                                        sourceLauncher.launch(source)
-                                    }
-                                } else {
-                                    rescanFailed()
-                                }
-                             }
-                         )
-                     }
-                 }
              }
              Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                  ArchiveResultTab("全部", "All", batchRecords.size, resultFilter == ArchiveResultFilter.All, Modifier.weight(1f)) { resultFilter = ArchiveResultFilter.All; session.selectedUris.value = emptySet() }
@@ -1905,8 +1863,21 @@ private fun ArchiveContent(
                                         applyProgress(update)
                                     }
                                 }
-                                records = result.records
+                                val archiveInputUris = records
+                                    .filter { it.canArchive }
+                                    .mapTo(hashSetOf()) { it.uri }
+                                records = if (copyInsteadOfMove) result.records else {
+                                    val moved = result.records
+                                        .filter { it.status == PixivArchiveStatus.Archived && it.uri in archiveInputUris }
+                                        .mapTo(hashSetOf()) { it.uri }
+                                    result.records.filterNot { it.uri in moved }
+                                }
                                 session.persistRecords()
+                                if (records.isEmpty()) {
+                                    session.reset()
+                                    resultFilter = ArchiveResultFilter.All
+                                    onExitSelection()
+                                }
                                 completed = result.completed
                                 failed = result.failed
                                 state = if (result.failed == 0) ArchiveUiState.Complete else ArchiveUiState.Error
@@ -2162,24 +2133,6 @@ private fun ArchiveResultTab(
             Text(if (LocalAppEnglish.current) englishLabel else label, fontSize = 12.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
             Text(count.toString(), fontSize = 12.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
         }
-    }
-}
-
-@Composable
-private fun ArchiveResultActionButton(label: String, enabled: Boolean, filled: Boolean, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.height(32.dp),
-        contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (filled) MaterialTheme.colorScheme.primary else Color(0xFFE53935),
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    ) {
-        Text(label, fontSize = 11.sp, maxLines = 1)
     }
 }
 

@@ -205,9 +205,19 @@ internal fun EditorCenterCarousel(
                     if (scrolling) return@collect
                     val info = state.layoutInfo
                     val center = (info.viewportStartOffset + info.viewportEndOffset) / 2
-                    val centered = info.visibleItemsInfo.minByOrNull {
+                    val centeredItem = info.visibleItemsInfo.minByOrNull {
                         kotlin.math.abs(it.offset + it.size / 2 - center)
-                    }?.index?.coerceIn(0, maxSelectableIndex) ?: return@collect
+                    } ?: return@collect
+                    val centered = centeredItem.index.coerceIn(0, maxSelectableIndex)
+                    // The fling behavior chooses a nearby snap point, but a
+                    // partially visible item can still stop between cards.
+                    // Re-align its start to the side inset so the card center
+                    // and the fixed green outline use exactly the same axis.
+                    if (centeredItem.index != centered ||
+                        kotlin.math.abs(centeredItem.offset + centeredItem.size / 2 - center) > 1
+                    ) {
+                        state.animateScrollToItem(centered, 0)
+                    }
                     if (centered != latestSelectedIndex.coerceIn(0, maxSelectableIndex)) {
                         latestOnCentered(centered)
                     }

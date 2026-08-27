@@ -272,7 +272,7 @@ fun MediaThumbnail(
                         color = Color.White,
                         fontSize = 9.sp,
                         modifier = Modifier
-                            .offset(y = (-0.8f).dp)
+                            .offset(y = (-0.6f).dp)
                             .padding(horizontal = 5.dp),
                         lineHeight = 9.sp,
                         maxLines = 1

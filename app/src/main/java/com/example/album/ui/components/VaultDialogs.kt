@@ -442,7 +442,7 @@ fun VaultWheelChoiceSheet(
                         translationY = if (playerStyle) 0f else (1f - progress) * slideDistance
                         if (playerStyle) { scaleX = .94f + .06f * progress; scaleY = .94f + .06f * progress }
                     },
-                color = if (playerStyle) Color(0xFF141414).copy(alpha = .88f) else MaterialTheme.colorScheme.surface,
+                color = if (playerStyle) Color(0xFF141414).copy(alpha = .20f) else MaterialTheme.colorScheme.surface,
                 contentColor = foreground,
                 shape = RoundedCornerShape(24.dp),
                 shadowElevation = 20.dp

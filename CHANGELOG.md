@@ -17,6 +17,17 @@ This file records release-level changes. Each exported release should have:
 - SHA-256: `DB5B77CC0F7BD5B1A71745A5055F2C79D980A23429C674A6171CD25065007909`
 - Signature: verified with APK Signature Scheme v2; 1 signer.
 
+## v1.1.22 - 2026-08-27
+
+- Removed archive-page scan results after a Pixiv archive move succeeds; copy operations keep their scan results.
+- Removed archive records after manual Move completes, including SAF/MediaStore deletion confirmation paths.
+- Reset the archive page to its initial state when all scan results have been cleared.
+- Fixed batch archive cleanup so previously archived records are not removed accidentally.
+- Included the recent duration alignment, editor carousel snapping, video dialog transparency, and decoded Chinese path display fixes.
+- APK: `app/release/app-release.apk`
+- SHA-256: `4E14E6828B5021CB81522CB944D69FD11C3D2E4CE22C08AED2012B6875677674`
+- Signature: verified with APK Signature Scheme v2; 1 signer.
+
 ## Unreleased
 
 - No changes.
