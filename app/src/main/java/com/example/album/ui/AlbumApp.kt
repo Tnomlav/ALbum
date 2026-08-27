@@ -719,6 +719,9 @@ fun AlbumApp(
     BackHandler(enabled = appBackEnabled) {
         when {
             transferRequest != null -> transferRequest = null
+            // Selection is a nested mode of every page, including the Pixiv
+            // archive page. Back must leave that mode before closing its page.
+            selectionMode -> clearSelection()
             pixivArchiveOpen -> {
                 pixivArchiveOpen = false
                 pixivRefreshKey++
@@ -733,7 +736,6 @@ fun AlbumApp(
                     }
                 }
             }
-            selectionMode -> clearSelection()
             openedFolder != null -> closeFolder()
             query.isNotBlank() -> suspendSearch()
             searchOpen -> suspendSearch()

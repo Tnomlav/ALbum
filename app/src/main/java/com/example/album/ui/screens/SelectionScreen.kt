@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.aspectRatio
@@ -231,7 +232,7 @@ fun AlbumSelectionScreen(
     ) {
         items(albums, key = { it.name }) { album ->
             val selected = album.name in selectedFolders
-            Column(Modifier.clickable { onToggle(album.name) }) {
+            Column(Modifier.fillMaxWidth().clickable { onToggle(album.name) }) {
                     Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
                         album.coverItem?.let { cover ->
                         MediaThumbnail(
@@ -261,14 +262,24 @@ fun AlbumSelectionScreen(
                         }
                     }
                 }
-                Text(
-                    album.name,
-                    modifier = Modifier.padding(top = 6.dp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Text(if (english) "${album.items.size} items" else "${album.items.size} 项", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 2.dp, top = 7.dp, end = 2.dp),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        album.name,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        fontSize = VaultDimens.AlbumName
+                    )
+                    Text(
+                        album.items.size.toString(),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = VaultDimens.AlbumCount
+                    )
+                }
             }
         }
     }

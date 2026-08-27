@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
 import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
@@ -574,7 +575,11 @@ class MediaRepository(private val context: Context) {
         directory: DocumentFile,
         conflictPolicy: ConflictPolicy
     ): TransferResult? {
-        val parent = localFolders.findAuthorizedParent(item.uri) ?: return null
+        // Archive sources can come from a Pixiv-specific SAF tree that is not
+        // part of the local-folder index. Find the source parent from every
+        // persisted tree so Move can stay a real provider-side move instead
+        // of falling back to copy-then-delete.
+        val parent = findPersistedDocumentParent(item.uri) ?: return null
         val existingNames = runCatching { directory.listFiles().mapNotNull { it.name }.toSet() }
             .getOrDefault(emptySet())
         val targetChoice = resolveTransferTargetName(item.name, existingNames, conflictPolicy)
@@ -591,6 +596,30 @@ class MediaRepository(private val context: Context) {
             DocumentsContract.moveDocument(context.contentResolver, item.uri, parent.uri, directory.uri)
         }.getOrNull() ?: return null
         return TransferResult(item, success = true, targetName = moved?.let { targetChoice.name } ?: item.name, movedDirectly = true)
+    }
+
+    private fun findPersistedDocumentParent(targetUri: Uri): DocumentFile? {
+        val treeUris = buildSet {
+            addAll(localFolders.treeUris())
+            addAll(
+                context.contentResolver.persistedUriPermissions
+                    .map { it.uri }
+                    .filter { DocumentsContract.isTreeUri(it) }
+            )
+        }
+        return treeUris.asSequence()
+            .mapNotNull { DocumentFile.fromTreeUri(context, it) }
+            .mapNotNull { findDocumentParent(it, targetUri) }
+            .firstOrNull()
+    }
+
+    private fun findDocumentParent(directory: DocumentFile, targetUri: Uri): DocumentFile? {
+        if (!directory.isDirectory) return null
+        for (child in runCatching { directory.listFiles() }.getOrDefault(emptyArray())) {
+            if (child.uri == targetUri) return directory
+            if (child.isDirectory) findDocumentParent(child, targetUri)?.let { return it }
+        }
+        return null
     }
 
     private fun transferToDocumentDirectory(
