@@ -748,9 +748,7 @@ fun AlbumApp(
         if (result.resultCode == Activity.RESULT_OK) {
             library.remove(pendingDeletes)
             val deletedUris = pendingDeletes.mapTo(hashSetOf()) { it.uri.toString() }
-            pixivArchiveSession.records.value = pixivArchiveSession.records.value.filterNot {
-                it.uri.toString() in deletedUris && it.uri.toString() in pixivArchivePendingDeleteUris
-            }
+            pixivArchiveSession.removeRecords(deletedUris intersect pixivArchivePendingDeleteUris)
             pixivArchivePendingDeleteUris -= deletedUris
             if (pendingDeletes.any { it.uri == selectedMedia?.uri }) selectedMedia = null
             selectedUris = emptySet()
@@ -1147,6 +1145,7 @@ fun AlbumApp(
                     ).show()
                 }
                 scope.launch(transferErrorHandler) {
+                    val archiveMoveUris = pixivArchiveMoveUris
                     val results = library.transfer(request.items, destination, policy, preserveDate, request.mode)
                     val completed = results.filter { it.success && !it.skipped }
                     val completedItems = completed.map { it.item }
@@ -1156,6 +1155,16 @@ fun AlbumApp(
                     transferPreferences.edit().putString("recent_folders", updatedRecent.joinToString("\u001f")).apply()
                     library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
 
+                    if (request.mode == TransferMode.Move) {
+                        val directlyMovedArchiveUris = completed
+                            .filter { it.movedDirectly && it.item.uri.toString() in archiveMoveUris }
+                            .mapTo(hashSetOf()) { it.item.uri.toString() }
+                        if (directlyMovedArchiveUris.isNotEmpty()) {
+                            pixivArchiveSession.removeRecords(directlyMovedArchiveUris)
+                            pixivArchiveMoveUris -= directlyMovedArchiveUris
+                        }
+                    }
+
                     var sourceDeleteRequestFailed = false
                     var sourceDeletePending = false
                     if (request.mode == TransferMode.Move && completedItems.isNotEmpty()) {
@@ -1164,18 +1173,21 @@ fun AlbumApp(
                             documents.filter { media -> library.deleteLegacy(media) }
                         }
                         library.remove(deletedDocuments)
-                        if (pixivArchiveMoveUris.isNotEmpty()) {
+                        if (archiveMoveUris.isNotEmpty()) {
                             val deletedUris = deletedDocuments.mapTo(hashSetOf()) { it.uri.toString() }
-                            pixivArchiveSession.records.value = pixivArchiveSession.records.value.filterNot {
-                                it.uri.toString() in deletedUris
-                            }
-                            pixivArchiveMoveUris = emptySet()
+                            pixivArchiveSession.removeRecords(deletedUris intersect archiveMoveUris)
+                            pixivArchiveMoveUris -= deletedUris
                         }
                         val systemMedia = completed.filter { !it.movedDirectly && !it.item.isDocument }.map { it.item }
                         val deletedSystemMedia = withContext(Dispatchers.IO) {
                             systemMedia.filter { media -> library.deleteLegacy(media) }
                         }
                         library.remove(deletedSystemMedia)
+                        if (archiveMoveUris.isNotEmpty()) {
+                            val deletedUris = deletedSystemMedia.mapTo(hashSetOf()) { it.uri.toString() }
+                            pixivArchiveSession.removeRecords(deletedUris intersect archiveMoveUris)
+                            pixivArchiveMoveUris -= deletedUris
+                        }
                         val requiresSystemConfirmation = systemMedia.filterNot { media ->
                             deletedSystemMedia.any { it.uri == media.uri }
                         }
@@ -1184,6 +1196,9 @@ fun AlbumApp(
                         !canModifyMediaDirectly(context)
                     ) {
                             pendingDeletes = requiresSystemConfirmation
+                            pixivArchivePendingDeleteUris = requiresSystemConfirmation
+                                .mapNotNull { media -> media.uri.toString().takeIf { it in archiveMoveUris } }
+                                .toSet()
                             runCatching {
                                 val deleteRequest = MediaStore.createDeleteRequest(context.contentResolver, requiresSystemConfirmation.map { it.uri })
                                 externalDeleteRequestInFlight = true
@@ -1199,7 +1214,9 @@ fun AlbumApp(
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
+                            pixivArchiveMoveUris = emptySet()
                         } else {
+                            pixivArchiveMoveUris = emptySet()
                             selectedUris = emptySet()
                             selectionMode = false
                         }

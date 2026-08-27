@@ -847,7 +847,7 @@ internal fun Media3VideoPlayer(
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                        color = Color.Black.copy(alpha = .82f),
+                        color = Color.Black.copy(alpha = .20f),
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
                     ) {
                         Column(Modifier.padding(vertical = 8.dp)) {

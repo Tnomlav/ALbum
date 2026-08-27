@@ -24,7 +24,7 @@ fun MediaItem.isSystemTrashedFile(): Boolean = name.trimStart().startsWith(".tra
 
 fun MediaItem.displayAddress(): String {
     val relative = relativePath?.trim()?.trim('/')
-    if (!relative.isNullOrBlank()) return "$relative/$name"
+    if (!relative.isNullOrBlank()) return "${Uri.decode(relative)}/$name"
     if (uri.scheme.equals("file", ignoreCase = true)) {
         uri.path?.let { path -> return Uri.decode(path) }
     }

@@ -718,7 +718,7 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color.Black.copy(alpha = .88f),
+        containerColor = Color.Black.copy(alpha = .20f),
         titleContentColor = Color.White,
         textContentColor = Color.White,
         title = { Text(appText("视频设置", english)) },
@@ -762,7 +762,7 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
     if (openChoice != null) {
         AlertDialog(
             onDismissRequest = { openChoice = null },
-            containerColor = Color.Black.copy(alpha = .88f),
+            containerColor = Color.Black.copy(alpha = .20f),
             titleContentColor = Color.White,
             textContentColor = Color.White,
             title = {
