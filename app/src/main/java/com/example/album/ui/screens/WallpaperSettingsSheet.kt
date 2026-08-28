@@ -4,12 +4,16 @@ import android.content.SharedPreferences
 import android.os.PowerManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -19,6 +23,9 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,12 +33,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.album.ui.LocalAppEnglish
 
 private enum class WallpaperOrder { InOrder, TrueRandom, Shuffle }
 private enum class WallpaperSound { Disabled, ForegroundOnly, BackgroundNoFocus, BackgroundWithFocus }
+private enum class WallpaperSettingDialog { Span, Order, Frequency, Sound }
 
 @Composable
 fun WallpaperSettingsSheet(
@@ -70,6 +81,7 @@ fun WallpaperSettingsSheet(
                 .getOrDefault(WallpaperSound.Disabled)
         )
     }
+    var dialog by remember { mutableStateOf<WallpaperSettingDialog?>(null) }
 
     fun save() {
         preferences.edit()
@@ -95,45 +107,40 @@ fun WallpaperSettingsSheet(
                 Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(text("类型", "Type"), fontSize = 13.sp)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text("壁纸类型", "Wallpaper type"), fontSize = 13.sp)
+                Row(
+                    Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                        .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
                     TypeChoice(text("静态", "Static"), !isVideo) { isVideo = false }
                     TypeChoice(text("动态", "Live"), isVideo) { isVideo = true }
                 }
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                SettingSwitch(text("同步锁屏", "Sync lock screen"), syncLock) { syncLock = it }
-                SettingSwitch(text("后台运行", "Run in background"), allowBackground) { allowBackground = it }
-                Text(text("显示范围", "Display span"), fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-                ChoiceRow(text("单屏", "Single screen"), spanMode == "single") { spanMode = "single" }
-                ChoiceRow(text("跨屏", "Across screens"), spanMode == "scrolling") { spanMode = "scrolling" }
-                Text(text("回桌切换", "Return-home switching"), fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-                SettingSwitch(text("回桌时切换下一项", "Switch on return home"), returnSwitch) { returnSwitch = it }
-                Text(text("轮播顺序", "Rotation order"), fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-                ChoiceRow(text("顺序", "In order"), order == WallpaperOrder.InOrder) { order = WallpaperOrder.InOrder }
-                ChoiceRow(text("真随机", "True random"), order == WallpaperOrder.TrueRandom) { order = WallpaperOrder.TrueRandom }
-                ChoiceRow(text("洗牌式随机", "Shuffled random"), order == WallpaperOrder.Shuffle) { order = WallpaperOrder.Shuffle }
+                SettingSwitch(text("同步到锁屏", "Sync to lock screen"), syncLock) { syncLock = it }
+                SettingSwitch(text("允许后台运行", "Allow background operation"), allowBackground) { allowBackground = it }
+                SettingChoiceRow(
+                    text("壁纸范围", "Wallpaper span"),
+                    if (spanMode == "single") text("单屏宽度", "Single screen") else text("跨屏宽度", "Across screens")
+                ) { dialog = WallpaperSettingDialog.Span }
+                SettingSwitch(text("回到桌面时切换下一张", "Switch on return to home"), returnSwitch) { returnSwitch = it }
+                SettingChoiceRow(
+                    text("轮播顺序", "Rotation order"),
+                    when (order) {
+                        WallpaperOrder.InOrder -> text("顺序播放", "In order")
+                        WallpaperOrder.TrueRandom -> text("完全随机", "True random")
+                        WallpaperOrder.Shuffle -> text("洗牌后播放", "Shuffle then play")
+                    }
+                ) { dialog = WallpaperSettingDialog.Order }
                 if (!isVideo) {
-                    SettingSwitch(text("自动调整图片占用", "Auto-adjust image usage"), autoAdjustImage) { autoAdjustImage = it }
-                    Text(text("轮播频率", "Rotation frequency"), fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-                    val frequencies = listOf("1", "3", "5", "10", "30", "60", "custom")
-                    frequencies.forEach { value ->
-                        val label = when (value) {
-                            "custom" -> text("自定义", "Custom")
-                            "60" -> "1 min"
-                            else -> "$value s"
-                        }
-                        ChoiceRow(label, frequency == value, enabled = !returnSwitch) { frequency = value }
-                    }
-                    if (frequency == "custom") {
-                        OutlinedTextField(
-                            value = customSeconds,
-                            onValueChange = { customSeconds = it.filter(Char::isDigit).take(5) },
-                            enabled = !returnSwitch,
-                            label = { Text(text("秒数", "Seconds")) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
-                        )
-                    }
+                    SettingSwitch(text("自动适配图片占用", "Automatically fit image usage"), autoAdjustImage) { autoAdjustImage = it }
+                    SettingChoiceRow(
+                        text("轮播频率", "Rotation frequency"),
+                        if (returnSwitch) text("回桌即切换", "On return home")
+                        else frequencyLabel(frequency, customSeconds, english),
+                        enabled = !returnSwitch
+                    ) { dialog = WallpaperSettingDialog.Frequency }
                 } else {
                     SettingSwitch(text("低功耗模式", "Low-power mode"), lowPower, enabled = !systemPowerSave) {
                         lowPower = it
@@ -142,27 +149,179 @@ fun WallpaperSettingsSheet(
                             allowBackground = false
                         }
                     }
-                    Text(text("后台播放", "Background playback"), fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
                     SettingSwitch(text("后台播放与轮播", "Background playback and rotation"), dynamicBackground, enabled = !lowPower) {
                         dynamicBackground = it
                         if (it) allowBackground = true
                     }
-                    Text(text("声音", "Sound"), fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-                    ChoiceRow(text("禁用", "Disabled"), sound == WallpaperSound.Disabled) { sound = WallpaperSound.Disabled }
-                    ChoiceRow(text("仅前台", "Foreground only"), sound == WallpaperSound.ForegroundOnly) { sound = WallpaperSound.ForegroundOnly }
-                    ChoiceRow(text("后台播放（不抢音频）", "Background (no audio focus)"), sound == WallpaperSound.BackgroundNoFocus, enabled = dynamicBackground) { sound = WallpaperSound.BackgroundNoFocus }
-                    ChoiceRow(text("后台播放（抢占音频）", "Background (audio focus)"), sound == WallpaperSound.BackgroundWithFocus, enabled = dynamicBackground) { sound = WallpaperSound.BackgroundWithFocus }
+                    SettingChoiceRow(text("声音播放", "Sound playback"), soundLabel(sound, english), enabled = dynamicBackground) { dialog = WallpaperSettingDialog.Sound }
                 }
             }
         },
         confirmButton = { TextButton(onClick = { save(); onDismiss() }) { Text(text("应用", "Apply")) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(text("取消", "Cancel")) } }
     )
+
+    when (dialog) {
+        WallpaperSettingDialog.Span -> ChoiceDialog(
+            text("壁纸范围", "Wallpaper span"),
+            listOf(text("单屏宽度", "Single screen"), text("跨屏宽度", "Across screens")),
+            if (spanMode == "single") 0 else 1,
+            { spanMode = if (it == 0) "single" else "scrolling"; dialog = null },
+            { dialog = null }
+        )
+        WallpaperSettingDialog.Order -> ChoiceDialog(
+            text("轮播顺序", "Rotation order"),
+            listOf(text("顺序播放", "In order"), text("完全随机", "True random"), text("洗牌后播放", "Shuffle then play")),
+            order.ordinal,
+            { order = WallpaperOrder.entries[it]; dialog = null },
+            { dialog = null }
+        )
+        WallpaperSettingDialog.Frequency -> FrequencyDialog(
+            english, frequency, customSeconds,
+            { nextFrequency, nextSeconds -> frequency = nextFrequency; customSeconds = nextSeconds; dialog = null },
+            { dialog = null }
+        )
+        WallpaperSettingDialog.Sound -> ChoiceDialog(
+            text("声音播放", "Sound playback"),
+            listOf(text("禁用声音", "Disabled"), text("仅前台播放", "Foreground only"), text("后台播放，不抢占音频", "Background, no audio focus"), text("后台播放，优先占用音频", "Background, audio focus")),
+            sound.ordinal,
+            { sound = WallpaperSound.entries[it]; dialog = null },
+            { dialog = null }
+        )
+        null -> Unit
+    }
 }
 
 @Composable
-private fun TypeChoice(label: String, selected: Boolean, onClick: () -> Unit) {
-    Text(label, modifier = Modifier.clickable(onClick = onClick).padding(vertical = 10.dp), color = if (selected) androidx.compose.material3.MaterialTheme.colorScheme.primary else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+private fun RowScope.TypeChoice(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.weight(1f).heightIn(min = 40.dp).then(
+            if (selected) Modifier.shadow(2.dp, androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                .background(androidx.compose.material3.MaterialTheme.colorScheme.surface)
+            else Modifier
+        ).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = if (selected) androidx.compose.material3.MaterialTheme.colorScheme.onSurface else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun SettingChoiceRow(label: String, value: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, fontSize = 13.sp, color = if (enabled) androidx.compose.material3.MaterialTheme.colorScheme.onSurface else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f))
+            Text(value, fontSize = 11.sp, color = if (enabled) androidx.compose.material3.MaterialTheme.colorScheme.primary else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f))
+        }
+        Icon(
+            Icons.Outlined.ChevronRight,
+            contentDescription = null,
+            tint = if (enabled) androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .35f),
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+private fun frequencyLabel(frequency: String, customSeconds: String, english: Boolean): String = when (frequency) {
+    "custom" -> if (english) "$customSeconds s" else "${customSeconds}秒"
+    "60" -> if (english) "1 min" else "1分钟"
+    else -> if (english) "$frequency s" else "${frequency}秒"
+}
+
+private fun soundLabel(sound: WallpaperSound, english: Boolean): String = when (sound) {
+    WallpaperSound.Disabled -> if (english) "Disabled" else "禁用声音"
+    WallpaperSound.ForegroundOnly -> if (english) "Foreground only" else "仅前台播放"
+    WallpaperSound.BackgroundNoFocus -> if (english) "Background, no audio focus" else "后台播放，不抢占音频"
+    WallpaperSound.BackgroundWithFocus -> if (english) "Background, audio focus" else "后台播放，优先占用音频"
+}
+
+@Composable
+private fun ChoiceDialog(
+    title: String,
+    options: List<String>,
+    selectedIndex: Int,
+    onSelected: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                options.forEachIndexed { index, option ->
+                    ChoiceRow(option, selectedIndex == index) { onSelected(index) }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("确定") } }
+    )
+}
+
+@Composable
+private fun FrequencyDialog(
+    english: Boolean,
+    frequency: String,
+    customSeconds: String,
+    onApply: (String, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selected by remember { mutableStateOf(frequency) }
+    var seconds by remember { mutableStateOf(customSeconds) }
+    var showCustomSeconds by remember { mutableStateOf(false) }
+    val frequencies = listOf("1", "3", "5", "10", "30", "60", "custom")
+    val text = { zh: String, en: String -> if (english) en else zh }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text("轮播频率", "Rotation frequency")) },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                frequencies.forEach { value ->
+                    val label = when (value) {
+                        "custom" -> text("自定义秒数", "Custom seconds")
+                        "60" -> text("1分钟", "1 min")
+                        else -> if (english) "$value s" else "${value}秒"
+                    }
+                    ChoiceRow(label, selected == value) {
+                        selected = value
+                        if (value == "custom") showCustomSeconds = true
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onApply(selected, seconds) }) { Text(text("确定", "OK")) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(text("取消", "Cancel")) } }
+    )
+    if (showCustomSeconds) {
+        var draftSeconds by remember { mutableStateOf(seconds) }
+        AlertDialog(
+            onDismissRequest = { showCustomSeconds = false },
+            title = { Text(text("自定义轮播时间", "Custom rotation time")) },
+            text = {
+                OutlinedTextField(
+                    value = draftSeconds,
+                    onValueChange = { draftSeconds = it.filter(Char::isDigit).take(4) },
+                    label = { Text(text("秒数", "Seconds")) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = draftSeconds.toLongOrNull()?.let { it in 1L..3600L } == true,
+                    onClick = {
+                        seconds = draftSeconds
+                        selected = "custom"
+                        showCustomSeconds = false
+                    }
+                ) { Text(text("确定", "OK")) }
+            },
+            dismissButton = { TextButton(onClick = { showCustomSeconds = false }) { Text(text("取消", "Cancel")) } }
+        )
+    }
 }
 
 @Composable

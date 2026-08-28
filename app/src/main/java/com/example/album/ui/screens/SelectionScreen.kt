@@ -64,6 +64,7 @@ import com.example.album.ui.appText
 @Composable
 fun SelectionScreen(
     media: List<MediaItem>,
+    orderUris: List<String> = emptyList(),
     selectedUris: Set<String>,
     columns: Int,
     onToggle: (MediaItem) -> Unit,
@@ -76,7 +77,7 @@ fun SelectionScreen(
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
 ) {
-    val orderedMedia = remember(media, sort, sortDirection) {
+    val sortedMedia = remember(media, sort, sortDirection) {
         val sorted = when (sort) {
             MediaSort.Time, MediaSort.Count -> media.sortedBy { it.dateTaken }
             MediaSort.Name -> media.sortedBy { it.name.lowercase() }
@@ -84,6 +85,12 @@ fun SelectionScreen(
             MediaSort.Duration -> media.sortedBy { it.duration }
         }
         if (sortDirection == SortDirection.Descending) sorted.reversed() else sorted
+    }
+    val orderedMedia = remember(sortedMedia, orderUris) {
+        if (orderUris.isEmpty()) sortedMedia else {
+            val positions = orderUris.withIndex().associate { it.value to it.index }
+            sortedMedia.sortedBy { positions[it.uri.toString()] ?: Int.MAX_VALUE }
+        }
     }
     val english = LocalAppEnglish.current
     if (searching && query.isNotBlank() && orderedMedia.isEmpty()) {

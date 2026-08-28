@@ -151,7 +151,7 @@ fun WallpaperManagerScreen(
                 val selected = item.uri.toString() in selectedUris
                 Column(Modifier.fillMaxWidth()) {
                     Box(
-                        Modifier.fillMaxWidth().aspectRatio(item.displayAspectRatio).clip(RoundedCornerShape(4.dp))
+                        Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(4.dp))
                             .combinedClickable(
                                 onClick = { if (selectionMode) onToggleSelection(item) else onOpenMedia(item) },
                                 onLongClick = { onEnterSelectionMode(item, visibleMedia) }

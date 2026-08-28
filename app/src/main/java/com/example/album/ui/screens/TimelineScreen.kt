@@ -287,7 +287,7 @@ private fun OptimizedTimelineGrid(
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
                     itemCount.toString(),
-                    modifier = Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 11.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = 2.dp, top = 2.dp, end = 2.dp, bottom = 2.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                     textAlign = androidx.compose.ui.text.style.TextAlign.End
@@ -448,7 +448,7 @@ private fun AdaptiveTimeline(
             item(span = StaggeredGridItemSpan.FullLine) {
                 Text(
                     itemCount.toString(),
-                    modifier = Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 14.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = 2.dp, top = 2.dp, end = 2.dp, bottom = 2.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                     textAlign = androidx.compose.ui.text.style.TextAlign.End

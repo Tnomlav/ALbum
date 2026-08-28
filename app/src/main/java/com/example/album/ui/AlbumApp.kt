@@ -148,6 +148,7 @@ import com.example.album.ui.screens.CleanupScreen
 import com.example.album.ui.screens.WallpaperManagerScreen
 import com.example.album.ui.screens.WallpaperSort
 import com.example.album.ui.screens.WallpaperSettingsSheet
+import com.example.album.ui.screens.WallpaperCropScreen
 import com.example.album.ui.screens.PixivArchiveScreen
 import com.example.album.ui.screens.PixivArchiveSession
 import com.example.album.ui.screens.ArchiveActivity
@@ -349,15 +350,13 @@ fun AlbumApp(
     var selectingFolders by rememberSaveable { mutableStateOf(false) }
     var selectionMediaSort by rememberSaveable { mutableStateOf(initialSort) }
     var selectionMediaSortDirection by rememberSaveable { mutableStateOf(SortDirection.Descending) }
+    var selectionMediaOrderUris by remember { mutableStateOf<List<String>>(emptyList()) }
     var showWallpaperSortDialog by remember { mutableStateOf(false) }
     var showWallpaperColumnDialog by remember { mutableStateOf(false) }
     var showWallpaperLayoutDialog by remember { mutableStateOf(false) }
     var showWallpaperSettings by remember { mutableStateOf(false) }
+    var wallpaperCropItem by remember { mutableStateOf<MediaItem?>(null) }
 
-    fun freezeSelectionSort() {
-        selectionMediaSort = mediaSort
-        selectionMediaSortDirection = sortDirection
-    }
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedFolders by remember { mutableStateOf<Set<String>>(emptySet()) }
     var wallpaperQueueOrder by remember {
@@ -376,6 +375,7 @@ fun AlbumApp(
             selectedUris = emptySet()
             selectedFolders = emptySet()
             selectingFolders = false
+            selectionMediaOrderUris = emptyList()
         }
     }
     var selectionFolderFirstVisibleItem by remember { mutableIntStateOf(0) }
@@ -448,6 +448,9 @@ fun AlbumApp(
         wallpaperQueueOrder = updatedOrder
         preferences.edit().putStringSet("wallpaper_queue_uris", updated).apply()
         preferences.edit().putString("wallpaper_queue_order", JSONArray(updatedOrder).toString()).apply()
+    }
+    fun requestWallpaper(item: MediaItem) {
+        if (item.isVideo) setWallpaper(context, item, english) else wallpaperCropItem = item
     }
     var backgroundOptimizationEnabled by remember {
         mutableStateOf(albumSettings.getBoolean("background_optimization", true))
@@ -598,6 +601,19 @@ fun AlbumApp(
             searchMedia(text, searchSource)
         }
     } }
+
+    fun freezeSelectionSort() {
+        selectionMediaSort = mediaSort
+        selectionMediaSortDirection = sortDirection
+        val ordered = when (mediaSort) {
+            MediaSort.Time, MediaSort.Count -> selectionMedia.sortedBy { it.dateTaken }
+            MediaSort.Name -> selectionMedia.sortedBy { it.name.lowercase() }
+            MediaSort.Size -> selectionMedia.sortedBy { it.size }
+            MediaSort.Duration -> selectionMedia.sortedBy { it.duration }
+        }
+        selectionMediaOrderUris = (if (sortDirection == SortDirection.Descending) ordered.reversed() else ordered)
+            .map { it.uri.toString() }
+    }
     // Search is a view over the source; it must never become the source of
     // truth for a selection. Actions resolve selected keys from the complete
     // media set so items hidden by the current query remain actionable.
@@ -817,6 +833,15 @@ fun AlbumApp(
     BackHandler(enabled = appBackEnabled) {
         when {
             transferRequest != null -> transferRequest = null
+            wallpaperManagerOpen && wallpaperSelectionMode -> {
+                wallpaperSelectionMode = false
+                wallpaperSelectedUris = emptySet()
+                wallpaperSelectionOrder = emptyList()
+            }
+            pixivArchiveOpen && pixivArchiveSession.selectionMode.value -> {
+                pixivArchiveSession.selectionMode.value = false
+                pixivArchiveSession.selectedUris.value = emptySet()
+            }
             // Selection is a nested mode of every page, including the Pixiv
             // archive page. Back must leave that mode before closing its page.
             selectionMode -> clearSelection()
@@ -1401,6 +1426,8 @@ fun AlbumApp(
                 }
             },
             onBack = {
+                pixivArchiveSession.selectionMode.value = false
+                pixivArchiveSession.selectedUris.value = emptySet()
                 pixivArchiveOpen = false
                 pixivRefreshKey++
             },
@@ -1638,6 +1665,7 @@ fun AlbumApp(
                 actionEnabled = if (wallpaperSelectionMode || wallpaperQuery.isNotBlank()) {
                     wallpaperSelectedUris.isNotEmpty()
                 } else true,
+                actionCapsule = wallpaperQuery.isBlank(),
                 onActionClick = {
                     if (wallpaperQuery.isNotBlank()) {
                         addToWallpaperQueue(wallpaperSearchMedia.filter { it.uri.toString() in wallpaperSelectedUris })
@@ -1711,7 +1739,7 @@ fun AlbumApp(
                     beginEditing(selected)
                 }},
                 onWallpaper = selectedItemsForAction.singleOrNull()?.takeIf { !selectingFolders }?.let { selected -> {
-                    setWallpaper(context, selected, english)
+                    requestWallpaper(selected)
                 }},
                 onAddToWallpaperQueue = if (!selectingFolders) {
                     {
@@ -2192,6 +2220,7 @@ fun AlbumApp(
                 onToggle = { folder -> selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder }
             ) else if (selectionMode) SelectionScreen(
                     media = selectionMedia,
+                    orderUris = selectionMediaOrderUris,
                     selectedUris = selectedUris,
                     columns = when {
                         tab == MainTab.Timeline -> timelineColumns
@@ -2623,6 +2652,7 @@ fun AlbumApp(
                                 preferences.edit().putStringSet("favorites", favoriteUris).apply()
                             },
                             onEditTags = { editing -> openTagEditor(editing) },
+                            onWallpaper = ::requestWallpaper,
                             pictureInPictureMode = pictureInPictureMode,
                             onEnterPictureInPicture = onEnterPictureInPicture
                         )
@@ -2650,6 +2680,17 @@ fun AlbumApp(
             body = "Pixiv 文件归档，用于把本地保存的 Pixiv 图片整理到指定目录。\n\n使用时先选择“来源目录”和“归档目标目录”，然后点击“开始扫描”。应用会从图片文件名中读取 Pixiv 作品 ID，登录 Pixiv 网站查询作品、画师和标签，并将结果保存到本地。\n\n扫描完成后，选择要处理的图片并点击“归档”。应用会将图片移动至目标目录中与其画师名对应的文件夹内，如果尚无此文件夹，则按“画师名称_UID”建立文件夹。没有扫描到作品信息的图片不会被归档，可在失败结果中重新处理。\n\nPixiv 文件归档主页支持按画师或标签，在来源文件夹和归档文件夹内，搜索图片和文件夹。",
             dismissLabel = "知道了",
             onDismiss = { showPixivHomeIntro = false }
+        )
+    }
+
+    wallpaperCropItem?.let { item ->
+        WallpaperCropScreen(
+            item = item,
+            onDismiss = { wallpaperCropItem = null },
+            onConfirm = { composed ->
+                wallpaperCropItem = null
+                com.example.album.ui.setStaticWallpaperBitmap(context, composed, english)
+            }
         )
     }
     if (showPixivArchiveInfo) {

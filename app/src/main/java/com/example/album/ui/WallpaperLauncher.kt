@@ -8,6 +8,7 @@ import android.os.PowerManager
 import android.app.WallpaperManager
 import android.content.ComponentName
 import android.widget.Toast
+import android.graphics.Bitmap
 import androidx.core.content.FileProvider
 import com.example.album.data.MediaItem
 import kotlinx.coroutines.CoroutineScope
@@ -54,7 +55,7 @@ fun setStaticWallpaper(context: Context, items: List<MediaItem>, english: Boolea
                 }
                 if (names.isEmpty()) error("Unable to read image")
                 val finalDirectory = File(context.filesDir, "static_wallpaper_queue")
-                finalDirectory.listFiles()?.forEach { it.delete() }
+                if (finalDirectory.exists() && !finalDirectory.deleteRecursively()) error("Unable to replace wallpaper queue")
                 if (!directory.renameTo(finalDirectory)) error("Unable to prepare wallpaper queue")
                 val preferences = context.getSharedPreferences("album_preferences", Context.MODE_PRIVATE)
                 val editor = preferences.edit().putString("static_wallpaper_queue", JSONArray(names).toString()).putInt("static_wallpaper_index", 0)
@@ -79,6 +80,46 @@ fun setStaticWallpaper(context: Context, items: List<MediaItem>, english: Boolea
         runCatching {
             context.startActivity(intent)
         }.onFailure {
+            Toast.makeText(context, if (english) "Unable to open wallpaper settings" else "无法打开壁纸设置", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
+
+/** Uses a composed still image as the only item in the static wallpaper queue. */
+fun setStaticWallpaperBitmap(context: Context, bitmap: Bitmap, english: Boolean) {
+    CoroutineScope(Dispatchers.Main.immediate).launch {
+        val imported = withContext(Dispatchers.IO) {
+            try {
+                runCatching {
+                    val directory = File(context.filesDir, "static_wallpaper_queue_staging_${System.nanoTime()}").apply { mkdirs() }
+                    val target = File(directory, "image_00000.jpg")
+                    target.outputStream().use { output ->
+                        if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output)) error("Unable to encode image")
+                    }
+                    val finalDirectory = File(context.filesDir, "static_wallpaper_queue")
+                    if (finalDirectory.exists() && !finalDirectory.deleteRecursively()) error("Unable to replace wallpaper queue")
+                    if (!directory.renameTo(finalDirectory)) error("Unable to prepare wallpaper queue")
+                    context.getSharedPreferences("album_preferences", Context.MODE_PRIVATE).edit()
+                        .putString("static_wallpaper_queue", JSONArray(listOf(target.name)).toString())
+                        .putInt("static_wallpaper_index", 0)
+                        .apply()
+                    finalDirectory
+                }.getOrNull()
+            } finally {
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+        }
+        if (imported == null) {
+            Toast.makeText(context, if (english) "Unable to save wallpaper" else "无法保存壁纸", Toast.LENGTH_SHORT).show()
+            return@launch
+        }
+        val component = ComponentName(context, com.example.album.wallpaper.ImageWallpaperService::class.java)
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
+                putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, component)
+            }
+        } else Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER)
+        runCatching { context.startActivity(intent) }.onFailure {
             Toast.makeText(context, if (english) "Unable to open wallpaper settings" else "无法打开壁纸设置", Toast.LENGTH_SHORT).show()
         }
     }
@@ -109,7 +150,7 @@ fun setDynamicWallpaper(context: Context, items: List<MediaItem>, english: Boole
             }
             if (names.isEmpty()) error("Unable to read video")
             val finalDirectory = File(context.filesDir, "live_wallpaper_queue")
-            finalDirectory.listFiles()?.forEach { it.delete() }
+            if (finalDirectory.exists() && !finalDirectory.deleteRecursively()) error("Unable to replace video queue")
             if (!directory.renameTo(finalDirectory)) error("Unable to prepare wallpaper queue")
             val preferences = context.getSharedPreferences("album_preferences", Context.MODE_PRIVATE)
             val editor = preferences.edit()

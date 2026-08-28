@@ -353,15 +353,11 @@ fun PixivArchiveScreen(
     var renameText by remember { mutableStateOf("") }
     var deleteItems by remember { mutableStateOf<List<MediaItem>?>(null) }
     var infoRecordUri by remember { mutableStateOf<String?>(null) }
-    var selectionMode by remember { mutableStateOf(false) }
+    var selectionMode by session.selectionMode
 
     fun exitSelectionMode() {
         selectionMode = false
         session.selectedUris.value = emptySet()
-    }
-
-    BackHandler(enabled = selectionMode) {
-        exitSelectionMode()
     }
 
     fun selectedUrls(): List<String> = records
@@ -1183,6 +1179,7 @@ class PixivArchiveSession(context: Context) {
     val activity = mutableStateOf(loadActivity())
     val selectedUris = mutableStateOf<Set<String>>(emptySet())
     val selectableUris = mutableStateOf<Set<String>>(emptySet())
+    val selectionMode = mutableStateOf(false)
     var scanJob: Job? = null
 
     fun persistRecords() {
@@ -1335,6 +1332,7 @@ class PixivArchiveSession(context: Context) {
         activity.value = ArchiveActivity()
         selectedUris.value = emptySet()
         selectableUris.value = emptySet()
+        selectionMode.value = false
     }
 
     private companion object {
