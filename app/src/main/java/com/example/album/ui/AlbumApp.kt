@@ -72,6 +72,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
 import android.widget.Toast
+import org.json.JSONArray
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -144,6 +145,8 @@ import com.example.album.ui.screens.SelectionScreen
 import com.example.album.ui.screens.AlbumSelectionScreen
 import com.example.album.ui.screens.CleanupScreen
 import com.example.album.ui.screens.WallpaperManagerScreen
+import com.example.album.ui.screens.WallpaperSort
+import com.example.album.ui.screens.WallpaperSettingsSheet
 import com.example.album.ui.screens.PixivArchiveScreen
 import com.example.album.ui.screens.PixivArchiveSession
 import com.example.album.ui.screens.ArchiveActivity
@@ -309,6 +312,14 @@ fun AlbumApp(
     var pendingTrashDelete by remember { mutableStateOf<List<com.example.album.data.RecycleEntry>>(emptyList()) }
     var cleanupOpen by rememberSaveable { mutableStateOf(false) }
     var wallpaperManagerOpen by rememberSaveable { mutableStateOf(false) }
+    var wallpaperShowVideos by rememberSaveable { mutableStateOf(false) }
+    var wallpaperQuery by rememberSaveable { mutableStateOf("") }
+    var wallpaperSelectionMode by rememberSaveable { mutableStateOf(false) }
+    var wallpaperSelectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var wallpaperColumns by rememberSaveable { mutableIntStateOf(4) }
+    var wallpaperLayout by rememberSaveable { mutableStateOf(MediaLayout.Grid) }
+    var wallpaperSort by rememberSaveable { mutableStateOf(WallpaperSort.Time) }
+    var wallpaperSortDirection by rememberSaveable { mutableStateOf(SortDirection.Descending) }
     var pixivArchiveOpen by rememberSaveable { mutableStateOf(false) }
     var favoriteFilter by rememberSaveable { mutableStateOf(false) }
     var mediaSort by rememberSaveable { mutableStateOf(initialSort) }
@@ -336,6 +347,10 @@ fun AlbumApp(
     var selectingFolders by rememberSaveable { mutableStateOf(false) }
     var selectionMediaSort by rememberSaveable { mutableStateOf(initialSort) }
     var selectionMediaSortDirection by rememberSaveable { mutableStateOf(SortDirection.Descending) }
+    var showWallpaperSortDialog by remember { mutableStateOf(false) }
+    var showWallpaperColumnDialog by remember { mutableStateOf(false) }
+    var showWallpaperLayoutDialog by remember { mutableStateOf(false) }
+    var showWallpaperSettings by remember { mutableStateOf(false) }
 
     fun freezeSelectionSort() {
         selectionMediaSort = mediaSort
@@ -343,6 +358,15 @@ fun AlbumApp(
     }
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedFolders by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var wallpaperQueueOrder by remember {
+        mutableStateOf(
+            runCatching {
+                val json = preferences.getString("wallpaper_queue_order", null) ?: return@runCatching emptyList()
+                (0 until JSONArray(json).length()).map { JSONArray(json).getString(it) }
+            }.getOrElse { emptyList() }
+                .ifEmpty { wallpaperQueueUris.toList() }
+        )
+    }
     var suspendedSearchQuery by rememberSaveable { mutableStateOf<String?>(null) }
     var searchOpen by rememberSaveable { mutableStateOf(true) }
     LaunchedEffect(selectionMode) {
@@ -397,11 +421,17 @@ fun AlbumApp(
     val wallpaperQueueMedia by remember { derivedStateOf {
         wallpaperLibraryMedia.filter { it.uri.toString() in wallpaperQueueUris }
     } }
+    val wallpaperSearchMedia by remember(wallpaperLibraryMedia, wallpaperShowVideos) {
+        derivedStateOf { wallpaperLibraryMedia.filter { it.isVideo == wallpaperShowVideos } }
+    }
 
     fun addToWallpaperQueue(items: List<com.example.album.data.MediaItem>) {
         val updated = wallpaperQueueUris + items.map { it.uri.toString() }
+        val updatedOrder = wallpaperQueueOrder + items.map { it.uri.toString() }.filterNot { it in wallpaperQueueOrder }
         wallpaperQueueUris = updated
+        wallpaperQueueOrder = updatedOrder
         preferences.edit().putStringSet("wallpaper_queue_uris", updated).apply()
+        preferences.edit().putString("wallpaper_queue_order", JSONArray(updatedOrder).toString()).apply()
         Toast.makeText(
             context,
             if (english) "Added ${items.size} item(s) to wallpaper queue" else "已加入壁纸队列 ${items.size} 项",
@@ -411,8 +441,11 @@ fun AlbumApp(
 
     fun removeFromWallpaperQueue(item: com.example.album.data.MediaItem) {
         val updated = wallpaperQueueUris - item.uri.toString()
+        val updatedOrder = wallpaperQueueOrder - item.uri.toString()
         wallpaperQueueUris = updated
+        wallpaperQueueOrder = updatedOrder
         preferences.edit().putStringSet("wallpaper_queue_uris", updated).apply()
+        preferences.edit().putString("wallpaper_queue_order", JSONArray(updatedOrder).toString()).apply()
     }
     var backgroundOptimizationEnabled by remember {
         mutableStateOf(albumSettings.getBoolean("background_optimization", true))
@@ -770,6 +803,10 @@ fun AlbumApp(
                 !showSortDialog &&
                 !showColumnDialog &&
                 !showLayoutDialog &&
+                !showWallpaperSortDialog &&
+                !showWallpaperColumnDialog &&
+                !showWallpaperLayoutDialog &&
+                !showWallpaperSettings &&
                 !showDateDialog &&
                 !showExcludeDialog
         }
@@ -1540,14 +1577,83 @@ fun AlbumApp(
                 topBar = {
             if (wallpaperManagerOpen) VaultTopBar(
                 title = if (english) "Wallpaper manager" else "壁纸管理",
-                query = "",
-                searchEnabled = false,
-                onQueryChange = {},
+                query = wallpaperQuery,
+                searchEnabled = true,
+                onQueryChange = {
+                    wallpaperQuery = it
+                    wallpaperSelectionMode = it.isNotBlank()
+                    if (it.isBlank()) wallpaperSelectedUris = emptySet()
+                },
                 favoriteActive = false,
                 onFavoriteClick = {},
-                menuItems = emptyList(),
-                onMenuItemClick = {},
-                onBack = { wallpaperManagerOpen = false },
+                menuItems = listOf(
+                    appText("设置", english),
+                    appText("列数", english),
+                    appText("排布方式", english),
+                    appText("排序方式", english),
+                    appText("清空壁纸队列", english)
+                ),
+                onMenuItemClick = { action ->
+                    when (action) {
+                        appText("设置", english) -> showWallpaperSettings = true
+                        appText("列数", english) -> showWallpaperColumnDialog = true
+                        appText("排布方式", english) -> showWallpaperLayoutDialog = true
+                        appText("排序方式", english) -> showWallpaperSortDialog = true
+                        appText("清空壁纸队列", english) -> {
+                            wallpaperQueueUris = emptySet()
+                            wallpaperQueueOrder = emptyList()
+                            preferences.edit()
+                                .putStringSet("wallpaper_queue_uris", emptySet())
+                                .putString("wallpaper_queue_order", JSONArray().toString())
+                                .apply()
+                        }
+                    }
+                },
+                onBack = {
+                    wallpaperManagerOpen = false
+                    wallpaperQuery = ""
+                    wallpaperSelectionMode = false
+                    wallpaperSelectedUris = emptySet()
+                },
+                searchPlaceholder = appText("搜索文件夹、图片名称", english),
+                searchModeLabels = listOf(
+                    if (english) "Static" else "静态",
+                    if (english) "Live" else "动态"
+                ),
+                selectedSearchMode = if (wallpaperShowVideos) 1 else 0,
+                onSearchModeChange = {
+                    wallpaperShowVideos = it == 1
+                    wallpaperSelectedUris = emptySet()
+                },
+                actionLabel = when {
+                    wallpaperQuery.isNotBlank() -> appText("确认", english)
+                    wallpaperSelectionMode -> appText("清除", english)
+                    else -> appText("应用", english)
+                },
+                actionEnabled = if (wallpaperSelectionMode || wallpaperQuery.isNotBlank()) {
+                    wallpaperSelectedUris.isNotEmpty()
+                } else true,
+                onActionClick = {
+                    if (wallpaperQuery.isNotBlank()) {
+                        addToWallpaperQueue(wallpaperSearchMedia.filter { it.uri.toString() in wallpaperSelectedUris })
+                        wallpaperQuery = ""
+                        wallpaperSelectionMode = false
+                        wallpaperSelectedUris = emptySet()
+                    } else if (wallpaperSelectionMode) {
+                        wallpaperSelectedUris.forEach { uri ->
+                            wallpaperQueueMedia.firstOrNull { it.uri.toString() == uri }?.let(::removeFromWallpaperQueue)
+                        }
+                        wallpaperSelectionMode = false
+                        wallpaperSelectedUris = emptySet()
+                    } else {
+                        val currentItems = wallpaperQueueMedia.filter { it.isVideo == wallpaperShowVideos }
+                        if (wallpaperShowVideos) {
+                            setDynamicWallpaper(context, currentItems, english)
+                        } else {
+                            setStaticWallpaper(context, currentItems, english)
+                        }
+                    }
+                },
                 chromeAlpha = pageChromeAlpha
             ) else if (selectionMode) SelectionTopBar(
                 selected = if (selectingFolders) selectedFolders.size else selectedItemsForAction.size,
@@ -2406,8 +2512,25 @@ fun AlbumApp(
                     Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
                 ) {
                     WallpaperManagerScreen(
-                        media = wallpaperQueueMedia,
+                        queuedMedia = wallpaperQueueMedia.filter { it.isVideo == wallpaperShowVideos },
+                        searchMedia = wallpaperSearchMedia,
+                        query = wallpaperQuery,
+                        selectionMode = wallpaperSelectionMode,
+                        selectedUris = wallpaperSelectedUris,
+                        columns = wallpaperColumns,
+                        layout = wallpaperLayout,
+                        sort = wallpaperSort,
+                        sortDirection = wallpaperSortDirection,
+                        queueOrder = wallpaperQueueOrder,
                         onOpenMedia = ::openMedia,
+                        onToggleSelection = { item ->
+                            val key = item.uri.toString()
+                            wallpaperSelectedUris = if (key in wallpaperSelectedUris) wallpaperSelectedUris - key else wallpaperSelectedUris + key
+                        },
+                        onEnterSelectionMode = { item ->
+                            wallpaperSelectionMode = true
+                            wallpaperSelectedUris = wallpaperSelectedUris + item.uri.toString()
+                        },
                         onRemove = ::removeFromWallpaperQueue
                     )
                 }
@@ -2523,6 +2646,56 @@ fun AlbumApp(
             body = "Pixiv 文件归档，用于把本地保存的 Pixiv 图片整理到指定目录。\n\n使用时先选择“来源目录”和“归档目标目录”，然后点击“开始扫描”。应用会从图片文件名中读取 Pixiv 作品 ID，登录 Pixiv 网站查询作品、画师和标签，并将结果保存到本地。\n\n扫描完成后，选择要处理的图片并点击“归档”。应用会将图片移动至目标目录中与其画师名对应的文件夹内，如果尚无此文件夹，则按“画师名称_UID”建立文件夹。没有扫描到作品信息的图片不会被归档，可在失败结果中重新处理。\n\nPixiv 文件归档主页支持按画师或标签，在来源文件夹和归档文件夹内，搜索图片和文件夹。\n\n请先登录 Pixiv，并确保网络可用。来源目录和归档目标目录不能互相包含。归档前请确认移动/复制选项和目标目录正确。写入 tags 可能修改图片信息。只有成功处理的文件会标记为已归档，失败文件会保留在原位置。图片较多时，建议降低单次扫描上限并分批处理。",
             dismissLabel = "知道了",
             onDismiss = { showPixivArchiveInfo = false }
+        )
+    }
+    if (showWallpaperSettings) {
+        WallpaperSettingsSheet(
+            preferences = preferences,
+            initialIsVideo = wallpaperShowVideos,
+            onDismiss = { showWallpaperSettings = false }
+        )
+    }
+    if (showWallpaperSortDialog) {
+        val methods = WallpaperSort.entries
+        val methodOptions = methods.map { if (english && it == WallpaperSort.QueueOrder) "Queue order" else appText(it.label, english) }
+        val directionOptions = SortDirection.entries.map { appText(it.label, english) }
+        VaultSortWheelSheet(
+            title = appText("排序方式", english),
+            methods = methodOptions,
+            selectedMethod = methodOptions[methods.indexOf(wallpaperSort)],
+            selectedDirection = appText(wallpaperSortDirection.label, english),
+            directions = directionOptions,
+            onDismiss = { showWallpaperSortDialog = false }
+        ) { method, direction ->
+            wallpaperSort = methods[methodOptions.indexOf(method)]
+            wallpaperSortDirection = SortDirection.entries[directionOptions.indexOf(direction)]
+            showWallpaperSortDialog = false
+        }
+    }
+    if (showWallpaperColumnDialog) {
+        val options = (1..6).map { if (english) "$it columns" else "$it 列" }
+        VaultWheelChoiceSheet(
+            title = appText("列数", english),
+            options = options,
+            selected = if (english) "$wallpaperColumns columns" else "$wallpaperColumns 列",
+            onDismiss = { showWallpaperColumnDialog = false },
+            onApply = { label ->
+                wallpaperColumns = label.substringBefore(' ').toIntOrNull() ?: wallpaperColumns
+                showWallpaperColumnDialog = false
+            }
+        )
+    }
+    if (showWallpaperLayoutDialog) {
+        val options = MediaLayout.entries.map { appText(it.label, english) }
+        VaultWheelChoiceSheet(
+            title = appText("排布方式", english),
+            options = options,
+            selected = appText(wallpaperLayout.label, english),
+            onDismiss = { showWallpaperLayoutDialog = false },
+            onApply = { label ->
+                wallpaperLayout = MediaLayout.entries[options.indexOf(label)]
+                showWallpaperLayoutDialog = false
+            }
         )
     }
     if (showSortDialog) {
