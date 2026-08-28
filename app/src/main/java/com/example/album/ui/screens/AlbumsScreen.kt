@@ -163,7 +163,7 @@ fun AlbumsScreen(
         )
     }
     val albums = remember(allAlbums, query, additionalFileNames, pinnedAlbumName) {
-        filterAlbums(allAlbums, query, additionalFileNames, pinnedAlbumName)
+        filterAlbums(allAlbums, query, additionalFileNames, pinnedAlbumName, albumQueryMatchesItems)
     }
     val currentAlbum = remember(media, openedFolder, query, sort, sortDirection, flatMode) {
         if (flatMode) {

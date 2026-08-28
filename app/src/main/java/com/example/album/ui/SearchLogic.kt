@@ -70,18 +70,24 @@ internal fun searchAlbums(
             ?: MediaAlbum(pinned, emptyList(), null)
         listOf(pinnedAlbum) + ordered.filterNot { it.name.equals(pinned, ignoreCase = true) }
     } ?: ordered
-    return filterAlbums(pinnedOrdered, query, additionalFileNames, pinnedFolderName)
+    return filterAlbums(pinnedOrdered, query, additionalFileNames, pinnedFolderName, matchItems)
 }
 
 internal fun filterAlbums(
     albums: List<MediaAlbum>,
     query: String,
     additionalFileNames: Map<String, Set<String>> = emptyMap(),
-    pinnedFolderName: String? = null
+    pinnedFolderName: String? = null,
+    matchItems: Boolean = true
 ): List<MediaAlbum> {
     if (query.isBlank()) return albums
     return albums.filter { album ->
         album.name.equals(pinnedFolderName, ignoreCase = true) ||
-            folderMatchesSearch(query, album.name, album.items, additionalFileNames[album.name].orEmpty())
+            folderMatchesSearch(
+                query,
+                album.name,
+                if (matchItems) album.items else emptyList(),
+                if (matchItems) additionalFileNames[album.name].orEmpty() else emptySet()
+            )
     }
 }

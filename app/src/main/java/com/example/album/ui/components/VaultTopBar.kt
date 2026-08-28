@@ -69,6 +69,9 @@ fun VaultTopBar(
     searchModeLabels: List<String> = emptyList(),
     selectedSearchMode: Int = 0,
     onSearchModeChange: (Int) -> Unit = {},
+    actionLabel: String? = null,
+    onActionClick: (() -> Unit)? = null,
+    actionEnabled: Boolean = true,
     onTitleClick: (() -> Unit)? = null,
     chromeAlpha: Float = 1f
 ) {
@@ -185,15 +188,27 @@ fun VaultTopBar(
                         )
                     }
                 }
-                IconButton(
-                    onClick = onFavoriteClick,
-                    modifier = Modifier.height(48.dp).width(if (searchModeLabels.isNotEmpty()) 44.dp else 48.dp)
-                ) {
-                    Icon(
-                        if (favoriteActive) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                        contentDescription = appText(if (favoriteActive) "显示全部" else "仅显示收藏", english),
-                        tint = if (favoriteActive) androidx.compose.ui.graphics.Color(0xFFFFD60A) else MaterialTheme.colorScheme.onSurface
+                if (actionLabel != null && onActionClick != null) {
+                    Text(
+                        actionLabel,
+                        modifier = Modifier.height(48.dp).widthIn(min = 44.dp)
+                            .clickable(enabled = actionEnabled, onClick = onActionClick),
+                        color = if (actionEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
+                } else {
+                    IconButton(
+                        onClick = onFavoriteClick,
+                        modifier = Modifier.height(48.dp).width(if (searchModeLabels.isNotEmpty()) 44.dp else 48.dp)
+                    ) {
+                        Icon(
+                            if (favoriteActive) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                            contentDescription = appText(if (favoriteActive) "显示全部" else "仅显示收藏", english),
+                            tint = if (favoriteActive) androidx.compose.ui.graphics.Color(0xFFFFD60A) else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
             } else {
                 // Keep the actions anchored to the right when a search is
