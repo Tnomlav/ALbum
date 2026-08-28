@@ -231,10 +231,14 @@ internal fun EditorCenterCarousel(
             flingBehavior = flingBehavior,
             userScrollEnabled = true,
             contentPadding = if (centerLastItem) PaddingValues(horizontal = side)
-            // The trailing settings card is not selectable, but it still
-            // occupies a slot in the row. Keep a centered trailing inset so
-            // the option immediately before it can reach the green frame.
-            else PaddingValues(start = side, end = side),
+            // The trailing settings card is not selectable. Reduce the
+            // trailing inset by one card slot so the last selectable option
+            // is the physical end of the row and cannot scroll past the
+            // green frame before snapping back.
+            else PaddingValues(
+                start = side,
+                end = (side - itemWidth - itemSpacing).coerceAtLeast(0.dp)
+            ),
             horizontalArrangement = Arrangement.spacedBy(itemSpacing)
         ) {
             items(indices, key = { it }) { index ->

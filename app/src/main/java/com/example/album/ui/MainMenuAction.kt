@@ -9,7 +9,8 @@ internal enum class MainMenuAction {
     Sort,
     JumpToDate,
     Select,
-    ExcludeFolder;
+    ExcludeFolder,
+    PixivArchiveInfo;
 
     companion object {
         fun fromLabel(label: String): MainMenuAction? = when (label) {
@@ -22,6 +23,7 @@ internal enum class MainMenuAction {
             "\u8df3\u8f6c\u65e5\u671f", "Jump to date" -> JumpToDate
             "\u8fdb\u5165\u591a\u9009", "Select" -> Select
             "\u6392\u9664\u6587\u4ef6\u5939", "Exclude folder" -> ExcludeFolder
+            "注意事项", "Notes" -> PixivArchiveInfo
             else -> null
         }
     }

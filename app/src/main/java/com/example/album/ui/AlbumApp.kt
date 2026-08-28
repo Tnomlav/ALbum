@@ -319,6 +319,8 @@ fun AlbumApp(
     var timelineShowsVideos by rememberSaveable { mutableStateOf(false) }
     var showExcludeDialog by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var showPixivHomeIntro by remember { mutableStateOf(false) }
+    var showPixivArchiveInfo by remember { mutableStateOf(false) }
     var createFolderName by rememberSaveable { mutableStateOf("") }
     var favoriteUris by remember { mutableStateOf(preferences.getStringSet("favorites", emptySet()).orEmpty().toSet()) }
     var showFavoriteBadge by remember { mutableStateOf(albumSettings.getBoolean("show_favorite_badge", true)) }
@@ -366,6 +368,14 @@ fun AlbumApp(
     var archiveMediaRefreshPending by remember { mutableStateOf(false) }
     var archiveMediaRefreshing by remember { mutableStateOf(false) }
     var pixivSearchMode by rememberSaveable { mutableStateOf(PixivSearchMode.Artist) }
+    LaunchedEffect(selectedTab, pixivArchiveOpen, pixivTabEnabled) {
+        if (pixivTabEnabled && selectedTab == MainTab.Pixiv && !pixivArchiveOpen &&
+            !albumSettings.getBoolean("pixiv_home_intro_seen", false)
+        ) {
+            showPixivHomeIntro = true
+            albumSettings.edit().putBoolean("pixiv_home_intro_seen", true).apply()
+        }
+    }
     var backgroundOptimizationEnabled by remember {
         mutableStateOf(albumSettings.getBoolean("background_optimization", true))
     }
@@ -1581,14 +1591,14 @@ fun AlbumApp(
                         listOf("Scan", "Add local folder", "Jump to date", "Columns", "Layout", "Select")
                     } else listOf("扫描刷新", "添加本地文件夹", "跳转日期", "列数", "排布方式", "进入多选")
                     MainTab.Pixiv -> if (appLanguage == "English") {
-                        if (pixivSearchMode == PixivSearchMode.Tag) listOf("Scan", "Columns", "Layout", "Sort", "Select")
-                        else if (openedFolder == null) listOf("Scan", "Columns", "Sort", "Select")
-                        else listOf("Scan", "New folder", "Columns", "Layout", "Sort", "Select")
+                        if (pixivSearchMode == PixivSearchMode.Tag) listOf("Scan", "Columns", "Layout", "Sort", "Select", "Notes")
+                        else if (openedFolder == null) listOf("Scan", "Columns", "Sort", "Select", "Notes")
+                        else listOf("Scan", "New folder", "Columns", "Layout", "Sort", "Select", "Notes")
                     } else if (pixivSearchMode == PixivSearchMode.Tag) {
-                        listOf("扫描刷新", "列数", "排布方式", "排序方式", "进入多选")
+                        listOf("扫描刷新", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
                     } else if (openedFolder == null) {
-                        listOf("扫描刷新", "列数", "排序方式", "进入多选")
-                    } else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
+                        listOf("扫描刷新", "列数", "排序方式", "进入多选", "注意事项")
+                    } else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
                     MainTab.Settings -> emptyList()
                 },
                 onMenuItemClick = { action ->
@@ -1627,6 +1637,7 @@ fun AlbumApp(
                             }
                         }
                         MainMenuAction.ExcludeFolder -> showExcludeDialog = true
+                        MainMenuAction.PixivArchiveInfo -> showPixivArchiveInfo = true
                         null -> Toast.makeText(
                             context,
                             if (english) "This action is unavailable" else "该功能暂不可用",
@@ -2394,6 +2405,22 @@ fun AlbumApp(
         )
     }
 
+    if (showPixivHomeIntro) {
+        VaultInfoSheet(
+            title = "Pixiv 文件归档说明",
+            body = "Pixiv 文件归档，用于把本地保存的 Pixiv 图片整理到指定目录。\n\n使用时先选择“来源目录”和“归档目标目录”，然后点击“开始扫描”。应用会从图片文件名中读取 Pixiv 作品 ID，登录 Pixiv 网站查询作品、画师和标签，并将结果保存到本地。\n\n扫描完成后，选择要处理的图片并点击“归档”。应用会将图片移动至目标目录中与其画师名对应的文件夹内，如果尚无此文件夹，则按“画师名称_UID”建立文件夹。没有扫描到作品信息的图片不会被归档，可在失败结果中重新处理。\n\nPixiv 文件归档主页支持按画师或标签，在来源文件夹和归档文件夹内，搜索图片和文件夹。",
+            dismissLabel = "知道了",
+            onDismiss = { showPixivHomeIntro = false }
+        )
+    }
+    if (showPixivArchiveInfo) {
+        VaultInfoSheet(
+            title = "Pixiv 文件归档说明与注意事项",
+            body = "Pixiv 文件归档，用于把本地保存的 Pixiv 图片整理到指定目录。\n\n使用时先选择“来源目录”和“归档目标目录”，然后点击“开始扫描”。应用会从图片文件名中读取 Pixiv 作品 ID，登录 Pixiv 网站查询作品、画师和标签，并将结果保存到本地。\n\n扫描完成后，选择要处理的图片并点击“归档”。应用会将图片移动至目标目录中与其画师名对应的文件夹内，如果尚无此文件夹，则按“画师名称_UID”建立文件夹。没有扫描到作品信息的图片不会被归档，可在失败结果中重新处理。\n\nPixiv 文件归档主页支持按画师或标签，在来源文件夹和归档文件夹内，搜索图片和文件夹。\n\n请先登录 Pixiv，并确保网络可用。来源目录和归档目标目录不能互相包含。归档前请确认移动/复制选项和目标目录正确。写入 tags 可能修改图片信息。只有成功处理的文件会标记为已归档，失败文件会保留在原位置。图片较多时，建议降低单次扫描上限并分批处理。",
+            dismissLabel = "知道了",
+            onDismiss = { showPixivArchiveInfo = false }
+        )
+    }
     if (showSortDialog) {
         val methods = when {
             selectedTab == MainTab.Pixiv && pixivSearchMode == PixivSearchMode.Tag -> listOf(MediaSort.Time, MediaSort.Name, MediaSort.Size)
