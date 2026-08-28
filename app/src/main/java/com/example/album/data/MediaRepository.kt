@@ -454,8 +454,7 @@ class MediaRepository(private val context: Context) {
         }
         findWritablePhysicalDirectory(destinationFolder)?.let { directory ->
             if (mode == TransferMode.Move && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !item.isDocument) {
-                val root = if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
-                mediaStoreRelativePath(directory, root)?.let { relativePath ->
+                mediaStoreRelativePathForDirectory(directory)?.let { relativePath ->
                     val collection = if (item.isVideo) {
                         MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                     } else {
@@ -487,7 +486,7 @@ class MediaRepository(private val context: Context) {
                 } else {
                     MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                 }
-                mediaStoreRelativePath(directory, root)?.let { relativePath ->
+                mediaStoreRelativePathForDirectory(directory)?.let { relativePath ->
                     // A provider-side move may require user-granted media
                     // management access. Keep Move semantics by copying into
                     // MediaStore here, then let the caller remove the source.
@@ -630,9 +629,8 @@ class MediaRepository(private val context: Context) {
         conflictPolicy: ConflictPolicy
     ): TransferResult? {
         if (item.isDocument || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
-        val root = if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
         val directory = findWritablePhysicalDirectory(destinationFolder) ?: return null
-        val relativePath = mediaStoreRelativePath(directory, root) ?: return null
+        val relativePath = mediaStoreRelativePathForDirectory(directory) ?: return null
         val collection = if (item.isVideo) {
             MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         } else {
@@ -789,6 +787,19 @@ class MediaRepository(private val context: Context) {
         if (actualPath != rootPath && !actualPath.startsWith("$rootPath${File.separator}")) return null
         val child = actualPath.removePrefix(rootPath).trim(File.separatorChar, '/')
         return if (child.isBlank()) "$root/" else "$root/$child/"
+    }
+
+    /** Resolves the actual public root instead of assuming image/video roots. */
+    private fun mediaStoreRelativePathForDirectory(directory: File): String? {
+        val actual = runCatching { directory.canonicalFile }.getOrNull() ?: return null
+        return listOf(
+            Environment.DIRECTORY_PICTURES,
+            Environment.DIRECTORY_MOVIES,
+            Environment.DIRECTORY_DCIM,
+            Environment.DIRECTORY_DOWNLOADS
+        ).firstNotNullOfOrNull { root ->
+            mediaStoreRelativePath(actual, root)
+        }
     }
 
     private fun transferToPhysicalDirectory(

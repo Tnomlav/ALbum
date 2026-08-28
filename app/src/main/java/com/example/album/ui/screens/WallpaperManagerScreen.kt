@@ -63,6 +63,7 @@ fun WallpaperManagerScreen(
     query: String,
     selectionMode: Boolean,
     selectedUris: Set<String>,
+    selectionOrder: List<String>,
     columns: Int,
     layout: MediaLayout,
     sort: WallpaperSort,
@@ -70,7 +71,7 @@ fun WallpaperManagerScreen(
     queueOrder: List<String>,
     onOpenMedia: (MediaItem) -> Unit,
     onToggleSelection: (MediaItem) -> Unit,
-    onEnterSelectionMode: (MediaItem) -> Unit,
+    onEnterSelectionMode: (MediaItem, List<MediaItem>) -> Unit,
     onRemove: (MediaItem) -> Unit
 ) {
     val english = LocalAppEnglish.current
@@ -84,7 +85,7 @@ fun WallpaperManagerScreen(
         else searchMedia.map { it.folder }.filter { searchTextMatches(query, it) }.distinct().sorted()
     }
     val baseVisibleMedia = if (query.isBlank()) queuedMedia else baseMatchingMedia
-    val visibleMedia = remember(baseVisibleMedia, sort, sortDirection, queueOrder) {
+    val visibleMedia = remember(baseVisibleMedia, sort, sortDirection, queueOrder, selectionMode, selectionOrder) {
         val ordered = when (sort) {
             WallpaperSort.Time -> baseVisibleMedia.sortedBy { it.dateTaken }
             WallpaperSort.Name -> baseVisibleMedia.sortedBy { it.name.lowercase() }
@@ -94,7 +95,11 @@ fun WallpaperManagerScreen(
                 if (index < 0) Int.MAX_VALUE else index
             }
         }
-        if (sortDirection == SortDirection.Descending) ordered.reversed() else ordered
+        val sorted = if (sortDirection == SortDirection.Descending) ordered.reversed() else ordered
+        if (selectionMode && query.isBlank() && selectionOrder.isNotEmpty()) {
+            val positions = selectionOrder.withIndex().associate { it.value to it.index }
+            sorted.sortedBy { positions[it.uri.toString()] ?: Int.MAX_VALUE }
+        } else sorted
     }
     val sections = remember(visibleMedia) { visibleMedia.groupBy { formatter.format(Date(it.dateTaken)) }.entries.toList() }
 
@@ -149,7 +154,7 @@ fun WallpaperManagerScreen(
                         Modifier.fillMaxWidth().aspectRatio(item.displayAspectRatio).clip(RoundedCornerShape(4.dp))
                             .combinedClickable(
                                 onClick = { if (selectionMode) onToggleSelection(item) else onOpenMedia(item) },
-                                onLongClick = { onEnterSelectionMode(item) }
+                                onLongClick = { onEnterSelectionMode(item, visibleMedia) }
                             )
                     ) {
                         MediaThumbnail(item, Modifier.fillMaxSize(), showVideoDuration = item.isVideo, contentScale = ContentScale.Crop)

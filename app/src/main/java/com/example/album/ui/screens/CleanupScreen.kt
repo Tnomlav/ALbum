@@ -1445,6 +1445,14 @@ private fun ArchiveContent(
         if (!removing) onEnterSelection()
     }
 
+    fun selectRecord(record: PixivArchiveRecord) {
+        val key = record.uri.toString()
+        if (key !in selectedUris) {
+            selectedUris = selectedUris + key
+        }
+        onEnterSelection()
+    }
+
     LaunchedEffect(Unit) {
         pixivSessionConnected = repository.verifyAuthenticatedSession()
     }
@@ -1666,11 +1674,11 @@ private fun ArchiveContent(
             items = visibleBatchRecords,
             keyOf = { it.uri.toString() },
             onStart = { record ->
-                if (record.uri.toString() !in session.selectedUris.value) toggleRecordSelection(record)
+                selectRecord(record)
             },
             onSelectRange = { range ->
                 range.forEach { record ->
-                    if (record.uri.toString() !in session.selectedUris.value) toggleRecordSelection(record)
+                    selectRecord(record)
                 }
             },
             canStartAt = { x, _ -> x <= archiveThumbnailWidth },
@@ -1896,6 +1904,7 @@ private fun ArchiveContent(
                 selected = record.uri.toString() in selectedUris,
                 selectionMode = selectionMode,
                 onSelect = { toggleRecordSelection(record) },
+                onLongPressSelect = { selectRecord(record) },
                 onArchive = { archiveSingle(record) },
                 onOpen = {
                     record.pid?.let { pid -> launchPixiv("https://www.pixiv.net/artworks/$pid") }
@@ -1912,6 +1921,7 @@ private fun ArchiveContent(
                     Modifier.weight(1f),
                     selected = record.uri.toString() in selectedUris,
                     onSelect = { toggleRecordSelection(record) },
+                    onLongPressSelect = { selectRecord(record) },
                     onCopyUrl = { copyPixivUrl(record) }
                 )
                 }
@@ -2269,6 +2279,7 @@ private fun ArchiveRecordRow(
     selected: Boolean,
     selectionMode: Boolean,
     onSelect: () -> Unit,
+    onLongPressSelect: () -> Unit,
     onArchive: () -> Unit,
     onOpen: () -> Unit,
     onCopyUrl: () -> Unit,
@@ -2284,9 +2295,9 @@ private fun ArchiveRecordRow(
                 .clip(RoundedCornerShape(5.dp))
                 .combinedClickable(
                     onClick = { if (selectionMode) onSelect() else onInfo() },
-                    // Enter selection immediately on a stationary long press;
-                    // the list-level gesture still handles range dragging.
-                    onLongClick = onSelect
+                    // The list-level range gesture can receive the same pointer
+                    // sequence, so long-press selection must be idempotent.
+                    onLongClick = onLongPressSelect
                 )
         ) {
             ArchiveThumbnail(
@@ -2317,7 +2328,7 @@ private fun ArchiveRecordRow(
             Modifier.weight(1f).padding(horizontal = 12.dp)
                 .combinedClickable(
                     onClick = { if (selectionMode) onSelect() },
-                    onLongClick = { if (selectionMode) onSelect() else onCopyUrl() }
+                    onLongClick = { if (selectionMode) onLongPressSelect() else onCopyUrl() }
                 ),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
@@ -2373,6 +2384,7 @@ private fun ArchiveGridItem(
     modifier: Modifier,
     selected: Boolean,
     onSelect: () -> Unit,
+    onLongPressSelect: () -> Unit,
     onCopyUrl: () -> Unit
 ) {
     Column(
@@ -2381,7 +2393,7 @@ private fun ArchiveGridItem(
         Box(
             Modifier.fillMaxWidth().aspectRatio(1f)
                 .clip(RoundedCornerShape(5.dp))
-                .combinedClickable(onClick = onSelect, onLongClick = onSelect)
+                .combinedClickable(onClick = onSelect, onLongClick = onLongPressSelect)
         ) {
             ArchiveThumbnail(record, Modifier.fillMaxSize())
             Box(
