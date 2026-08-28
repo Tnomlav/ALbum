@@ -532,16 +532,13 @@ private fun drawDoodleOverlays(bitmap: Bitmap, strokes: List<EditorStroke>) {
     val overlay = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(overlay)
     val shortSide = min(bitmap.width, bitmap.height).toFloat()
+    val mosaicLayer = if (strokes.any { it.brush == EditorBrush.Mosaic && it.points.isNotEmpty() }) {
+        buildMosaicLayer(bitmap)
+    } else null
     strokes.forEach { stroke ->
         if (stroke.points.isEmpty()) return@forEach
         if (stroke.brush == EditorBrush.Mosaic) {
-            val sample = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
-            Canvas(sample).apply {
-                drawBitmap(bitmap, 0f, 0f, null)
-                drawBitmap(overlay, 0f, 0f, null)
-            }
-            drawMosaicStroke(sample, canvas, stroke, shortSide)
-            sample.recycle()
+            mosaicLayer?.let { drawMosaicStroke(it, canvas, stroke, shortSide) }
             return@forEach
         }
         val path = Path().apply {
@@ -594,6 +591,7 @@ private fun drawDoodleOverlays(bitmap: Bitmap, strokes: List<EditorStroke>) {
     }
     Canvas(bitmap).drawBitmap(overlay, 0f, 0f, null)
     overlay.recycle()
+    mosaicLayer?.recycle()
 }
 
 private fun drawSprayStroke(
@@ -648,40 +646,72 @@ internal fun editorBrushAlpha(brush: EditorBrush): Float = when (brush) {
     else -> 1f
 }
 
-private fun drawMosaicStroke(bitmap: Bitmap, canvas: Canvas, stroke: EditorStroke, shortSide: Float) {
-    val radius = (stroke.width * shortSide * 1.5f).toInt().coerceAtLeast(6)
-    val block = (radius / 3).coerceIn(4, 28)
-    val points = stroke.points
-    if (points.isEmpty()) return
-    fun stamp(point: NormalizedPoint) {
-        val centerX = (point.x * bitmap.width).toInt()
-        val centerY = (point.y * bitmap.height).toInt()
-        var y = (centerY - radius).coerceAtLeast(0)
-        while (y < (centerY + radius).coerceAtMost(bitmap.height)) {
-            var x = (centerX - radius).coerceAtLeast(0)
-            while (x < (centerX + radius).coerceAtMost(bitmap.width)) {
-                val sampleX = (x + block / 2).coerceIn(0, bitmap.width - 1)
-                val sampleY = (y + block / 2).coerceIn(0, bitmap.height - 1)
-                canvas.drawRect(
-                    x.toFloat(), y.toFloat(),
-                    (x + block).coerceAtMost(bitmap.width).toFloat(),
-                    (y + block).coerceAtMost(bitmap.height).toFloat(),
-                    Paint().apply { color = bitmap.getPixel(sampleX, sampleY) }
-                )
-                x += block
+private const val MOSAIC_GRID_CELLS = 32
+
+/** Builds the complete fixed-grid mosaic from the untouched image only. */
+internal fun buildMosaicLayer(source: Bitmap): Bitmap {
+    val result = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+    val block = (min(source.width, source.height).toFloat() / MOSAIC_GRID_CELLS)
+        .roundToInt().coerceAtLeast(2)
+    val pixels = IntArray(source.width * source.height)
+    source.getPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
+    val output = IntArray(pixels.size)
+    var top = 0
+    while (top < source.height) {
+        val bottom = min(top + block, source.height)
+        var left = 0
+        while (left < source.width) {
+            val right = min(left + block, source.width)
+            var red = 0L
+            var green = 0L
+            var blue = 0L
+            var alpha = 0L
+            var count = 0
+            for (y in top until bottom) {
+                val row = y * source.width
+                for (x in left until right) {
+                    val color = pixels[row + x]
+                    alpha += color ushr 24
+                    red += color shr 16 and 0xff
+                    green += color shr 8 and 0xff
+                    blue += color and 0xff
+                    count++
+                }
             }
-            y += block
+            val color = ((alpha / count).toInt() shl 24) or
+                ((red / count).toInt() shl 16) or
+                ((green / count).toInt() shl 8) or
+                (blue / count).toInt()
+            for (y in top until bottom) {
+                val row = y * source.width
+                for (x in left until right) output[row + x] = color
+            }
+            left = right
         }
+        top = bottom
     }
-    stamp(points.first())
-    points.zipWithNext().forEach { (from, to) ->
-        val distance = maxOf(abs(to.x - from.x) * bitmap.width, abs(to.y - from.y) * bitmap.height)
-        val steps = (distance / (block * .55f)).toInt().coerceAtLeast(1)
-        for (step in 1..steps) {
-            val ratio = step / steps.toFloat()
-            stamp(NormalizedPoint(from.x + (to.x - from.x) * ratio, from.y + (to.y - from.y) * ratio))
-        }
+    result.setPixels(output, 0, source.width, 0, 0, source.width, source.height)
+    return result
+}
+
+private fun drawMosaicStroke(mosaicLayer: Bitmap, canvas: Canvas, stroke: EditorStroke, shortSide: Float) {
+    val path = Path().apply {
+        moveTo(stroke.points.first().x * mosaicLayer.width, stroke.points.first().y * mosaicLayer.height)
+        stroke.points.drop(1).forEach { lineTo(it.x * mosaicLayer.width, it.y * mosaicLayer.height) }
     }
+    val masked = Bitmap.createBitmap(mosaicLayer.width, mosaicLayer.height, Bitmap.Config.ARGB_8888)
+    val maskedCanvas = Canvas(masked)
+    maskedCanvas.drawBitmap(mosaicLayer, 0f, 0f, null)
+    maskedCanvas.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        strokeWidth = stroke.width * shortSide * 1.5f
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+    })
+    canvas.drawBitmap(masked, 0f, 0f, null)
+    masked.recycle()
 }
 
 internal fun drawEditorTextOverlay(

@@ -223,7 +223,7 @@ private fun OptimizedTimelineGrid(
     val density = LocalDensity.current
     val triggerPull = with(density) { 96.dp.toPx() }
     val maxPull = with(density) { 144.dp.toPx() }
-    val pullRefreshing = loading
+    val pullRefreshing = loading && pullDistance > 0f
     LaunchedEffect(loading) {
         if (!loading) pullDistance = 0f
     }
@@ -389,7 +389,7 @@ private fun AdaptiveTimeline(
     val density = LocalDensity.current
     val triggerPull = with(density) { 96.dp.toPx() }
     val maxPull = with(density) { 144.dp.toPx() }
-    val pullRefreshing = loading
+    val pullRefreshing = loading && pullDistance > 0f
     LaunchedEffect(loading) {
         if (!loading) pullDistance = 0f
     }

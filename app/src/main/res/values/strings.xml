@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">相册</string>
+    <string name="live_wallpaper_description">相册视频动态壁纸</string>
 </resources>

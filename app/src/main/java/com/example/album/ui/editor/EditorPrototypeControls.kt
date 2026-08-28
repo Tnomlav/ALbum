@@ -195,7 +195,7 @@ internal fun EditorCenterCarousel(
             val current = state.layoutInfo.visibleItemsInfo.minByOrNull {
                 kotlin.math.abs(it.offset + it.size / 2 - center)
             }?.index
-            if (current != target) state.animateScrollToItem(target, 0)
+            if (current != target) state.scrollToItem(target, 0)
         }
         LaunchedEffect(itemCount, sidePx, maxSelectableIndex, initialized) {
             if (!initialized) return@LaunchedEffect
@@ -216,7 +216,10 @@ internal fun EditorCenterCarousel(
                     if (centeredItem.index != centered ||
                         kotlin.math.abs(centeredItem.offset + centeredItem.size / 2 - center) > 1
                     ) {
-                        state.animateScrollToItem(centered, 0)
+                        // The fling behavior has already animated the row. Use
+                        // an immediate correction here so release never waits
+                        // for a second default spring animation.
+                        state.scrollToItem(centered, 0)
                     }
                     if (centered != latestSelectedIndex.coerceIn(0, maxSelectableIndex)) {
                         latestOnCentered(centered)
@@ -228,7 +231,10 @@ internal fun EditorCenterCarousel(
             flingBehavior = flingBehavior,
             userScrollEnabled = true,
             contentPadding = if (centerLastItem) PaddingValues(horizontal = side)
-            else PaddingValues(start = side, end = 0.dp),
+            // The trailing settings card is not selectable, but it still
+            // occupies a slot in the row. Keep a centered trailing inset so
+            // the option immediately before it can reach the green frame.
+            else PaddingValues(start = side, end = side),
             horizontalArrangement = Arrangement.spacedBy(itemSpacing)
         ) {
             items(indices, key = { it }) { index ->
@@ -237,7 +243,7 @@ internal fun EditorCenterCarousel(
                     // this callback additionally brings a clicked card to the
                     // same centered position used by drag snapping.
                     content(index) {
-                        scope.launch { state.animateScrollToItem(index, 0) }
+                        scope.launch { state.scrollToItem(index, 0) }
                     }
                 }
             }

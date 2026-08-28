@@ -435,6 +435,15 @@ class MediaRepository(private val context: Context) {
         mode: TransferMode = TransferMode.Copy
     ): TransferResult = withContext(Dispatchers.IO) {
         try {
+        // Prefer a provider-side MediaStore move before consulting SAF. A
+        // destination can have a persisted tree permission even when the
+        // source is MediaStore; checking SAF first silently downgraded Move
+        // to copy-then-delete.
+            if (mode == TransferMode.Move) {
+                tryDirectMediaStoreMove(item, destinationFolder, conflictPolicy)?.let {
+                    return@withContext it
+                }
+            }
         // A destination found through an authorized tree URI is a real folder,
         // including folders that contain no media and folders outside Pictures/Movies.
             localFolders.findAuthorizedDirectory(destinationFolder)?.let { directory ->
@@ -446,14 +455,12 @@ class MediaRepository(private val context: Context) {
         findWritablePhysicalDirectory(destinationFolder)?.let { directory ->
             if (mode == TransferMode.Move && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !item.isDocument) {
                 val root = if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
-                val expected = File(Environment.getExternalStoragePublicDirectory(root), destinationFolder.trim('/'))
-                if (directory.absolutePath == expected.absolutePath) {
+                mediaStoreRelativePath(directory, root)?.let { relativePath ->
                     val collection = if (item.isVideo) {
                         MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                     } else {
                         MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                     }
-                    val relativePath = "$root/${destinationFolder.trim('/')}"
                     val existing = findDestination(collection, relativePath, item.name)
                     if (existing == item.uri) {
                         return@withContext TransferResult(item, success = true, skipped = true, targetName = item.name, movedDirectly = true)
@@ -547,6 +554,36 @@ class MediaRepository(private val context: Context) {
         } catch (_: Exception) {
             TransferResult(item, success = false)
         }
+    }
+
+    private fun tryDirectMediaStoreMove(
+        item: MediaItem,
+        destinationFolder: String,
+        conflictPolicy: ConflictPolicy
+    ): TransferResult? {
+        if (item.isDocument || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val root = if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
+        val directory = findWritablePhysicalDirectory(destinationFolder) ?: return null
+        val relativePath = mediaStoreRelativePath(directory, root) ?: return null
+        val collection = if (item.isVideo) {
+            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        } else {
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        }
+        val existing = findDestination(collection, relativePath, item.name)
+        if (existing == item.uri) {
+            return TransferResult(item, success = true, skipped = true, targetName = item.name, movedDirectly = true)
+        }
+        if (existing != null && conflictPolicy == ConflictPolicy.Skip) {
+            return TransferResult(item, success = true, skipped = true, targetName = item.name)
+        }
+        val targetName = if (existing != null && conflictPolicy == ConflictPolicy.KeepBoth) {
+            availableName(collection, relativePath, item.name)
+        } else item.name
+        if (existing != null && conflictPolicy == ConflictPolicy.Overwrite &&
+            runCatching { context.contentResolver.delete(existing, null, null) }.getOrDefault(0) == 0
+        ) return TransferResult(item, success = false)
+        return moveMediaStoreItem(item, collection, relativePath, existing, targetName, conflictPolicy)
     }
 
     private fun moveMediaStoreItem(
@@ -673,6 +710,17 @@ class MediaRepository(private val context: Context) {
             File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), normalized)
         )
         return candidates.firstOrNull { it.isDirectory && it.canWrite() }
+    }
+
+    /** Returns the MediaStore path only for a directory under its public root. */
+    private fun mediaStoreRelativePath(directory: File, root: String): String? {
+        val publicRoot = Environment.getExternalStoragePublicDirectory(root).canonicalFile
+        val actual = runCatching { directory.canonicalFile }.getOrNull() ?: return null
+        val rootPath = publicRoot.path
+        val actualPath = actual.path
+        if (actualPath != rootPath && !actualPath.startsWith("$rootPath${File.separator}")) return null
+        val child = actualPath.removePrefix(rootPath).trim(File.separatorChar, '/')
+        return if (child.isBlank()) "$root/" else "$root/$child/"
     }
 
     private fun transferToPhysicalDirectory(

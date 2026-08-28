@@ -533,7 +533,7 @@ fun MediaViewer(
                             onCopy = { onCopy(current) },
                             onSettings = current.takeIf { it.isVideo }?.let { { showVideoSettings = true } },
                             onEditTags = onEditTags?.let { action -> { action(current) } },
-                            onWallpaper = current.takeUnless(MediaItem::isVideo)?.let {
+                            onWallpaper = current.let {
                                 { setWallpaper(context, current, english) }
                             }
                         )
@@ -556,6 +556,7 @@ fun MediaViewer(
                 onValueChange = { renameText = it },
                 label = appText("文件名", english),
                 confirmLabel = appText("保存", english),
+                autoFocus = true,
                 initialSelection = TextRange(0, (if (showRenameExtension && extension != null) editableName.length - extension.length - 1 else editableName.length).coerceAtLeast(0)),
                 onDismiss = { showRename = false },
                 onConfirm = {

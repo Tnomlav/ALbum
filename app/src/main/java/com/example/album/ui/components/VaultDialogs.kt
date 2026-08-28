@@ -64,6 +64,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
 import androidx.compose.foundation.shape.CircleShape
@@ -492,11 +495,13 @@ private fun ChoiceWheel(
     val rowHeightPx = with(LocalDensity.current) { rowHeight.roundToPx() }
     val centerPadding = 76.dp
     LaunchedEffect(state, options) {
-        snapshotFlow { state.isScrollInProgress }
+        // Keep the draft value synchronized while the wheel is moving. If
+        // the user taps Apply immediately after releasing the wheel, the
+        // button must already see the row currently nearest the center.
+        snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
             .distinctUntilChanged()
-            .filter { !it }
-            .collect {
-                val nearest = state.firstVisibleItemIndex + if (state.firstVisibleItemScrollOffset >= rowHeightPx / 2) 1 else 0
+            .collect { (firstIndex, offset) ->
+                val nearest = firstIndex + if (offset >= rowHeightPx / 2) 1 else 0
                 options.getOrNull(nearest)?.let(onSelected)
             }
     }
@@ -572,6 +577,7 @@ fun VaultTextInputDialog(
     confirmEnabled: Boolean = value.isNotBlank(),
     singleLine: Boolean = true,
     initialSelection: TextRange? = null,
+    autoFocus: Boolean = false,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
@@ -629,7 +635,7 @@ fun VaultTextInputDialog(
                         }
                     }
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp)) {
-                          VaultActionInput(value, onValueChange, label, Modifier.fillMaxWidth(), singleLine, initialSelection)
+                          VaultActionInput(value, onValueChange, label, Modifier.fillMaxWidth(), singleLine, initialSelection, autoFocus)
                     }
                     Row(
                         Modifier.fillMaxWidth().height(54.dp),
@@ -661,15 +667,24 @@ private fun VaultActionInput(
     label: String,
     modifier: Modifier = Modifier,
     singleLine: Boolean = true,
-    initialSelection: TextRange? = null
+    initialSelection: TextRange? = null,
+    autoFocus: Boolean = false
 ) {
     val shape = RoundedCornerShape(6.dp)
     var fieldValue by remember {
         mutableStateOf(TextFieldValue(value, initialSelection ?: TextRange(value.length)))
     }
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
     LaunchedEffect(value, initialSelection) {
         if (fieldValue.text != value) {
             fieldValue = TextFieldValue(value, initialSelection ?: TextRange(value.length))
+        }
+    }
+    LaunchedEffect(autoFocus) {
+        if (autoFocus) {
+            focusRequester.requestFocus()
+            keyboardController?.show()
         }
     }
     BasicTextField(
@@ -681,6 +696,7 @@ private fun VaultActionInput(
         singleLine = singleLine,
         textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
         modifier = modifier
+            .focusRequester(focusRequester)
             .height(if (singleLine) 44.dp else 132.dp)
             .background(MaterialTheme.colorScheme.surface, shape)
             .border(1.dp, MaterialTheme.colorScheme.outline, shape)

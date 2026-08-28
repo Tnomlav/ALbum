@@ -481,6 +481,7 @@ fun PixivArchiveScreen(
             onValueChange = { renameText = it },
             label = appText("文件名", english),
             confirmLabel = appText("保存", english),
+            autoFocus = true,
             onDismiss = { renameItem = null },
             onConfirm = {
                 val newName = renameText.trim()
@@ -1171,10 +1172,10 @@ data class ArchiveActivity(
 class PixivArchiveSession(context: Context) {
     private val preferences = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
     val records = mutableStateOf(loadRecords())
-    val state = mutableStateOf(if (records.value.isEmpty()) ArchiveUiState.Idle else ArchiveUiState.Ready)
-    val completed = mutableStateOf(0)
-    val failed = mutableStateOf(0)
-    val activity = mutableStateOf(ArchiveActivity())
+    val state = mutableStateOf(loadState())
+    val completed = mutableStateOf(preferences.getInt(KEY_SCAN_COMPLETED, 0))
+    val failed = mutableStateOf(preferences.getInt(KEY_SCAN_FAILED, 0))
+    val activity = mutableStateOf(loadActivity())
     val selectedUris = mutableStateOf<Set<String>>(emptySet())
     val selectableUris = mutableStateOf<Set<String>>(emptySet())
     var scanJob: Job? = null
@@ -1210,6 +1211,47 @@ class PixivArchiveSession(context: Context) {
         preferences.edit().putString(KEY_SCAN_RECORDS, json.toString()).apply()
     }
 
+    fun persistScanProgress(update: com.example.album.data.PixivArchiveProgress) {
+        completed.value = update.completed
+        failed.value = update.failed
+        activity.value = ArchiveActivity(
+            phase = update.phase,
+            completed = update.completed,
+            total = update.total,
+            failed = update.failed,
+            currentFile = update.currentFile,
+            currentArtist = update.currentArtist,
+            message = update.message,
+            logs = if (update.log.isBlank()) activity.value.logs
+            else (listOf(update.log) + activity.value.logs).take(4)
+        )
+        preferences.edit()
+            .putInt(KEY_SCAN_COMPLETED, completed.value)
+            .putInt(KEY_SCAN_FAILED, failed.value)
+            .putString(KEY_SCAN_ACTIVITY, JSONObject().apply {
+                put("phase", activity.value.phase.name)
+                put("total", activity.value.total)
+                put("currentFile", activity.value.currentFile)
+                put("currentArtist", activity.value.currentArtist)
+                put("message", activity.value.message)
+                put("logs", JSONArray(activity.value.logs))
+            }.toString())
+            .apply()
+    }
+
+    fun setScanState(newState: ArchiveUiState) {
+        state.value = newState
+        preferences.edit().putString(KEY_SCAN_STATE, newState.name).apply()
+    }
+
+    fun refreshFromPersistence() {
+        records.value = loadRecords()
+        completed.value = preferences.getInt(KEY_SCAN_COMPLETED, completed.value)
+        failed.value = preferences.getInt(KEY_SCAN_FAILED, failed.value)
+        state.value = loadState()
+        activity.value = loadActivity()
+    }
+
     fun removeRecords(uris: Set<String>) {
         if (uris.isEmpty()) return
         val updated = records.value.filterNot { it.uri.toString() in uris }
@@ -1220,6 +1262,7 @@ class PixivArchiveSession(context: Context) {
 
     fun upsertRecord(record: PixivArchiveRecord) {
         records.value = records.value.filterNot { it.uri == record.uri } + record
+        persistRecords()
     }
 
     fun mergeRecords(scanned: List<PixivArchiveRecord>) {
@@ -1277,9 +1320,10 @@ class PixivArchiveSession(context: Context) {
     }.getOrDefault(emptyList())
 
     fun reset() {
-        if (scanJob?.isActive == true) return
+        if (scanJob?.isActive == true || state.value == ArchiveUiState.Scanning) return
         records.value = emptyList()
-        preferences.edit().remove(KEY_SCAN_RECORDS).apply()
+        preferences.edit().remove(KEY_SCAN_RECORDS).remove(KEY_SCAN_STATE)
+            .remove(KEY_SCAN_ACTIVITY).remove(KEY_SCAN_COMPLETED).remove(KEY_SCAN_FAILED).apply()
         state.value = ArchiveUiState.Idle
         completed.value = 0
         failed.value = 0
@@ -1290,7 +1334,32 @@ class PixivArchiveSession(context: Context) {
 
     private companion object {
         const val KEY_SCAN_RECORDS = "scan_records"
+        const val KEY_SCAN_STATE = "scan_state"
+        const val KEY_SCAN_ACTIVITY = "scan_activity"
+        const val KEY_SCAN_COMPLETED = "scan_completed"
+        const val KEY_SCAN_FAILED = "scan_failed"
     }
+
+    private fun loadState(): ArchiveUiState = runCatching {
+        ArchiveUiState.valueOf(preferences.getString(KEY_SCAN_STATE, null).orEmpty())
+    }.getOrElse { if (records.value.isEmpty()) ArchiveUiState.Idle else ArchiveUiState.Ready }
+
+    private fun loadActivity(): ArchiveActivity = runCatching {
+        val json = JSONObject(preferences.getString(KEY_SCAN_ACTIVITY, "{}"))
+        ArchiveActivity(
+            phase = PixivArchivePhase.valueOf(json.optString("phase", PixivArchivePhase.Discover.name)),
+            completed = completed.value,
+            total = json.optInt("total", 0),
+            failed = failed.value,
+            currentFile = json.optString("currentFile"),
+            currentArtist = json.optString("currentArtist"),
+            message = json.optString("message", "等待开始"),
+            logs = buildList {
+                val logs = json.optJSONArray("logs") ?: JSONArray()
+                repeat(logs.length()) { add(logs.optString(it)) }
+            }
+        )
+    }.getOrDefault(ArchiveActivity())
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1365,6 +1434,13 @@ private fun ArchiveContent(
 
     LaunchedEffect(Unit) {
         pixivSessionConnected = repository.verifyAuthenticatedSession()
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            session.refreshFromPersistence()
+            kotlinx.coroutines.delay(500L)
+        }
     }
 
     val pixivLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
