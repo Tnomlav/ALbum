@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
@@ -316,6 +317,7 @@ fun AlbumApp(
     var wallpaperQuery by rememberSaveable { mutableStateOf("") }
     var wallpaperSelectionMode by rememberSaveable { mutableStateOf(false) }
     var wallpaperSelectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var wallpaperSelectionOrder by remember { mutableStateOf<List<String>>(emptyList()) }
     var wallpaperColumns by rememberSaveable { mutableIntStateOf(4) }
     var wallpaperLayout by rememberSaveable { mutableStateOf(MediaLayout.Grid) }
     var wallpaperSort by rememberSaveable { mutableStateOf(WallpaperSort.Time) }
@@ -1583,6 +1585,7 @@ fun AlbumApp(
                     wallpaperQuery = it
                     wallpaperSelectionMode = it.isNotBlank()
                     if (it.isBlank()) wallpaperSelectedUris = emptySet()
+                    if (it.isBlank()) wallpaperSelectionOrder = emptyList()
                 },
                 favoriteActive = false,
                 onFavoriteClick = {},
@@ -1614,6 +1617,7 @@ fun AlbumApp(
                     wallpaperQuery = ""
                     wallpaperSelectionMode = false
                     wallpaperSelectedUris = emptySet()
+                    wallpaperSelectionOrder = emptyList()
                 },
                 searchPlaceholder = appText("搜索文件夹、图片名称", english),
                 searchModeLabels = listOf(
@@ -1624,6 +1628,7 @@ fun AlbumApp(
                 onSearchModeChange = {
                     wallpaperShowVideos = it == 1
                     wallpaperSelectedUris = emptySet()
+                    wallpaperSelectionOrder = emptyList()
                 },
                 actionLabel = when {
                     wallpaperQuery.isNotBlank() -> appText("确认", english)
@@ -1639,12 +1644,14 @@ fun AlbumApp(
                         wallpaperQuery = ""
                         wallpaperSelectionMode = false
                         wallpaperSelectedUris = emptySet()
+                        wallpaperSelectionOrder = emptyList()
                     } else if (wallpaperSelectionMode) {
                         wallpaperSelectedUris.forEach { uri ->
                             wallpaperQueueMedia.firstOrNull { it.uri.toString() == uri }?.let(::removeFromWallpaperQueue)
                         }
                         wallpaperSelectionMode = false
                         wallpaperSelectedUris = emptySet()
+                        wallpaperSelectionOrder = emptyList()
                     } else {
                         val currentItems = wallpaperQueueMedia.filter { it.isVideo == wallpaperShowVideos }
                         if (wallpaperShowVideos) {
@@ -2509,7 +2516,10 @@ fun AlbumApp(
 
             if (wallpaperManagerOpen) {
                 Box(
-                    Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
+                    Modifier.fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.statusBars)
+                        .padding(top = VaultDimens.HeaderContentHeight)
+                        .background(MaterialTheme.colorScheme.surface)
                 ) {
                     WallpaperManagerScreen(
                         queuedMedia = wallpaperQueueMedia.filter { it.isVideo == wallpaperShowVideos },
@@ -2517,6 +2527,7 @@ fun AlbumApp(
                         query = wallpaperQuery,
                         selectionMode = wallpaperSelectionMode,
                         selectedUris = wallpaperSelectedUris,
+                        selectionOrder = wallpaperSelectionOrder,
                         columns = wallpaperColumns,
                         layout = wallpaperLayout,
                         sort = wallpaperSort,
@@ -2527,9 +2538,10 @@ fun AlbumApp(
                             val key = item.uri.toString()
                             wallpaperSelectedUris = if (key in wallpaperSelectedUris) wallpaperSelectedUris - key else wallpaperSelectedUris + key
                         },
-                        onEnterSelectionMode = { item ->
+                        onEnterSelectionMode = { item, orderedItems ->
                             wallpaperSelectionMode = true
                             wallpaperSelectedUris = wallpaperSelectedUris + item.uri.toString()
+                            wallpaperSelectionOrder = orderedItems.map { it.uri.toString() }
                         },
                         onRemove = ::removeFromWallpaperQueue
                     )

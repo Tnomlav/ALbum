@@ -37,6 +37,12 @@ This file records release-level changes. Each exported release should have:
 - SHA-256: `4ED4C7A99A0F7A232D4564B1B9E41A69CD36DF9D7DB617F336F3686B6DCBFA5C`
 - Signature: verified with APK Signature Scheme v2; 1 signer.
 
-## Unreleased
+## v1.1.31 - 2026-08-28
 
-- No changes.
+- Fixed archive multi-select so the long-pressed image and drag start image are selected reliably.
+- Made long-press selection idempotent when list and thumbnail gesture handlers receive the same pointer sequence.
+- Improved direct global Move path resolution for Pictures, Movies, DCIM, and Downloads instead of unnecessarily falling back to copy behavior.
+- Restored the wallpaper manager top-bar inset and preserved its selection ordering during multi-select.
+- APK: `app/release/app-release.apk`
+- SHA-256: `50FFFFB7E032D1EEC9D532B7356538BC3CA887DC01360BC86DA4E5C96ECC3F77`
+- Signature: verified with APK Signature Scheme v2; 1 signer.
