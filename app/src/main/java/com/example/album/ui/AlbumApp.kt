@@ -143,6 +143,7 @@ import com.example.album.ui.screens.TimelineScreen
 import com.example.album.ui.screens.SelectionScreen
 import com.example.album.ui.screens.AlbumSelectionScreen
 import com.example.album.ui.screens.CleanupScreen
+import com.example.album.ui.screens.WallpaperManagerScreen
 import com.example.album.ui.screens.PixivArchiveScreen
 import com.example.album.ui.screens.PixivArchiveSession
 import com.example.album.ui.screens.ArchiveActivity
@@ -272,6 +273,11 @@ fun AlbumApp(
     }
     var selectedTab by rememberSaveable { mutableStateOf(initialTab) }
     var query by rememberSaveable { mutableStateOf("") }
+    var appliedQuery by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(query) {
+        delay(500L)
+        appliedQuery = query
+    }
     var selectedMedia by remember { mutableStateOf<MediaItem?>(null) }
     var viewerMedia by remember { mutableStateOf<MediaItem?>(null) }
     var viewerScope by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -302,6 +308,7 @@ fun AlbumApp(
     var pendingTrashRestore by remember { mutableStateOf<List<com.example.album.data.RecycleEntry>>(emptyList()) }
     var pendingTrashDelete by remember { mutableStateOf<List<com.example.album.data.RecycleEntry>>(emptyList()) }
     var cleanupOpen by rememberSaveable { mutableStateOf(false) }
+    var wallpaperManagerOpen by rememberSaveable { mutableStateOf(false) }
     var pixivArchiveOpen by rememberSaveable { mutableStateOf(false) }
     var favoriteFilter by rememberSaveable { mutableStateOf(false) }
     var mediaSort by rememberSaveable { mutableStateOf(initialSort) }
@@ -323,11 +330,17 @@ fun AlbumApp(
     var showPixivArchiveInfo by remember { mutableStateOf(false) }
     var createFolderName by rememberSaveable { mutableStateOf("") }
     var favoriteUris by remember { mutableStateOf(preferences.getStringSet("favorites", emptySet()).orEmpty().toSet()) }
+    var wallpaperQueueUris by remember { mutableStateOf(preferences.getStringSet("wallpaper_queue_uris", emptySet()).orEmpty().toSet()) }
     var showFavoriteBadge by remember { mutableStateOf(albumSettings.getBoolean("show_favorite_badge", true)) }
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var selectingFolders by rememberSaveable { mutableStateOf(false) }
     var selectionMediaSort by rememberSaveable { mutableStateOf(initialSort) }
     var selectionMediaSortDirection by rememberSaveable { mutableStateOf(SortDirection.Descending) }
+
+    fun freezeSelectionSort() {
+        selectionMediaSort = mediaSort
+        selectionMediaSortDirection = sortDirection
+    }
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedFolders by remember { mutableStateOf<Set<String>>(emptySet()) }
     var suspendedSearchQuery by rememberSaveable { mutableStateOf<String?>(null) }
@@ -376,6 +389,31 @@ fun AlbumApp(
             albumSettings.edit().putBoolean("pixiv_home_intro_seen", true).apply()
         }
     }
+
+    val wallpaperLibraryMedia by remember { derivedStateOf {
+        (library.images + library.videos + library.localImages + library.localVideos)
+            .distinctBy { it.uri.toString() }
+    } }
+    val wallpaperQueueMedia by remember { derivedStateOf {
+        wallpaperLibraryMedia.filter { it.uri.toString() in wallpaperQueueUris }
+    } }
+
+    fun addToWallpaperQueue(items: List<com.example.album.data.MediaItem>) {
+        val updated = wallpaperQueueUris + items.map { it.uri.toString() }
+        wallpaperQueueUris = updated
+        preferences.edit().putStringSet("wallpaper_queue_uris", updated).apply()
+        Toast.makeText(
+            context,
+            if (english) "Added ${items.size} item(s) to wallpaper queue" else "已加入壁纸队列 ${items.size} 项",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    fun removeFromWallpaperQueue(item: com.example.album.data.MediaItem) {
+        val updated = wallpaperQueueUris - item.uri.toString()
+        wallpaperQueueUris = updated
+        preferences.edit().putStringSet("wallpaper_queue_uris", updated).apply()
+    }
     var backgroundOptimizationEnabled by remember {
         mutableStateOf(albumSettings.getBoolean("background_optimization", true))
     }
@@ -399,7 +437,7 @@ fun AlbumApp(
     val visibleImages by remember { derivedStateOf {
         // The remembered query is not an active search. Returning from search
         // must restore the exact same source as the initial page.
-        val source = if (query.isBlank()) {
+        val source = if (appliedQuery.isBlank()) {
             library.images
         } else {
             (library.images + library.localImages).distinctBy { it.uri }
@@ -407,7 +445,7 @@ fun AlbumApp(
         if (favoriteFilter) source.filter { it.uri.toString() in favoriteUris } else source
     } }
     val visibleVideos by remember { derivedStateOf {
-        val source = if (query.isBlank()) {
+        val source = if (appliedQuery.isBlank()) {
             (library.videos + library.localVideos).distinctBy { it.uri }
         } else {
             (library.videos + library.localVideos).distinctBy { it.uri }
@@ -439,7 +477,7 @@ fun AlbumApp(
     }
     val needsFolderSearchIndex by remember {
         derivedStateOf {
-            query.isNotBlank() &&
+            appliedQuery.isNotBlank() &&
                 selectedTab in setOf(MainTab.Albums, MainTab.Videos) &&
                 openedFolder == null &&
                 (!selectionMode || selectingFolders)
@@ -458,8 +496,11 @@ fun AlbumApp(
         val allowedFolders = pixivFolderNames + pixivSourceFolderName
         pixivImages.filter { it.folder in allowedFolders }
     } }
-    LaunchedEffect(pixivSearchMode, pixivImages, query.trim()) {
-        if (pixivSearchMode == PixivSearchMode.Tag && query.isNotBlank()) {
+    LaunchedEffect(pixivSearchMode, pixivImages) {
+        // Load the tag index once for the current Pixiv library. Searching is
+        // local filtering; tying this job to every keystroke cancels the
+        // full read repeatedly on large archives and can leave no results.
+        if (pixivSearchMode == PixivSearchMode.Tag) {
             pixivTagsLoading = true
             try {
                 pixivTagsByUri = pixivRepository.loadTags(pixivImages)
@@ -477,8 +518,9 @@ fun AlbumApp(
         (visibleImages + library.localImages).distinctBy { it.uri }
     } }
     val pixivTagResults by remember { derivedStateOf {
-        if (query.isBlank()) emptyList() else pixivSearchImages.filter { item ->
-            pixivRepository.matchesTagQuery(pixivTagsByUri[item.uri.toString()].orEmpty(), query)
+        val tagQuery = appliedQuery.trim().removePrefix("#").trim()
+        if (tagQuery.isBlank()) emptyList() else pixivSearchImages.filter { item ->
+            pixivRepository.matchesTagQuery(pixivTagsByUri[item.uri.toString()].orEmpty(), tagQuery)
         }
     } }
     val currentSelectionMedia by remember { derivedStateOf {
@@ -493,7 +535,7 @@ fun AlbumApp(
                 ?: openedFolder?.let { folder -> albumImages.filter { it.folder == folder } }
                 ?: albumImages
             MainTab.Timeline -> if (timelineShowsVideos) visibleVideos else visibleImages
-            MainTab.Pixiv -> if (pixivSearchMode == PixivSearchMode.Tag && query.isNotBlank()) {
+            MainTab.Pixiv -> if (pixivSearchMode == PixivSearchMode.Tag && appliedQuery.isNotBlank()) {
                 pixivTagResults
             } else {
                 openedMediaScope
@@ -504,7 +546,7 @@ fun AlbumApp(
         }
     } }
     val selectionMedia by remember { derivedStateOf {
-        val text = query.trim()
+        val text = appliedQuery.trim()
         if (text.isBlank() || (selectedTab == MainTab.Pixiv && pixivSearchMode == PixivSearchMode.Tag)) {
             currentSelectionMedia
         } else {
@@ -659,6 +701,18 @@ fun AlbumApp(
         searchOpen = true
     }
 
+    fun openFolder(folder: String?) {
+        openedFolder = folder
+        folderScope = null
+        if (folder != null) {
+            // A folder opened from a search must show all of its contents;
+            // the parent search text must not become a filename filter.
+            query = ""
+            suspendedSearchQuery = null
+            searchOpen = false
+        }
+    }
+
     fun clearSelection() {
         selectionMode = false
         selectingFolders = false
@@ -707,7 +761,7 @@ fun AlbumApp(
 
     val appBackEnabled by remember {
         derivedStateOf {
-            val standalonePageOpen = transferRequest != null || pixivArchiveOpen || cleanupOpen
+            val standalonePageOpen = transferRequest != null || pixivArchiveOpen || cleanupOpen || wallpaperManagerOpen
             (standalonePageOpen || (selectedMedia == null && editingMedia == null && selectionSlideshow.isEmpty())) &&
                 pendingAppDelete == null &&
                 selectionRenameItem == null &&
@@ -741,6 +795,7 @@ fun AlbumApp(
                     }
                 }
             }
+            wallpaperManagerOpen -> wallpaperManagerOpen = false
             openedFolder != null -> closeFolder()
             query.isNotBlank() -> suspendSearch()
             searchOpen -> suspendSearch()
@@ -1483,7 +1538,18 @@ fun AlbumApp(
                 modifier = Modifier.fillMaxSize(),
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 topBar = {
-            if (selectionMode) SelectionTopBar(
+            if (wallpaperManagerOpen) VaultTopBar(
+                title = if (english) "Wallpaper manager" else "壁纸管理",
+                query = "",
+                searchEnabled = false,
+                onQueryChange = {},
+                favoriteActive = false,
+                onFavoriteClick = {},
+                menuItems = emptyList(),
+                onMenuItemClick = {},
+                onBack = { wallpaperManagerOpen = false },
+                chromeAlpha = pageChromeAlpha
+            ) else if (selectionMode) SelectionTopBar(
                 selected = if (selectingFolders) selectedFolders.size else selectedItemsForAction.size,
                 selectingFolders = selectingFolders,
                 onClose = { clearSelection() },
@@ -1534,6 +1600,12 @@ fun AlbumApp(
                 onWallpaper = selectedItemsForAction.singleOrNull()?.takeIf { !selectingFolders }?.let { selected -> {
                     setWallpaper(context, selected, english)
                 }},
+                onAddToWallpaperQueue = if (!selectingFolders) {
+                    {
+                        addToWallpaperQueue(selectedItemsForAction)
+                        clearSelection()
+                    }
+                } else null,
                 onExclude = if (selectingFolders && selectedFolders.isNotEmpty()) {{
                     selectedFolders.forEach(library::excludeFolder)
                     Toast.makeText(context, if (english) "Excluded ${selectedFolders.size} folders" else "已排除 ${selectedFolders.size} 个文件夹", Toast.LENGTH_SHORT).show()
@@ -1581,11 +1653,11 @@ fun AlbumApp(
                 onFavoriteClick = { favoriteFilter = !favoriteFilter },
                 menuItems = when (tab) {
                     MainTab.Albums, MainTab.Videos -> if (appLanguage == "English") {
-                        if (openedFolder == null) listOf("Scan", "Add local folder", "Columns", "Sort", "Select")
-                        else listOf("Scan", "New folder", "Columns", "Layout", "Sort", "Select")
+                        if (openedFolder == null) listOf("Scan", "Add local folder", "Columns", "Sort", "Select", "Wallpaper manager")
+                        else listOf("Scan", "New folder", "Columns", "Layout", "Sort", "Select", "Wallpaper manager")
                     } else {
-                        if (openedFolder == null) listOf("扫描刷新", "添加本地文件夹", "列数", "排序方式", "进入多选")
-                        else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
+                        if (openedFolder == null) listOf("扫描刷新", "添加本地文件夹", "列数", "排序方式", "进入多选", "壁纸管理")
+                        else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选", "壁纸管理")
                     }
                     MainTab.Timeline -> if (appLanguage == "English") {
                         listOf("Scan", "Add local folder", "Jump to date", "Columns", "Layout", "Select")
@@ -1623,8 +1695,7 @@ fun AlbumApp(
                             // This is especially important inside a folder,
                             // where the selection screen replaces the folder
                             // content immediately.
-                            selectionMediaSort = mediaSort
-                            selectionMediaSortDirection = sortDirection
+                            freezeSelectionSort()
                             selectionMode = true
                             selectingFolders = openedFolder == null && (tab == MainTab.Albums || tab == MainTab.Videos || (tab == MainTab.Pixiv && pixivSearchMode == PixivSearchMode.Artist))
                             val first = currentSelectionMedia.firstOrNull()
@@ -1635,6 +1706,14 @@ fun AlbumApp(
                                 selectedUris = first?.uri?.toString()?.let(::setOf).orEmpty()
                                 selectedFolders = emptySet()
                             }
+                        }
+                        MainMenuAction.WallpaperManager -> {
+                            query = ""
+                            suspendedSearchQuery = null
+                            searchOpen = false
+                            openedFolder = null
+                            folderScope = null
+                            wallpaperManagerOpen = true
                         }
                         MainMenuAction.ExcludeFolder -> showExcludeDialog = true
                         MainMenuAction.PixivArchiveInfo -> showPixivArchiveInfo = true
@@ -1715,7 +1794,7 @@ fun AlbumApp(
                     chromeAlpha = pageChromeAlpha
                 )
             AnimatedVisibility(
-                visible = openedFolder == null,
+                visible = openedFolder == null && !wallpaperManagerOpen,
                 enter = slideInVertically(tween(240, easing = CubicBezierEasing(.22f, .8f, .28f, 1f))) { it } + fadeIn(tween(160)),
                 exit = slideOutVertically(tween(200, easing = CubicBezierEasing(.22f, .8f, .28f, 1f))) { it } + fadeOut(tween(140))
             ) {
@@ -1982,14 +2061,14 @@ fun AlbumApp(
                 },
                 selectedFolders = selectedFolders,
                 columns = albumColumns,
-                sort = mediaSort,
-                sortDirection = sortDirection,
+                sort = selectionMediaSort,
+                sortDirection = selectionMediaSortDirection,
                 // Folder selection must use the exact same directory index as
                 // the normal album search, including empty/non-media folders.
                 additionalFolderNames = library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
                 additionalFileNames = library.searchableFolderFiles,
                 pinnedFolderName = pixivSourceFolderName.takeIf { selectedTab == MainTab.Pixiv },
-                query = suspendedSearchQuery ?: query,
+                query = suspendedSearchQuery ?: appliedQuery,
                 searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                 initialFirstVisibleItem = selectionFolderFirstVisibleItem,
                 initialFirstVisibleOffset = selectionFolderFirstVisibleOffset,
@@ -2007,7 +2086,8 @@ fun AlbumApp(
                         openedFolder != null -> folderColumns
                         else -> albumColumns
                     },
-                    query = query,
+                    topTrailingCount = selectionMedia.size.takeIf { openedFolder != null },
+                    query = appliedQuery,
                     searching = library.loading,
                     initialFirstVisibleItem = selectionMediaFirstVisibleItem,
                     initialFirstVisibleOffset = selectionMediaFirstVisibleOffset,
@@ -2025,7 +2105,7 @@ fun AlbumApp(
                 MainTab.Albums -> AlbumsScreen(
                     media = albumImages,
                     isVideo = false,
-                    query = query,
+                    query = appliedQuery,
                     searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                     loading = library.loading,
                     scanning = library.scanning,
@@ -2051,14 +2131,16 @@ fun AlbumApp(
                     },
                     onRequestPermission = requestPermission,
                     onOpenMedia = ::openMedia,
-                    onLongPressMedia = { pressed -> selectionMode = true; selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onLongPressMedia = { pressed -> freezeSelectionSort(); selectionMode = true; selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
                     onBatchSelectMedia = { items ->
+                        freezeSelectionSort()
                         selectingFolders = false
                         selectedUris = selectedUris + items.map { it.uri.toString() }
                     },
-                    onSelectionGestureStartMedia = { pressed -> selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onSelectionGestureStartMedia = { pressed -> freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
                     onSelectionGestureEnd = { selectionMode = true },
                     onLongPressAlbum = { album, index, offset ->
+                        freezeSelectionSort()
                         albumFirstVisibleItem = index
                         albumFirstVisibleOffset = offset
                         selectionFolderFirstVisibleItem = index
@@ -2068,19 +2150,20 @@ fun AlbumApp(
                         selectedFolders = selectedFolders + album.name
                     },
                     onBatchSelectAlbums = { albums ->
+                        freezeSelectionSort()
                         selectingFolders = true
                         selectedFolders = selectedFolders + albums.map { it.name }
                     },
                     onAlbumSelectionGestureEnd = { selectionMode = true },
                     onRefresh = { requestMediaScan(false) },
                     openedFolder = openedFolder,
-                    onOpenedFolderChange = { openedFolder = it; if (it != null) searchOpen = false },
+                    onOpenedFolderChange = ::openFolder,
                     onVisibleScopeChanged = { folderScope = it },
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
-                    additionalAlbumNames = if (query.isBlank()) emptySet() else library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
-                    additionalFileNames = if (query.isBlank()) emptyMap() else library.searchableFolderFiles,
+                    additionalAlbumNames = if (appliedQuery.isBlank()) emptySet() else library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
+                    additionalFileNames = if (appliedQuery.isBlank()) emptyMap() else library.searchableFolderFiles,
                     additionalChildFolderNames = if (openedFolder == null) emptySet() else library.searchableFolderChildren[openedFolder].orEmpty(),
                     onClearQuery = { query = "" }
                     ,onOpenPixivArchive = {
@@ -2090,7 +2173,7 @@ fun AlbumApp(
                 MainTab.Videos -> AlbumsScreen(
                     media = visibleVideos,
                     isVideo = true,
-                    query = query,
+                    query = appliedQuery,
                     searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                     loading = library.loading,
                     scanning = library.scanning,
@@ -2116,14 +2199,16 @@ fun AlbumApp(
                     },
                     onRequestPermission = requestPermission,
                     onOpenMedia = ::openMedia,
-                    onLongPressMedia = { pressed -> selectionMode = true; selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onLongPressMedia = { pressed -> freezeSelectionSort(); selectionMode = true; selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
                     onBatchSelectMedia = { items ->
+                        freezeSelectionSort()
                         selectingFolders = false
                         selectedUris = selectedUris + items.map { it.uri.toString() }
                     },
-                    onSelectionGestureStartMedia = { pressed -> selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onSelectionGestureStartMedia = { pressed -> freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
                     onSelectionGestureEnd = { selectionMode = true },
                     onLongPressAlbum = { album, index, offset ->
+                        freezeSelectionSort()
                         albumFirstVisibleItem = index
                         albumFirstVisibleOffset = offset
                         selectionFolderFirstVisibleItem = index
@@ -2133,25 +2218,26 @@ fun AlbumApp(
                         selectedFolders = selectedFolders + album.name
                     },
                     onBatchSelectAlbums = { albums ->
+                        freezeSelectionSort()
                         selectingFolders = true
                         selectedFolders = selectedFolders + albums.map { it.name }
                     },
                     onAlbumSelectionGestureEnd = { selectionMode = true },
                     onRefresh = { requestMediaScan(false) },
                     openedFolder = openedFolder,
-                    onOpenedFolderChange = { openedFolder = it; if (it != null) searchOpen = false },
+                    onOpenedFolderChange = ::openFolder,
                     onVisibleScopeChanged = { folderScope = it },
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
-                    additionalAlbumNames = if (query.isBlank()) emptySet() else library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
-                    additionalFileNames = if (query.isBlank()) emptyMap() else library.searchableFolderFiles,
+                    additionalAlbumNames = if (appliedQuery.isBlank()) emptySet() else library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
+                    additionalFileNames = if (appliedQuery.isBlank()) emptyMap() else library.searchableFolderFiles,
                     additionalChildFolderNames = if (openedFolder == null) emptySet() else library.searchableFolderChildren[openedFolder].orEmpty(),
                     onClearQuery = { query = "" }
                 )
                 MainTab.Timeline -> TimelineScreen(
                     media = if (timelineShowsVideos) visibleVideos else visibleImages,
-                    query = query,
+                    query = appliedQuery,
                     loading = library.loading,
                     scanning = library.scanning,
                     permissionGranted = library.permissionGranted,
@@ -2171,6 +2257,7 @@ fun AlbumApp(
                     onRequestPermission = requestPermission,
                     onOpenMedia = ::openMedia,
                     onLongPressMedia = { pressed ->
+                        freezeSelectionSort()
                         selectionMediaFirstVisibleItem = timelineFirstVisibleItem
                         selectionMediaFirstVisibleOffset = timelineFirstVisibleOffset
                         selectionMode = true
@@ -2178,10 +2265,11 @@ fun AlbumApp(
                         selectedUris = selectedUris + pressed.uri.toString()
                     },
                     onBatchSelectMedia = { items ->
+                        freezeSelectionSort()
                         selectingFolders = false
                         selectedUris = selectedUris + items.map { it.uri.toString() }
                     },
-                    onSelectionGestureStartMedia = { pressed -> selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onSelectionGestureStartMedia = { pressed -> freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
                     onSelectionGestureEnd = { selectionMode = true },
                     onRefresh = { requestMediaScan(false) },
                     sharedElementEnabled = tab == selectedTab,
@@ -2197,9 +2285,9 @@ fun AlbumApp(
                     }
                     Box(Modifier.fillMaxWidth().weight(1f)) {
                 AlbumsScreen(
-                    media = if (pixivSearchMode == PixivSearchMode.Tag && query.isNotBlank()) pixivTagResults else pixivSearchImages,
+                    media = if (pixivSearchMode == PixivSearchMode.Tag && appliedQuery.isNotBlank()) pixivTagResults else pixivSearchImages,
                     isVideo = false,
-                    query = if (pixivSearchMode == PixivSearchMode.Tag) "" else query,
+                    query = if (pixivSearchMode == PixivSearchMode.Tag) "" else appliedQuery,
                     searchingFolders = false,
                     loading = library.loading || pixivTagsLoading || pixivPageRefreshing,
                     scanning = library.scanning,
@@ -2212,17 +2300,20 @@ fun AlbumApp(
                     onRequestPermission = requestPermission,
                     onOpenMedia = ::openMedia,
                     onLongPressMedia = { pressed ->
+                        freezeSelectionSort()
                         selectionMode = true
                         selectingFolders = false
                         selectedUris = setOf(pressed.uri.toString())
                     },
                     onBatchSelectMedia = { items ->
+                        freezeSelectionSort()
                         selectingFolders = false
                         selectedUris = selectedUris + items.map { it.uri.toString() }
                     },
-                    onSelectionGestureStartMedia = { pressed -> selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onSelectionGestureStartMedia = { pressed -> freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
                     onSelectionGestureEnd = { selectionMode = true },
                     onLongPressAlbum = { album, index, offset ->
+                        freezeSelectionSort()
                         selectionFolderFirstVisibleItem = index
                         selectionFolderFirstVisibleOffset = offset
                         selectionMode = true
@@ -2230,6 +2321,7 @@ fun AlbumApp(
                         selectedFolders = selectedFolders + album.name
                     },
                     onBatchSelectAlbums = { albums ->
+                        freezeSelectionSort()
                         selectingFolders = true
                         selectedFolders = selectedFolders + albums.map { it.name }
                     },
@@ -2238,7 +2330,7 @@ fun AlbumApp(
                         scope.launch { reloadPixivPage() }
                     },
                     openedFolder = openedFolder,
-                    onOpenedFolderChange = { openedFolder = it; if (it != null) searchOpen = false },
+                    onOpenedFolderChange = ::openFolder,
                     onVisibleScopeChanged = { folderScope = it },
                     sharedElementEnabled = tab == selectedTab,
                     onOpenPixivArchive = {
@@ -2246,10 +2338,10 @@ fun AlbumApp(
                     },
                     pinnedAlbumName = pixivSourceFolderName,
                     albumQueryMatchesItems = pixivSearchMode != PixivSearchMode.Artist,
-                    flatMode = pixivSearchMode == PixivSearchMode.Tag && query.isNotBlank(),
+                    flatMode = pixivSearchMode == PixivSearchMode.Tag && appliedQuery.isNotBlank(),
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
-                    emptyMessage = if (query.isBlank()) {
+                    emptyMessage = if (appliedQuery.isBlank()) {
                         if (english) "Enter a tag to search images" else "输入 Tag 搜索图片"
                     } else if (english) "No images match this tag" else "没有匹配该 Tag 的图片"
                 )
@@ -2291,7 +2383,7 @@ fun AlbumApp(
                     onLanguageChange = onAppLanguageChange
                 )
             }
-            if (selectionMode && selectingFolders && query.isNotBlank() && library.searchableFoldersLoading) {
+            if (selectionMode && selectingFolders && appliedQuery.isNotBlank() && library.searchableFoldersLoading) {
                 Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -2308,6 +2400,18 @@ fun AlbumApp(
         }
             }
         }
+
+            if (wallpaperManagerOpen) {
+                Box(
+                    Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
+                ) {
+                    WallpaperManagerScreen(
+                        media = wallpaperQueueMedia,
+                        onOpenMedia = ::openMedia,
+                        onRemove = ::removeFromWallpaperQueue
+                    )
+                }
+            }
 
             AnimatedVisibility(
                 visible = selectedMedia != null && editingMedia == null,

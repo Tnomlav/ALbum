@@ -67,6 +67,7 @@ fun SelectionScreen(
     selectedUris: Set<String>,
     columns: Int,
     onToggle: (MediaItem) -> Unit,
+    topTrailingCount: Int? = null,
     query: String = "",
     searching: Boolean = false,
     sort: MediaSort = MediaSort.Time,
@@ -125,6 +126,17 @@ fun SelectionScreen(
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(3.dp),
         verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(3.dp)
     ) {
+        topTrailingCount?.let { count ->
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                Text(
+                    count.toString(),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 2.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End
+                )
+            }
+        }
         items(orderedMedia, key = { it.uri.toString() }) { item ->
             val selected = item.uri.toString() in selectedUris
             val markScale by animateFloatAsState(if (selected) 1f else .82f, tween(120), label = "selection-scale")

@@ -9,6 +9,7 @@ internal enum class MainMenuAction {
     Sort,
     JumpToDate,
     Select,
+    WallpaperManager,
     ExcludeFolder,
     PixivArchiveInfo;
 
@@ -22,6 +23,7 @@ internal enum class MainMenuAction {
             "\u6392\u5e8f\u65b9\u5f0f", "Sort" -> Sort
             "\u8df3\u8f6c\u65e5\u671f", "Jump to date" -> JumpToDate
             "\u8fdb\u5165\u591a\u9009", "Select" -> Select
+            "壁纸管理", "Wallpaper manager" -> WallpaperManager
             "\u6392\u9664\u6587\u4ef6\u5939", "Exclude folder" -> ExcludeFolder
             "注意事项", "Notes" -> PixivArchiveInfo
             else -> null

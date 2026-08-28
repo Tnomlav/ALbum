@@ -80,6 +80,7 @@ fun SelectionTopBar(
     onEditTags: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
     onWallpaper: (() -> Unit)? = null,
+    onAddToWallpaperQueue: (() -> Unit)? = null,
     onExclude: (() -> Unit)? = null,
     selectingFolders: Boolean = false,
     query: String = "",
@@ -187,6 +188,7 @@ fun SelectionTopBar(
                     onEditTags?.let { action -> DropdownMenuItem(text = { Text(if (english) "View/Edit Tags" else "查看/编辑 Tags") }, leadingIcon = { Icon(Icons.Outlined.Label, null) }, onClick = { run(action) }) }
                     onEdit?.let { action -> DropdownMenuItem(text = { Text(appText("编辑", english)) }, leadingIcon = { Icon(Icons.Outlined.Edit, null) }, onClick = { run(action) }) }
                     onWallpaper?.let { action -> DropdownMenuItem(text = { Text(appText("设置为壁纸", english)) }, leadingIcon = { Icon(Icons.Outlined.Wallpaper, null) }, onClick = { run(action) }) }
+                    onAddToWallpaperQueue?.let { action -> DropdownMenuItem(text = { Text(appText("加入壁纸队列", english)) }, leadingIcon = { Icon(Icons.Outlined.Wallpaper, null) }, onClick = { run(action) }) }
                     onExclude?.let { action -> DropdownMenuItem(text = { Text(appText("排除", english)) }, leadingIcon = { Icon(Icons.Outlined.FolderOff, null) }, onClick = { run(action) }) }
                 }
             }
