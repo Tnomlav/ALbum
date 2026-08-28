@@ -18,6 +18,7 @@ class VideoWallpaperService : WallpaperService() {
         private var player: MediaPlayer? = null
         private var visible = false
         private var hasBeenVisible = false
+        private var surfaceReady = false
         private val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { change ->
             if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
@@ -37,6 +38,11 @@ class VideoWallpaperService : WallpaperService() {
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
+            // The system preview may create the surface before dispatching a
+            // visibility callback. Treat a valid preview surface as playable
+            // so the prepared video cannot remain stuck on a black frame.
+            surfaceReady = true
+            visible = true
             startPlayback(holder)
         }
 
@@ -46,6 +52,7 @@ class VideoWallpaperService : WallpaperService() {
         }
 
         override fun onSurfaceDestroyed(holder: SurfaceHolder) {
+            surfaceReady = false
             player?.release()
             player = null
             super.onSurfaceDestroyed(holder)
@@ -83,7 +90,14 @@ class VideoWallpaperService : WallpaperService() {
                     } else {
                         audioManager.abandonAudioFocus(audioFocusListener)
                     }
-                    setOnPreparedListener { prepared -> if (visible) prepared.start() }
+                    setOnPreparedListener { prepared ->
+                        if (shouldPlay()) prepared.start()
+                    }
+                    setOnErrorListener { failedPlayer, _, _ ->
+                        failedPlayer.release()
+                        player = null
+                        true
+                    }
                     prepareAsync()
                 }
             }.getOrElse {
@@ -95,6 +109,8 @@ class VideoWallpaperService : WallpaperService() {
         private fun keepPlayingInBackground(): Boolean =
             applicationContext.getSharedPreferences("album_preferences", Context.MODE_PRIVATE)
                 .getBoolean("wallpaper_dynamic_background", false)
+
+        private fun shouldPlay(): Boolean = visible || (surfaceReady && keepPlayingInBackground())
 
         private fun soundMode(): String =
             applicationContext.getSharedPreferences("album_preferences", Context.MODE_PRIVATE)

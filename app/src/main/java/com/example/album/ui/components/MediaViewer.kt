@@ -13,7 +13,6 @@ import android.media.MediaMetadataRetriever
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.widget.Toast
-import com.example.album.ui.setWallpaper
 import com.example.album.ui.shareMedia
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -228,6 +227,7 @@ fun MediaViewer(
     favorite: (MediaItem) -> Boolean,
     onFavorite: (MediaItem) -> Unit,
     onEditTags: ((MediaItem) -> Unit)? = null,
+    onWallpaper: ((MediaItem) -> Unit)? = null,
     pictureInPictureMode: Boolean = false,
     onEnterPictureInPicture: () -> Boolean = { false }
 ) {
@@ -509,7 +509,14 @@ fun MediaViewer(
                             favorite = favorite(current),
                             onClose = ::closeViewer,
                             onFavorite = { onFavorite(current) },
-                            onInfo = { showMenu = false; showInfo = !showInfo }
+                            onInfo = { showMenu = false; showInfo = !showInfo },
+                            menuExpanded = showMenu,
+                            onMenuExpanded = { showInfo = false; showMenu = it },
+                            onShare = { share(context, current, english) },
+                            onCopy = { onCopy(current) },
+                            onSettings = current.takeIf { it.isVideo }?.let { { showVideoSettings = true } },
+                            onEditTags = onEditTags?.let { action -> { action(current) } },
+                            onWallpaper = onWallpaper?.let { action -> { action(current) } }
                         )
                     }
                     AnimatedVisibility(
@@ -527,15 +534,6 @@ fun MediaViewer(
                             onDelete = { onDelete(current) },
                             onMove = { onMove(current) },
                             onRename = { renameText = current.name; showRename = true },
-                            menuExpanded = showMenu,
-                            onMenuExpanded = { showInfo = false; showMenu = it },
-                            onShare = { share(context, current, english) },
-                            onCopy = { onCopy(current) },
-                            onSettings = current.takeIf { it.isVideo }?.let { { showVideoSettings = true } },
-                            onEditTags = onEditTags?.let { action -> { action(current) } },
-                            onWallpaper = current.let {
-                                { setWallpaper(context, current, english) }
-                            }
                         )
                     }
 
@@ -606,7 +604,21 @@ private fun OriginalMediaImage(
 }
 
 @Composable
-private fun ViewerTopBar(item: MediaItem, position: String, favorite: Boolean, onClose: () -> Unit, onFavorite: () -> Unit, onInfo: () -> Unit) {
+private fun ViewerTopBar(
+    item: MediaItem,
+    position: String,
+    favorite: Boolean,
+    onClose: () -> Unit,
+    onFavorite: () -> Unit,
+    onInfo: () -> Unit,
+    menuExpanded: Boolean,
+    onMenuExpanded: (Boolean) -> Unit,
+    onShare: () -> Unit,
+    onCopy: () -> Unit,
+    onSettings: (() -> Unit)?,
+    onEditTags: (() -> Unit)?,
+    onWallpaper: (() -> Unit)?
+) {
     val english = LocalAppEnglish.current
     Row(
         Modifier.fillMaxWidth()
@@ -629,6 +641,29 @@ private fun ViewerTopBar(item: MediaItem, position: String, favorite: Boolean, o
         )
         IconButton(onClick = onFavorite) { Icon(if (favorite) Icons.Filled.Star else Icons.Outlined.StarBorder, appText("收藏", english), tint = if (favorite) Color(0xFFFFD60A) else Color(0xFF1A1A1A)) }
         IconButton(onClick = onInfo) { Icon(Icons.Outlined.Info, appText("信息", english), tint = Color(0xFF1A1A1A)) }
+        Box {
+            IconButton(onClick = { onMenuExpanded(true) }) {
+                Icon(Icons.Outlined.MoreVert, appText("菜单", english), tint = Color(0xFF1A1A1A))
+            }
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { onMenuExpanded(false) },
+                modifier = Modifier.width(190.dp).clip(RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp)),
+                containerColor = Color.Black.copy(alpha = .20f)
+            ) {
+                DropdownMenuItem(text = { Text(appText("分享", english), color = Color.White, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Share, null, tint = Color.White) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); onShare() })
+                DropdownMenuItem(text = { Text(appText("复制", english), color = Color.White, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null, tint = Color.White) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); onCopy() })
+                onSettings?.let { action ->
+                    DropdownMenuItem(text = { Text(appText("设置", english), color = Color.White, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.SettingsIcon, null, tint = Color.White) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); action() })
+                }
+                onEditTags?.let { action ->
+                    DropdownMenuItem(text = { Text(if (english) "View/Edit Tags" else "查看/编辑 Tags", color = Color.White, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Label, null, tint = Color.White) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); action() })
+                }
+                onWallpaper?.let { action ->
+                    DropdownMenuItem(text = { Text(appText("设置为壁纸", english), color = Color.White, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Wallpaper, null, tint = Color.White) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); action() })
+                }
+            }
+        }
     }
 }
 
@@ -639,13 +674,6 @@ private fun ViewerBottomBar(
     onDelete: () -> Unit,
     onMove: () -> Unit,
     onRename: () -> Unit,
-    menuExpanded: Boolean,
-    onMenuExpanded: (Boolean) -> Unit,
-    onShare: () -> Unit,
-    onCopy: () -> Unit,
-    onSettings: (() -> Unit)?,
-    onEditTags: (() -> Unit)?,
-    onWallpaper: (() -> Unit)?
 ) {
     val english = LocalAppEnglish.current
     Row(
@@ -661,26 +689,6 @@ private fun ViewerBottomBar(
         ViewerAction(Icons.Outlined.Delete, appText("移到回收站", english), onDelete)
         ViewerAction(Icons.AutoMirrored.Outlined.DriveFileMove, appText("移动", english), onMove)
         ViewerAction(Icons.Outlined.Edit, appText("重命名", english), onRename)
-        Box {
-            ViewerAction(Icons.Outlined.MoreVert, appText("菜单", english)) { onMenuExpanded(true) }
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { onMenuExpanded(false) },
-                modifier = Modifier.width(228.dp).background(Color.White, RoundedCornerShape(14.dp))
-            ) {
-                DropdownMenuItem(text = { Text(appText("分享", english)) }, leadingIcon = { Icon(Icons.Outlined.Share, null) }, onClick = { onMenuExpanded(false); onShare() })
-                DropdownMenuItem(text = { Text(appText("复制", english)) }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) }, onClick = { onMenuExpanded(false); onCopy() })
-                onSettings?.let { action ->
-                    DropdownMenuItem(text = { Text(appText("设置", english)) }, leadingIcon = { Icon(Icons.Outlined.SettingsIcon, null) }, onClick = { onMenuExpanded(false); action() })
-                }
-                onEditTags?.let { action ->
-                    DropdownMenuItem(text = { Text(if (english) "View/Edit Tags" else "查看/编辑 Tags") }, leadingIcon = { Icon(Icons.Outlined.Label, null) }, onClick = { onMenuExpanded(false); action() })
-                }
-                onWallpaper?.let { action ->
-                    DropdownMenuItem(text = { Text(appText("设置为壁纸", english)) }, leadingIcon = { Icon(Icons.Outlined.Wallpaper, null) }, onClick = { onMenuExpanded(false); action() })
-                }
-            }
-        }
     }
 }
 

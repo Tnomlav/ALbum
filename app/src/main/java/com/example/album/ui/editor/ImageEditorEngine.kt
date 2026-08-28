@@ -229,6 +229,25 @@ suspend fun loadEditorBitmap(context: Context, item: MediaItem): Bitmap? = withC
     }.getOrNull()
 }
 
+/** Loads a larger preview for wallpaper composition without decoding unbounded source files. */
+suspend fun loadWallpaperBitmap(context: Context, item: MediaItem): Bitmap? = withContext(Dispatchers.IO) {
+    runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        openMediaInputStream(context, item.uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+        var sample = 1
+        while (
+            max(bounds.outWidth, bounds.outHeight) / sample > 4096 ||
+            bounds.outWidth.toLong() * bounds.outHeight / (sample.toLong() * sample) > 16_000_000L
+        ) sample *= 2
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        openMediaInputStream(context, item.uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+    }.getOrNull()
+}
+
 fun geometryBitmap(source: Bitmap, state: ImageEditState): Bitmap {
     val matrix = Matrix().apply {
         postScale(if (state.flipHorizontal) -1f else 1f, if (state.flipVertical) -1f else 1f)
@@ -243,6 +262,17 @@ fun croppedGeometryBitmap(
     referenceWidth: Int = bitmap.width,
     referenceHeight: Int = bitmap.height
 ): Bitmap = cropBitmap(bitmap, state, referenceWidth, referenceHeight)
+
+/** Crops a wallpaper composition frame using the same geometry as the editor. */
+fun cropWallpaperBitmap(bitmap: Bitmap, frame: NormalizedRect, ratio: Float): Bitmap =
+    cropBitmap(
+        bitmap,
+        ImageEditState(
+            crop = CropPreset.Custom,
+            customCropRatio = ratio,
+            cropRect = frame
+        )
+    )
 
 suspend fun saveEditedBitmap(
     context: Context,

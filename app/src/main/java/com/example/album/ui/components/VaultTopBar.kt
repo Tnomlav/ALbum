@@ -72,6 +72,7 @@ fun VaultTopBar(
     actionLabel: String? = null,
     onActionClick: (() -> Unit)? = null,
     actionEnabled: Boolean = true,
+    actionCapsule: Boolean = false,
     onTitleClick: (() -> Unit)? = null,
     chromeAlpha: Float = 1f
 ) {
@@ -189,15 +190,39 @@ fun VaultTopBar(
                     }
                 }
                 if (actionLabel != null && onActionClick != null) {
-                    Text(
-                        actionLabel,
-                        modifier = Modifier.height(48.dp).widthIn(min = 44.dp)
-                            .clickable(enabled = actionEnabled, onClick = onActionClick),
-                        color = if (actionEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
+                    if (actionCapsule) {
+                        Box(
+                            modifier = Modifier
+                                .height(34.dp)
+                                .widthIn(min = 48.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(
+                                    if (actionEnabled) MaterialTheme.colorScheme.primary.copy(alpha = .12f)
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)
+                                )
+                                .clickable(enabled = actionEnabled, onClick = onActionClick)
+                                .padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                actionLabel,
+                                color = if (actionEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    } else {
+                        Text(
+                            actionLabel,
+                            modifier = Modifier.height(48.dp).widthIn(min = 44.dp)
+                                .clickable(enabled = actionEnabled, onClick = onActionClick),
+                            color = if (actionEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
                 } else {
                     IconButton(
                         onClick = onFavoriteClick,
