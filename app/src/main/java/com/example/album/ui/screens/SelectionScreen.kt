@@ -237,7 +237,8 @@ fun AlbumSelectionScreen(
                         album.coverItem?.let { cover ->
                         MediaThumbnail(
                             cover,
-                            Modifier.fillMaxSize().clip(RoundedCornerShape(VaultDimens.AlbumRadius))
+                            Modifier.fillMaxSize().clip(RoundedCornerShape(VaultDimens.AlbumRadius)),
+                            showVideoDuration = false
                         )
                     } ?: Box(
                         Modifier.fillMaxSize()

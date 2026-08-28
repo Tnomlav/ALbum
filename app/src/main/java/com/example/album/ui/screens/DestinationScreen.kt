@@ -501,7 +501,8 @@ private fun DestinationFolderCell(
                     item = cover,
                     modifier = Modifier.fillMaxSize(),
                     requestedSize = 220,
-                    contentScale = ContentScale.Crop
+                    contentScale = ContentScale.Crop,
+                    showVideoDuration = false
                 )
             } else if (isNew) {
                 Text("+", fontSize = 28.sp, color = MaterialTheme.colorScheme.onSurface)

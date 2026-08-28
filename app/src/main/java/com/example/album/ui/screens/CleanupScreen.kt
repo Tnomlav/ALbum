@@ -1136,7 +1136,7 @@ private fun ExcludedContent(
         items(folders.entries.toList(), key = { it.key }) { (folder, items) ->
             Row(Modifier.fillMaxWidth().heightIn(min = 72.dp).combinedClickable(onClick = { onOpenFolder(folder, items.all(MediaItem::isVideo)) }, onLongClick = {}), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(72.dp).clickable { onToggleFolder(folder) }) {
-                    MediaThumbnail(items.first(), Modifier.fillMaxSize())
+                    MediaThumbnail(items.first(), Modifier.fillMaxSize(), showVideoDuration = false)
                     CleanupSelectionMark(folder in selectedFolders, Modifier.align(Alignment.TopEnd).padding(4.dp).clickable { onToggleFolder(folder) })
                 }
                 Column(Modifier.weight(1f).padding(start = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1411,6 +1411,7 @@ private fun ArchiveContent(
     var checkingPixivLogin by remember { mutableStateOf(false) }
     var pixivLoginCheckFailed by remember { mutableStateOf(false) }
     var showPixivAccountActions by remember { mutableStateOf(false) }
+    var showArchiveIntro by remember { mutableStateOf(false) }
     var resultFilter by remember { mutableStateOf(ArchiveResultFilter.All) }
     var retryJob by remember { mutableStateOf<Job?>(null) }
     var resultGrid by remember { mutableStateOf(false) }
@@ -1422,6 +1423,13 @@ private fun ArchiveContent(
             onExitSelection()
             confirmArchive = false
             confirmClearResults = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (!preferences.getBoolean("archive_intro_seen", false)) {
+            showArchiveIntro = true
+            preferences.edit().putBoolean("archive_intro_seen", true).apply()
         }
     }
 
@@ -2063,6 +2071,18 @@ private fun ArchiveContent(
             }
         )
     }
+    if (showArchiveIntro) {
+        VaultInfoSheet(
+            title = appText("Pixiv 归档注意事项", english),
+            body = if (english) {
+                "Sign in to Pixiv and make sure the network is available. The source and archive folders must not contain each other. Check the move/copy setting and target folder before archiving.\n\nWriting tags may modify image information. Only successfully processed files are marked as archived; failed files remain in their original location.\n\nFor many images, lower the scan limit and process them in batches."
+            } else {
+                "请先登录 Pixiv，并确保网络可用。来源目录和归档目标目录不能互相包含。归档前请确认移动/复制选项和目标目录正确。\n\n写入 tags 可能修改图片信息。只有成功处理的文件会标记为已归档，失败文件会保留在原位置。\n\n图片较多时，建议降低单次扫描上限并分批处理。"
+            },
+            dismissLabel = appText("知道了", english),
+            onDismiss = { showArchiveIntro = false }
+        )
+    }
 }
 
 private fun documentTreesOverlap(first: Uri, second: Uri): Boolean = runCatching {
@@ -2403,8 +2423,9 @@ private fun archiveStatusMessage(message: String, english: Boolean): String {
 
 private fun pixivArchiveInfo(record: PixivArchiveRecord, english: Boolean): String = buildString {
     val metadata = record.metadata
+    val displayUri = Uri.decode(record.uri.toString())
     appendLine(if (english) "Name: ${record.filename}" else "名称：${record.filename}")
-    appendLine(if (english) "Address: ${record.uri}" else "地址：${record.uri}")
+    appendLine(if (english) "Address: $displayUri" else "地址：$displayUri")
     appendLine(if (english) "Type: ${record.mimeType}" else "类型：${record.mimeType}")
     appendLine(if (english) "PID: ${record.pid ?: "Unknown"}" else "PID：${record.pid ?: "未识别"}")
     appendLine(if (english) "Page: ${record.page}" else "页码：${record.page}")

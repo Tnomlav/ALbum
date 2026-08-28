@@ -101,7 +101,8 @@ fun AlbumTile(
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(VaultDimens.AlbumRadius)).let {
                     if (sharedElementEnabled) it.mediaSharedElement(album.cover) else it
                 },
-                showVideoMark = album.cover.isVideo
+                showVideoMark = album.cover.isVideo,
+                showVideoDuration = false
             )
         }
         Row(
@@ -160,6 +161,7 @@ fun MediaThumbnail(
     modifier: Modifier = Modifier,
     requestedSize: Int = 360,
     showVideoMark: Boolean = item.isVideo,
+    showVideoDuration: Boolean = true,
     contentScale: ContentScale = ContentScale.Crop,
     backgroundColor: Color? = null,
     animateGif: Boolean? = null,
@@ -251,7 +253,7 @@ fun MediaThumbnail(
                 Icon(Icons.Filled.PlayArrow, contentDescription = appText("视频", english), tint = Color.White, modifier = Modifier.padding(7.dp))
             }
         }
-        if (item.isVideo && item.duration > 0L) {
+        if (showVideoDuration && item.isVideo && item.duration > 0L) {
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
