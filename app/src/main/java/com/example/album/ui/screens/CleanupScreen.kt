@@ -13,6 +13,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -357,6 +358,10 @@ fun PixivArchiveScreen(
     fun exitSelectionMode() {
         selectionMode = false
         session.selectedUris.value = emptySet()
+    }
+
+    BackHandler(enabled = selectionMode) {
+        exitSelectionMode()
     }
 
     fun selectedUrls(): List<String> = records
@@ -2279,9 +2284,9 @@ private fun ArchiveRecordRow(
                 .clip(RoundedCornerShape(5.dp))
                 .combinedClickable(
                     onClick = { if (selectionMode) onSelect() else onInfo() },
-                    // The list-level gesture enters selection at the long
-                    // press timeout and continues the drag selection.
-                    onLongClick = {}
+                    // Enter selection immediately on a stationary long press;
+                    // the list-level gesture still handles range dragging.
+                    onLongClick = onSelect
                 )
         ) {
             ArchiveThumbnail(

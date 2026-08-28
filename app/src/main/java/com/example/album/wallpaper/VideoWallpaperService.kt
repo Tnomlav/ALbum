@@ -52,6 +52,10 @@ class VideoWallpaperService : WallpaperService() {
             player = runCatching {
                 MediaPlayer().apply {
                     setSurface(surface)
+                    // Keep the video's original aspect ratio. The wallpaper
+                    // surface may have a different shape from the source;
+                    // fitting avoids stretching the frames to fill it.
+                    setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT)
                     setDataSource(source.absolutePath)
                     isLooping = true
                     setVolume(0f, 0f)

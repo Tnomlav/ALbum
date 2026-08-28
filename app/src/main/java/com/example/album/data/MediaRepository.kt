@@ -480,6 +480,22 @@ class MediaRepository(private val context: Context) {
                     }
                 }
             }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val root = if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
+                val collection = if (item.isVideo) {
+                    MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                } else {
+                    MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                }
+                mediaStoreRelativePath(directory, root)?.let { relativePath ->
+                    // A provider-side move may require user-granted media
+                    // management access. Keep Move semantics by copying into
+                    // MediaStore here, then let the caller remove the source.
+                    return@withContext transferToMediaStoreDirectory(
+                        item, collection, relativePath, conflictPolicy, preserveModifiedDate
+                    )
+                }
+            }
             return@withContext transferToPhysicalDirectory(item, directory, conflictPolicy, preserveModifiedDate)
         }
         val resolver = context.contentResolver
@@ -556,6 +572,58 @@ class MediaRepository(private val context: Context) {
         }
     }
 
+    private fun transferToMediaStoreDirectory(
+        item: MediaItem,
+        collection: android.net.Uri,
+        relativePath: String,
+        conflictPolicy: ConflictPolicy,
+        preserveModifiedDate: Boolean
+    ): TransferResult {
+        val resolver = context.contentResolver
+        val existing = findDestination(collection, relativePath, item.name)
+        if (existing == item.uri) {
+            return TransferResult(item, success = true, skipped = true, targetName = item.name)
+        }
+        if (existing != null && conflictPolicy == ConflictPolicy.Skip) {
+            return TransferResult(item, success = true, skipped = true, targetName = item.name)
+        }
+        val targetName = if (existing != null && conflictPolicy == ConflictPolicy.KeepBoth) {
+            availableName(collection, relativePath, item.name)
+        } else item.name
+        if (existing != null && conflictPolicy == ConflictPolicy.Overwrite &&
+            runCatching { resolver.delete(existing, null, null) }.getOrDefault(0) == 0
+        ) return TransferResult(item, success = false)
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, targetName)
+            put(MediaStore.MediaColumns.MIME_TYPE, transferMimeType(item))
+            if (preserveModifiedDate) {
+                put(MediaStore.MediaColumns.DATE_MODIFIED, item.dateTaken / 1000L)
+                if (item.isVideo) put(MediaStore.Video.Media.DATE_TAKEN, item.dateTaken)
+                else put(MediaStore.Images.Media.DATE_TAKEN, item.dateTaken)
+            }
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val target = resolver.insert(collection, values)
+            ?: return TransferResult(item, success = false)
+        return runCatching {
+            resolver.openInputStream(item.uri).use { input ->
+                resolver.openOutputStream(target).use { output ->
+                    requireNotNull(input)
+                    requireNotNull(output)
+                    input.copyTo(output)
+                }
+            }
+            resolver.update(target, ContentValues().apply {
+                put(MediaStore.MediaColumns.IS_PENDING, 0)
+            }, null, null)
+            TransferResult(item, success = true, targetName = targetName)
+        }.getOrElse {
+            resolver.delete(target, null, null)
+            TransferResult(item, success = false)
+        }
+    }
+
     private fun tryDirectMediaStoreMove(
         item: MediaItem,
         destinationFolder: String,
@@ -582,7 +650,7 @@ class MediaRepository(private val context: Context) {
         } else item.name
         if (existing != null && conflictPolicy == ConflictPolicy.Overwrite &&
             runCatching { context.contentResolver.delete(existing, null, null) }.getOrDefault(0) == 0
-        ) return TransferResult(item, success = false)
+        ) return null
         return moveMediaStoreItem(item, collection, relativePath, existing, targetName, conflictPolicy)
     }
 

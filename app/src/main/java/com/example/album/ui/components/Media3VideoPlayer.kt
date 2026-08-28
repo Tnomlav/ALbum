@@ -226,6 +226,8 @@ internal fun Media3VideoPlayer(
     var controlsLocked by remember { mutableStateOf(false) }
     var controlsInteraction by remember { mutableIntStateOf(0) }
     var playerMenuOpen by remember { mutableStateOf(false) }
+    var popupWasPlaying by remember { mutableStateOf(false) }
+    var settingsPausePending by remember { mutableStateOf(false) }
     val autoHideControls = preferences.getBoolean("video_auto_hide", true)
     val tapPause = preferences.getBoolean("video_tap_pause", false)
     val portraitTapPause = preferences.getBoolean("video_portrait_tap_pause", false)
@@ -398,6 +400,23 @@ internal fun Media3VideoPlayer(
             }
             player.removeListener(listener)
             player.release()
+        }
+    }
+
+    fun pauseForPopup() {
+        popupWasPlaying = player.playWhenReady
+        if (popupWasPlaying) player.pause()
+    }
+
+    fun resumeAfterPopup() {
+        if (popupWasPlaying) player.play()
+        popupWasPlaying = false
+    }
+
+    LaunchedEffect(settingsVersion) {
+        if (settingsPausePending) {
+            settingsPausePending = false
+            resumeAfterPopup()
         }
     }
 
@@ -725,14 +744,14 @@ internal fun Media3VideoPlayer(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                TextButton(onClick = { refreshControls(); showSpeed = true }, modifier = Modifier.size(46.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                TextButton(onClick = { refreshControls(); pauseForPopup(); showSpeed = true }, modifier = Modifier.size(46.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
                     Text("${speed}x", color = Color.White, fontSize = 13.sp, maxLines = 1, softWrap = false)
                 }
                 IconButton(onClick = { refreshControls(); onFavorite() }, modifier = Modifier.size(46.dp)) {
                     Icon(HtmlStarIcon, appText("收藏", english), tint = if (favorite) Color(0xFFFFD60A) else Color.White)
                 }
                 Box {
-                    IconButton(onClick = { refreshControls(); playerMenuOpen = true }, modifier = Modifier.size(46.dp)) {
+                    IconButton(onClick = { refreshControls(); pauseForPopup(); playerMenuOpen = true }, modifier = Modifier.size(46.dp)) {
                         Icon(Icons.Outlined.MoreVert, appText("菜单", english), tint = Color.White)
                     }
                 }
@@ -838,7 +857,7 @@ internal fun Media3VideoPlayer(
         }
         if (playerMenuOpen) {
             Dialog(
-                onDismissRequest = { playerMenuOpen = false },
+                onDismissRequest = { playerMenuOpen = false; resumeAfterPopup() },
                 properties = DialogProperties(usePlatformDefaultWidth = false)
             ) {
                 Box(
@@ -858,7 +877,7 @@ internal fun Media3VideoPlayer(
                                     textColor = Color.White,
                                     leadingIconColor = Color.White
                                 ),
-                                onClick = { playerMenuOpen = false; onShare() }
+                                onClick = { playerMenuOpen = false; onShare(); resumeAfterPopup() }
                             )
                             DropdownMenuItem(
                                 text = { Text(appText("设置", english), color = Color.White) },
@@ -867,7 +886,11 @@ internal fun Media3VideoPlayer(
                                     textColor = Color.White,
                                     leadingIconColor = Color.White
                                 ),
-                                onClick = { playerMenuOpen = false; onSettings() }
+                                onClick = {
+                                    playerMenuOpen = false
+                                    settingsPausePending = true
+                                    onSettings()
+                                }
                             )
                         }
                     }
@@ -881,11 +904,12 @@ internal fun Media3VideoPlayer(
                 options = speedOptions,
                 selected = if (speed == 1f) "1x" else "${speed}x",
                 playerStyle = true,
-                onDismiss = { showSpeed = false },
+                onDismiss = { showSpeed = false; resumeAfterPopup() },
                 onApply = { selected ->
                     speed = selected.removeSuffix("x").toFloatOrNull() ?: 1f
                     player.setPlaybackSpeed(speed)
                     showSpeed = false
+                    resumeAfterPopup()
                     refreshControls()
                 }
             )
