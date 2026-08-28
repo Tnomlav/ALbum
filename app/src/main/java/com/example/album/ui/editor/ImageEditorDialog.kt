@@ -979,17 +979,16 @@ private fun EditorStage(
             geometry
         }
     }
-    // Each mosaic stroke samples the image as it looked immediately before
-    // that stroke, including all earlier doodle strokes.
-    val mosaicSources = remember(displayBitmap, state.strokes) {
-        state.strokes.mapIndexed { index, stroke ->
-            if (stroke.brush == EditorBrush.Mosaic) {
-                renderDoodleComposite(displayBitmap, state.strokes.take(index))
-            } else null
-        }
+    // Mosaic is one fixed grid derived from the untouched display image.
+    // Strokes only reveal this layer; they never affect its sampled colors.
+    val hasMosaic = state.strokes.any { it.brush == EditorBrush.Mosaic && it.points.isNotEmpty() }
+    val mosaicLayer = remember(displayBitmap, hasMosaic) {
+        if (hasMosaic) buildMosaicLayer(displayBitmap) else null
     }
-    val activeMosaicSource = remember(displayBitmap, state.strokes) {
-        renderDoodleComposite(displayBitmap, state.strokes)
+    DisposableEffect(mosaicLayer) {
+        onDispose {
+            mosaicLayer?.let { if (!it.isRecycled) it.recycle() }
+        }
     }
     val targetRatio = when {
         state.crop == CropPreset.Free && composeEnabled -> geometry.width.toFloat() / geometry.height
@@ -1493,28 +1492,36 @@ private fun EditorStage(
                         return@forEachIndexed
                     }
                     if (stroke.brush == EditorBrush.Mosaic) {
-                        val tile = (strokeWidth / 3f).coerceAtLeast(2f)
-                        val mosaicSource = mosaicSources.getOrNull(strokeIndex) ?: activeMosaicSource
-                        stroke.points.filterIndexed { pointIndex, _ -> pointIndex % 2 == 0 }.forEach { point ->
-                            for (row in -1..1) {
-                                for (column in -1..1) {
-                                    val offsetX = column * tile
-                                    val offsetY = row * tile
-                                    val sampleX = (point.x * mosaicSource.width + offsetX * mosaicSource.width / size.width)
-                                        .toInt().coerceIn(0, mosaicSource.width - 1)
-                                    val sampleY = (point.y * mosaicSource.height + offsetY * mosaicSource.height / size.height)
-                                        .toInt().coerceIn(0, mosaicSource.height - 1)
-                                    drawRect(
-                                        Color(mosaicSource.getPixel(sampleX, sampleY)),
-                                        topLeft = androidx.compose.ui.geometry.Offset(
-                                            point.x * size.width + offsetX - tile / 2f,
-                                            point.y * size.height + offsetY - tile / 2f
-                                        ),
-                                        size = androidx.compose.ui.geometry.Size(tile, tile)
-                                    )
-                                }
+                        val mosaic = mosaicLayer ?: return@forEachIndexed
+                        val mosaicPath = Path().apply {
+                            moveTo(stroke.points.first().x * size.width, stroke.points.first().y * size.height)
+                            stroke.points.drop(1).forEach {
+                                lineTo(it.x * size.width, it.y * size.height)
                             }
                         }
+                        drawContext.canvas.nativeCanvas.saveLayer(
+                            0f, 0f, size.width, size.height, null
+                        )
+                        drawPath(
+                            mosaicPath,
+                            Color.White,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                width = strokeWidth * 1.5f,
+                                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                                join = androidx.compose.ui.graphics.StrokeJoin.Round
+                            )
+                        )
+                        drawContext.canvas.nativeCanvas.drawBitmap(
+                            mosaic,
+                            null,
+                            android.graphics.RectF(0f, 0f, size.width, size.height),
+                            android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                                xfermode = android.graphics.PorterDuffXfermode(
+                                    android.graphics.PorterDuff.Mode.SRC_IN
+                                )
+                            }
+                        )
+                        drawContext.canvas.nativeCanvas.restore()
                         return@forEachIndexed
                     }
                     if (stroke.brush == EditorBrush.Spray) {

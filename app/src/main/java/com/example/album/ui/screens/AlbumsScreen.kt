@@ -293,7 +293,8 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
     val density = LocalDensity.current
     val triggerPull = with(density) { 96.dp.toPx() }
     val maxPull = with(density) { 144.dp.toPx() }
-    val pullRefreshing = refreshing
+    // Loading/scanning alone must not move the content like a pull gesture.
+    val pullRefreshing = refreshing && pullDistance > 0f
     LaunchedEffect(refreshing) {
         if (!refreshing) pullDistance = 0f
     }
@@ -423,7 +424,7 @@ private fun FolderGrid(
     val density = LocalDensity.current
     val triggerPull = with(density) { 96.dp.toPx() }
     val maxPull = with(density) { 144.dp.toPx() }
-    val pullRefreshing = refreshing
+    val pullRefreshing = refreshing && pullDistance > 0f
     LaunchedEffect(refreshing) {
         if (!refreshing) pullDistance = 0f
     }
@@ -547,7 +548,7 @@ private fun AdaptiveFolderGrid(
     val density = LocalDensity.current
     val triggerPull = with(density) { 96.dp.toPx() }
     val maxPull = with(density) { 144.dp.toPx() }
-    val pullRefreshing = refreshing
+    val pullRefreshing = refreshing && pullDistance > 0f
     LaunchedEffect(refreshing) {
         if (!refreshing) pullDistance = 0f
     }

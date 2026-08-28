@@ -147,6 +147,7 @@ import com.example.album.ui.screens.PixivArchiveScreen
 import com.example.album.ui.screens.PixivArchiveSession
 import com.example.album.ui.screens.ArchiveActivity
 import com.example.album.ui.screens.ArchiveUiState
+import com.example.album.ui.screens.PixivArchiveScanService
 import com.example.album.data.PixivArchivePhase
 import com.example.album.ui.screens.DestinationScreen
 import com.example.album.ui.theme.VaultDimens
@@ -157,6 +158,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.yield
 import kotlin.coroutines.coroutineContext
 import kotlin.math.roundToInt
 
@@ -322,6 +324,8 @@ fun AlbumApp(
     var showFavoriteBadge by remember { mutableStateOf(albumSettings.getBoolean("show_favorite_badge", true)) }
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var selectingFolders by rememberSaveable { mutableStateOf(false) }
+    var selectionMediaSort by rememberSaveable { mutableStateOf(initialSort) }
+    var selectionMediaSortDirection by rememberSaveable { mutableStateOf(SortDirection.Descending) }
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedFolders by remember { mutableStateOf<Set<String>>(emptySet()) }
     var suspendedSearchQuery by rememberSaveable { mutableStateOf<String?>(null) }
@@ -373,6 +377,8 @@ fun AlbumApp(
         normalizedTabOrder(stored, pixivEnabledAtStart)
     }
     var tabOrder by remember { mutableStateOf(initialTabOrder) }
+    val primaryTab = tabOrder.firstOrNull { it in enabledMainTabs(pixivTabEnabled) } ?: MainTab.Albums
+    var lastRootBackAt by rememberSaveable { mutableLongStateOf(0L) }
     var bottomBarWidth by remember { mutableIntStateOf(0) }
     var draggedNavTab by remember { mutableStateOf<MainTab?>(null) }
     var navDragX by remember { mutableFloatStateOf(0f) }
@@ -669,7 +675,8 @@ fun AlbumApp(
         favoriteFilter = false
         suspendedSearchQuery = null
         searchOpen = true
-        if (selectedTab != MainTab.Albums) selectedTab = MainTab.Albums
+        lastRootBackAt = 0L
+        if (selectedTab != primaryTab) selectedTab = primaryTab
     }
 
     fun suspendSearch() {
@@ -700,19 +707,7 @@ fun AlbumApp(
                 !showColumnDialog &&
                 !showLayoutDialog &&
                 !showDateDialog &&
-                !showExcludeDialog &&
-                (
-                    transferRequest != null ||
-                        pixivArchiveOpen ||
-                        cleanupOpen ||
-                        selectionMode ||
-                        openedFolder != null ||
-                        query.isNotBlank() ||
-                        searchOpen ||
-                        favoriteFilter ||
-                        timelineJumpDate != null ||
-                        selectedTab != MainTab.Albums
-                    )
+                !showExcludeDialog
         }
     }
 
@@ -741,7 +736,20 @@ fun AlbumApp(
             searchOpen -> suspendSearch()
             favoriteFilter -> favoriteFilter = false
             timelineJumpDate != null -> timelineJumpDate = null
-            selectedTab != MainTab.Albums -> returnToPrimaryTab()
+            selectedTab != primaryTab -> returnToPrimaryTab()
+            else -> {
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastRootBackAt <= 2_000L) {
+                    (context as? Activity)?.finish()
+                } else {
+                    lastRootBackAt = now
+                    Toast.makeText(
+                        context,
+                        if (english) "Press back again to exit" else "再按一次返回退出应用",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
         }
     }
 
@@ -1147,6 +1155,9 @@ fun AlbumApp(
                     ).show()
                 }
                 scope.launch(transferErrorHandler) {
+                    // Let Compose commit the destination-page exit before
+                    // starting transfer work and its media refresh.
+                    yield()
                     val archiveMoveUris = pixivArchiveMoveUris
                     val results = library.transfer(request.items, destination, policy, preserveDate, request.mode)
                     val completed = results.filter { it.success && !it.skipped }
@@ -1156,6 +1167,24 @@ fun AlbumApp(
                     val updatedRecent = (listOf(destination) + recentFolders).distinct().take(8)
                     transferPreferences.edit().putString("recent_folders", updatedRecent.joinToString("\u001f")).apply()
                     library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
+
+                    if (completed.isNotEmpty()) {
+                        // Folder entries are displayed by leaf name in the
+                        // album grid, while the destination picker may carry
+                        // a parent path such as "Pictures/Wallpapers".
+                        openedFolder = destination.substringAfterLast('/')
+                            .trim()
+                            .takeIf { it.isNotBlank() }
+                        selectedTab = when {
+                            request.items.isNotEmpty() && request.items.all { it.isVideo } -> MainTab.Videos
+                            request.items.isNotEmpty() && request.items.all { !it.isVideo } -> MainTab.Albums
+                            else -> selectedTab
+                        }
+                        query = ""
+                        suspendedSearchQuery = null
+                        searchOpen = true
+                        favoriteFilter = false
+                    }
 
                     if (request.mode == TransferMode.Move) {
                         val directlyMovedArchiveUris = completed
@@ -1251,75 +1280,20 @@ fun AlbumApp(
         PixivArchiveScreen(
             session = pixivArchiveSession,
             onStartScan = { source, maxBatchSize ->
-                pixivArchiveSession.scanJob?.cancel()
-                    pixivArchiveSession.scanJob = null
-                    pixivArchiveSession.state.value = ArchiveUiState.Scanning
-                    pixivArchiveSession.completed.value = 0
-                    pixivArchiveSession.failed.value = 0
-                    pixivArchiveSession.activity.value = ArchiveActivity(
-                        message = if (english) "Reading source folder" else "正在读取来源目录"
-                    )
-                pixivArchiveSession.scanJob = scope.launch {
-                    runCatching {
-                        val existingRecords = pixivArchiveSession.records.value
-                        val onProgress: suspend (com.example.album.data.PixivArchiveProgress) -> Unit = { update ->
-                            withContext(Dispatchers.Main) {
-                                val current = pixivArchiveSession.activity.value
-                                pixivArchiveSession.completed.value = update.completed
-                                pixivArchiveSession.failed.value = update.failed
-                                pixivArchiveSession.activity.value = ArchiveActivity(
-                                    phase = update.phase,
-                                    completed = update.completed,
-                                    total = update.total,
-                                    failed = update.failed,
-                                    currentFile = update.currentFile,
-                                    currentArtist = update.currentArtist,
-                                    message = update.message,
-                                    logs = if (update.log.isBlank()) current.logs
-                                    else (listOf(update.log) + current.logs).take(4)
-                                )
-                            }
-                        }
-                        val onRecord: suspend (com.example.album.data.PixivArchiveRecord) -> Unit = { record ->
-                            withContext(Dispatchers.Main) {
-                                pixivArchiveSession.upsertRecord(record)
-                            }
-                        }
-                        if (existingRecords.isNotEmpty()) {
-                            pixivRepository.rescan(
-                                existingRecords,
-                                maxItems = existingRecords.size,
-                                onProgress = onProgress,
-                                onRecord = onRecord
-                            )
-                        } else {
-                            pixivRepository.scan(
-                                source,
-                                maxItems = maxBatchSize,
-                                onProgress = onProgress,
-                                onRecord = onRecord
-                            )
-                        }
-                    }.onSuccess { scanned ->
-                        pixivArchiveSession.mergeRecords(scanned)
-                        pixivArchiveSession.state.value = ArchiveUiState.Ready
-                        Toast.makeText(
-                            context,
-                            if (english) "Scan complete: ${scanned.size} results" else "全部扫描完成，共 ${scanned.size} 项结果",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }.onFailure { error ->
-                        if (error is CancellationException) throw error
-                        val message = error.message ?: if (english) "Unable to read source folder" else "无法读取来源目录"
-                        val current = pixivArchiveSession.activity.value
-                        pixivArchiveSession.activity.value = current.copy(
-                            phase = PixivArchivePhase.Error,
-                            message = message,
-                            logs = (listOf(message) + current.logs).take(4)
-                        )
-                        pixivArchiveSession.state.value = ArchiveUiState.Error
+                if (pixivArchiveSession.state.value != ArchiveUiState.Scanning) {
+                    val intent = Intent(context, PixivArchiveScanService::class.java).apply {
+                        action = PixivArchiveScanService.ACTION_SCAN
+                        putExtra(PixivArchiveScanService.EXTRA_SOURCE_URI, source.toString())
+                        putExtra(PixivArchiveScanService.EXTRA_MAX_BATCH, maxBatchSize)
                     }
-                    if (pixivArchiveSession.scanJob === coroutineContext[Job]) pixivArchiveSession.scanJob = null
+                    runCatching { ContextCompat.startForegroundService(context, intent) }
+                        .onFailure { error ->
+                            pixivArchiveSession.setScanState(ArchiveUiState.Error)
+                            pixivArchiveSession.activity.value = pixivArchiveSession.activity.value.copy(
+                                phase = PixivArchivePhase.Error,
+                                message = error.message ?: "无法启动后台扫描"
+                            )
+                        }
                 }
             },
             onBack = {
@@ -1547,7 +1521,7 @@ fun AlbumApp(
                     selectionMode = false
                     beginEditing(selected)
                 }},
-                onWallpaper = selectedItemsForAction.singleOrNull()?.takeIf { !selectingFolders && !it.isVideo }?.let { selected -> {
+                onWallpaper = selectedItemsForAction.singleOrNull()?.takeIf { !selectingFolders }?.let { selected -> {
                     setWallpaper(context, selected, english)
                 }},
                 onExclude = if (selectingFolders && selectedFolders.isNotEmpty()) {{
@@ -1635,6 +1609,12 @@ fun AlbumApp(
                         MainMenuAction.Sort -> showSortDialog = true
                         MainMenuAction.JumpToDate -> showDateDialog = true
                         MainMenuAction.Select -> {
+                            // Freeze the order at the moment selection starts.
+                            // This is especially important inside a folder,
+                            // where the selection screen replaces the folder
+                            // content immediately.
+                            selectionMediaSort = mediaSort
+                            selectionMediaSortDirection = sortDirection
                             selectionMode = true
                             selectingFolders = openedFolder == null && (tab == MainTab.Albums || tab == MainTab.Videos || (tab == MainTab.Pixiv && pixivSearchMode == PixivSearchMode.Artist))
                             val first = currentSelectionMedia.firstOrNull()
@@ -2024,8 +2004,8 @@ fun AlbumApp(
                         selectionMediaFirstVisibleItem = index
                         selectionMediaFirstVisibleOffset = offset
                     },
-                    sort = mediaSort,
-                    sortDirection = sortDirection,
+                    sort = selectionMediaSort,
+                    sortDirection = selectionMediaSortDirection,
                     onToggle = { item ->
                         val key = item.uri.toString()
                         selectedUris = if (key in selectedUris) selectedUris - key else selectedUris + key
@@ -2574,6 +2554,7 @@ fun AlbumApp(
             onValueChange = { selectionRenameText = it },
             label = appText("文件名", english),
             confirmLabel = appText("保存", english),
+            autoFocus = true,
             initialSelection = TextRange(0, (if (showRenameExtension && extension != null) editableName.length - extension.length - 1 else editableName.length).coerceAtLeast(0)),
             onDismiss = { selectionRenameItem = null },
             onConfirm = {
@@ -2607,6 +2588,8 @@ fun AlbumApp(
             onValueChange = { selectionRenameText = it },
             label = appText("文件夹名称", english),
             confirmLabel = appText("保存", english),
+            autoFocus = true,
+            initialSelection = TextRange(0, selectionRenameText.length),
             onDismiss = { selectionRenameFolder = null },
             onConfirm = {
                 val newName = selectionRenameText.trim()
