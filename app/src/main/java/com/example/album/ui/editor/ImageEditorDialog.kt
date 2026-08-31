@@ -266,8 +266,8 @@ fun ImageEditorDialog(
                 Toast.makeText(
                     context,
                     if (english) {
-                        if (replaceOriginal) "Original replaced" else "Saved to Pictures/相册/已编辑"
-                    } else if (replaceOriginal) "已替换原图" else "已保存到 Pictures/相册/已编辑",
+                        if (replaceOriginal) "Original replaced" else "Edited copy saved"
+                    } else if (replaceOriginal) "已替换原图" else "已保存编辑副本",
                     Toast.LENGTH_SHORT
                 ).show()
                 leaveEditor(onSaved)

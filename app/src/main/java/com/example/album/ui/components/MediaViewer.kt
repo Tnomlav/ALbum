@@ -538,7 +538,7 @@ fun MediaViewer(
                     }
 
                     if (showInfo && imageControlsVisible) {
-                        MediaInfoPanel(current, Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 66.dp, end = 10.dp))
+                        MediaInfoPanel(current, Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 66.dp, end = 10.dp), playerStyle = current.isVideo)
                     }
 
                 }
@@ -620,6 +620,7 @@ private fun ViewerTopBar(
     onWallpaper: (() -> Unit)?
 ) {
     val english = LocalAppEnglish.current
+    val menuForeground = if (item.isVideo) Color.White else Color(0xFF1A1A1A)
     Row(
         Modifier.fillMaxWidth()
             .height(68.dp)
@@ -649,18 +650,19 @@ private fun ViewerTopBar(
                 expanded = menuExpanded,
                 onDismissRequest = { onMenuExpanded(false) },
                 modifier = Modifier.width(190.dp).clip(RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp)),
-                containerColor = Color.Black.copy(alpha = .20f)
+                containerColor = if (item.isVideo) Color.Black.copy(alpha = .20f) else Color.White
             ) {
-                DropdownMenuItem(text = { Text(appText("分享", english), color = Color.White, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Share, null, tint = Color.White) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); onShare() })
-                DropdownMenuItem(text = { Text(appText("复制", english), color = Color.White, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null, tint = Color.White) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); onCopy() })
+                DropdownMenuItem(text = { Text(appText("分享", english), color = menuForeground, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Share, null, tint = menuForeground) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); onShare() })
+                DropdownMenuItem(text = { Text(appText("复制", english), color = menuForeground, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null, tint = menuForeground) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); onCopy() })
+                DropdownMenuItem(text = { Text(appText("信息", english), color = menuForeground, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Info, null, tint = menuForeground) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); onInfo() })
                 onSettings?.let { action ->
-                    DropdownMenuItem(text = { Text(appText("设置", english), color = Color.White, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.SettingsIcon, null, tint = Color.White) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); action() })
+                    DropdownMenuItem(text = { Text(appText("设置", english), color = menuForeground, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.SettingsIcon, null, tint = menuForeground) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); action() })
                 }
                 onEditTags?.let { action ->
-                    DropdownMenuItem(text = { Text(if (english) "View/Edit Tags" else "查看/编辑 Tags", color = Color.White, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Label, null, tint = Color.White) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); action() })
+                    DropdownMenuItem(text = { Text(if (english) "View/Edit Tags" else "查看/编辑 Tags", color = menuForeground, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Label, null, tint = menuForeground) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); action() })
                 }
                 onWallpaper?.let { action ->
-                    DropdownMenuItem(text = { Text(appText("设置为壁纸", english), color = Color.White, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Wallpaper, null, tint = Color.White) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); action() })
+                    DropdownMenuItem(text = { Text(appText("设置为壁纸", english), color = menuForeground, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Wallpaper, null, tint = menuForeground) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); action() })
                 }
             }
         }
@@ -705,6 +707,7 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
     val english = LocalAppEnglish.current
     val preferences = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE) }
     var autoplay by remember { mutableStateOf(preferences.getBoolean("video_autoplay", true)) }
+    var pauseOnBackground by remember { mutableStateOf(preferences.getBoolean("video_pause_on_background", true)) }
     var rememberProgress by remember { mutableStateOf(preferences.getBoolean("video_progress", true)) }
     var autoHide by remember { mutableStateOf(preferences.getBoolean("video_auto_hide", true)) }
     var longSkip by remember { mutableStateOf(preferences.getBoolean("long_skip", false)) }
@@ -719,7 +722,7 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
     fun putBoolean(key: String, value: Boolean) = preferences.edit().putBoolean(key, value).apply()
     fun putString(key: String, value: String) = preferences.edit().putString(key, value).apply()
     val options = when (openChoice) {
-        "normal" -> listOf("5秒", "10秒", "15秒", "30秒")
+        "normal" -> listOf("3秒", "5秒", "10秒", "15秒", "30秒")
         "long" -> listOf("30秒", "60秒", "90秒", "120秒")
         "gesture" -> listOf("30秒", "60秒", "90秒", "120秒", "150秒")
         else -> emptyList()
@@ -735,6 +738,9 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 VideoSettingSwitch(appText("打开视频时自动播放", english), autoplay) {
                     autoplay = it; putBoolean("video_autoplay", it)
+                }
+                VideoSettingSwitch(appText("进入后台时自动暂停", english), pauseOnBackground) {
+                    pauseOnBackground = it; putBoolean("video_pause_on_background", it)
                 }
                 VideoSettingSwitch(appText("记住最后一次播放进度", english), rememberProgress) {
                     rememberProgress = it; putBoolean("video_progress", it)
@@ -907,7 +913,9 @@ private fun NativeVideoPlayer(
     var speed by remember { mutableFloatStateOf(1f) }
     var showSpeedDialog by remember { mutableStateOf(false) }
     var speedDialogWasPlaying by remember { mutableStateOf(false) }
-    var orientationMode by remember { mutableIntStateOf(0) }
+    var orientationMode by remember {
+        mutableIntStateOf(preferences.getInt("video_orientation_mode", 0).coerceIn(0, 2))
+    }
     var gestureTarget by remember { mutableStateOf<Long?>(null) }
     var gestureHud by remember { mutableStateOf<String?>(null) }
     var gestureViewportWidth by remember { mutableIntStateOf(0) }
@@ -1197,6 +1205,7 @@ private fun NativeVideoPlayer(
 
     fun cycleOrientation() {
         orientationMode = (orientationMode + 1) % 3
+        preferences.edit().putInt("video_orientation_mode", orientationMode).apply()
         Toast.makeText(context, appText(listOf("自适应", "横屏", "竖屏")[orientationMode], english), Toast.LENGTH_SHORT).show()
     }
 
@@ -1869,7 +1878,7 @@ private fun formatPlayerTime(milliseconds: Long): String {
 private fun roundToInt(value: Float): Int = value.toInt()
 
 @Composable
-private fun MediaInfoPanel(item: MediaItem, modifier: Modifier = Modifier) {
+private fun MediaInfoPanel(item: MediaItem, modifier: Modifier = Modifier, playerStyle: Boolean = false) {
     val context = LocalContext.current
     val english = LocalAppEnglish.current
     val details by produceState<MediaDetails?>(null, item.uri) {
@@ -1879,7 +1888,7 @@ private fun MediaInfoPanel(item: MediaItem, modifier: Modifier = Modifier) {
         modifier = modifier.width(228.dp),
         shape = RoundedCornerShape(14.dp),
         shadowElevation = 10.dp,
-        color = Color.White
+        color = if (playerStyle) Color.Black.copy(alpha = .20f) else Color.White
     ) {
         Text(
             text = buildString {
@@ -1896,7 +1905,7 @@ private fun MediaInfoPanel(item: MediaItem, modifier: Modifier = Modifier) {
                 append(item.displayAddress())
             },
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
-            color = Color(0xFF1C1C1E),
+            color = if (playerStyle) Color.White else Color(0xFF1C1C1E),
             fontSize = 13.sp,
             lineHeight = 24.sp
         )

@@ -679,19 +679,29 @@ fun AlbumApp(
         MainTab.Settings -> "Settings"
     } else tab.label
 
+    fun mediaInDisplayOrder(items: List<MediaItem>): List<MediaItem> {
+        val ordered = when (mediaSort) {
+            MediaSort.Time, MediaSort.Count -> items.sortedBy { it.dateTaken }
+            MediaSort.Name -> items.sortedBy { it.name.lowercase() }
+            MediaSort.Size -> items.sortedBy { it.size }
+            MediaSort.Duration -> items.sortedBy { it.duration }
+        }
+        return if (sortDirection == SortDirection.Descending) ordered.reversed() else ordered
+    }
+
     fun openMedia(item: MediaItem) {
         // Video playback has no shared-image destination; keep its thumbnail
         // visible while the native player performs its regular entrance.
         activeSharedMediaKey = item.takeUnless { it.isVideo }?.let { "media:${it.uri}" }
-        viewerScope = currentSelectionMedia
-            .filter { it.isVideo == item.isVideo }
+        viewerScope = mediaInDisplayOrder(currentSelectionMedia
+            .filter { it.isVideo == item.isVideo })
             .takeIf { scope -> scope.any { it.uri == item.uri } }
             ?: if (item.isVideo) {
-                (library.videos + library.localVideos).distinctBy { it.uri.toString() }
+                mediaInDisplayOrder((library.videos + library.localVideos).distinctBy { it.uri.toString() })
             } else if (selectedTab == MainTab.Pixiv) {
-                pixivImages
+                mediaInDisplayOrder(pixivImages)
             } else {
-                (library.images + library.localImages).distinctBy { it.uri.toString() }
+                mediaInDisplayOrder((library.images + library.localImages).distinctBy { it.uri.toString() })
             }
         viewerMedia = item
         selectedMedia = item
@@ -1630,11 +1640,16 @@ fun AlbumApp(
                         appText("排布方式", english) -> showWallpaperLayoutDialog = true
                         appText("排序方式", english) -> showWallpaperSortDialog = true
                         appText("清空壁纸队列", english) -> {
-                            wallpaperQueueUris = emptySet()
-                            wallpaperQueueOrder = emptyList()
+                            val currentTypeUris = wallpaperQueueMedia
+                                .filter { it.isVideo == wallpaperShowVideos }
+                                .mapTo(mutableSetOf()) { it.uri.toString() }
+                            val updatedUris = wallpaperQueueUris - currentTypeUris
+                            val updatedOrder = wallpaperQueueOrder.filterNot { it in currentTypeUris }
+                            wallpaperQueueUris = updatedUris
+                            wallpaperQueueOrder = updatedOrder
                             preferences.edit()
-                                .putStringSet("wallpaper_queue_uris", emptySet())
-                                .putString("wallpaper_queue_order", JSONArray().toString())
+                                .putStringSet("wallpaper_queue_uris", updatedUris)
+                                .putString("wallpaper_queue_order", JSONArray(updatedOrder).toString())
                                 .apply()
                         }
                     }
@@ -1666,6 +1681,7 @@ fun AlbumApp(
                     wallpaperSelectedUris.isNotEmpty()
                 } else true,
                 actionCapsule = wallpaperQuery.isBlank(),
+                actionStartPadding = 10.dp,
                 onActionClick = {
                     if (wallpaperQuery.isNotBlank()) {
                         addToWallpaperQueue(wallpaperSearchMedia.filter { it.uri.toString() in wallpaperSelectedUris })

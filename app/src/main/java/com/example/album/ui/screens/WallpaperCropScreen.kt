@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,10 +20,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ScreenRotation
+import androidx.compose.material.icons.outlined.RotateLeft
+import androidx.compose.material.icons.outlined.RotateRight
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,6 +44,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.graphicsLayer
 import com.example.album.data.MediaItem
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
@@ -59,6 +66,8 @@ fun WallpaperCropScreen(
     val configuration = LocalConfiguration.current
     val portraitRatio = configuration.screenWidthDp.toFloat() / configuration.screenHeightDp.coerceAtLeast(1)
     var landscape by remember { mutableStateOf(false) }
+    var rotation by remember { mutableStateOf(0) }
+    var straighten by remember { mutableStateOf(0f) }
     var bitmap by remember(item.uri) { mutableStateOf<android.graphics.Bitmap?>(null) }
     var loading by remember(item.uri) { mutableStateOf(true) }
     var frame by remember(item.uri) { mutableStateOf(NormalizedRect()) }
@@ -80,6 +89,18 @@ fun WallpaperCropScreen(
                 Icon(Icons.Outlined.Close, appText("取消", english), tint = Color.White)
             }
             IconButton(onClick = {
+                rotation = (rotation + 270) % 360
+                frame = NormalizedRect()
+            }) {
+                Icon(Icons.Outlined.RotateLeft, appText("左转", english), tint = Color.White)
+            }
+            IconButton(onClick = {
+                rotation = (rotation + 90) % 360
+                frame = NormalizedRect()
+            }) {
+                Icon(Icons.Outlined.RotateRight, appText("右转", english), tint = Color.White)
+            }
+            IconButton(onClick = {
                 landscape = !landscape
                 frame = NormalizedRect()
             }) {
@@ -88,8 +109,13 @@ fun WallpaperCropScreen(
             IconButton(onClick = {
                 val source = bitmap ?: return@IconButton
                 val ratio = if (landscape) 1f / portraitRatio.coerceAtLeast(.01f) else portraitRatio.coerceAtLeast(.01f)
-                val selected = if (frame == NormalizedRect()) centeredFrame(source.width.toFloat() / source.height, ratio) else frame
-                onConfirm(cropWallpaperBitmap(source, selected, ratio))
+                val imageRatio = if (rotation % 180 == 0) {
+                    source.width.toFloat() / source.height.coerceAtLeast(1)
+                } else {
+                    source.height.toFloat() / source.width.coerceAtLeast(1)
+                }
+                val selected = if (frame == NormalizedRect()) centeredFrame(imageRatio, ratio) else frame
+                onConfirm(cropWallpaperBitmap(source, selected, ratio, rotation, straighten))
             }) {
                 Icon(Icons.Outlined.Check, appText("使用裁剪区域", english), tint = Color.White)
             }
@@ -108,14 +134,23 @@ fun WallpaperCropScreen(
                     Modifier.fillMaxSize().padding(top = 58.dp, bottom = 20.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    val imageRatio = source.width.toFloat() / source.height.coerceAtLeast(1)
+                    val imageRatio = if (rotation % 180 == 0) {
+                        source.width.toFloat() / source.height.coerceAtLeast(1)
+                    } else {
+                        source.height.toFloat() / source.width.coerceAtLeast(1)
+                    }
                     val width = min(maxWidth.value, maxHeight.value * imageRatio).dp
                     val height = (width.value / imageRatio).dp
                     val ratio = if (landscape) 1f / portraitRatio.coerceAtLeast(.01f) else portraitRatio.coerceAtLeast(.01f)
                     val initial = centeredFrame(imageRatio, ratio)
                     if (frame == NormalizedRect()) frame = initial
                     Box(Modifier.width(width).height(height)) {
-                        Image(source.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
+                        Image(
+                            source.asImageBitmap(),
+                            null,
+                            Modifier.fillMaxSize().graphicsLayer { rotationZ = rotation + straighten },
+                            contentScale = ContentScale.FillBounds
+                        )
                         CropFrame(
                             frame = frame,
                             normalizedRatio = ratio / imageRatio,
@@ -124,6 +159,30 @@ fun WallpaperCropScreen(
                         )
                     }
                 }
+            }
+        }
+
+        if (!loading && bitmap != null) {
+            Column(
+                Modifier.align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = .86f))
+                    .padding(horizontal = 18.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = if (english) "Angle: ${straighten.toInt()}°" else "角度：${straighten.toInt()}°",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Slider(
+                    value = straighten,
+                    onValueChange = { straighten = it },
+                    valueRange = -45f..45f,
+                    steps = 89,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }
