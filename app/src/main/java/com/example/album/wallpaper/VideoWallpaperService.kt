@@ -7,6 +7,8 @@ import android.media.AudioManager
 import android.content.Context
 import android.os.PowerManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import java.io.File
 import org.json.JSONArray
 
@@ -20,6 +22,13 @@ class VideoWallpaperService : WallpaperService() {
         private var hasBeenVisible = false
         private var surfaceReady = false
         private val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        private val volumeHandler = Handler(Looper.getMainLooper())
+        private val volumeUpdater = object : Runnable {
+            override fun run() {
+                updateAudioOutput()
+                if (player != null) volumeHandler.postDelayed(this, 500L)
+            }
+        }
         private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { change ->
             if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
                 player?.pause()
@@ -59,6 +68,7 @@ class VideoWallpaperService : WallpaperService() {
         }
 
         override fun onDestroy() {
+            volumeHandler.removeCallbacks(volumeUpdater)
             audioManager.abandonAudioFocus(audioFocusListener)
             player?.release()
             player = null
@@ -84,7 +94,8 @@ class VideoWallpaperService : WallpaperService() {
                     setDataSource(source.absolutePath)
                     isLooping = true
                     val soundMode = soundMode()
-                    setVolume(if (soundMode == "Disabled" || soundMode == "ForegroundOnly" && !visible) 0f else 1f, if (soundMode == "Disabled" || soundMode == "ForegroundOnly" && !visible) 0f else 1f)
+                    val outputVolume = wallpaperOutputVolume(soundMode)
+                    setVolume(outputVolume, outputVolume)
                     if (soundMode == "BackgroundWithFocus") {
                         audioManager.requestAudioFocus(audioFocusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
                     } else {
@@ -104,6 +115,8 @@ class VideoWallpaperService : WallpaperService() {
                 player?.release()
                 null
             }
+            volumeHandler.removeCallbacks(volumeUpdater)
+            volumeHandler.post(volumeUpdater)
         }
 
         private fun keepPlayingInBackground(): Boolean =
@@ -118,8 +131,18 @@ class VideoWallpaperService : WallpaperService() {
 
         private fun updateAudioOutput() {
             val currentPlayer = player ?: return
-            val muted = soundMode() == "Disabled" || soundMode() == "ForegroundOnly" && !visible
-            currentPlayer.setVolume(if (muted) 0f else 1f, if (muted) 0f else 1f)
+            val outputVolume = wallpaperOutputVolume(soundMode())
+            currentPlayer.setVolume(outputVolume, outputVolume)
+        }
+
+        private fun wallpaperOutputVolume(mode: String): Float {
+            if (mode == "Disabled" || mode == "ForegroundOnly" && !visible) return 0f
+            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+            val systemVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / maxVolume
+            val wallpaperVolume = applicationContext.getSharedPreferences("album_preferences", Context.MODE_PRIVATE)
+                .getFloat("wallpaper_volume", 1f)
+                .coerceIn(0f, 1f)
+            return (systemVolume * wallpaperVolume).coerceIn(0f, 1f)
         }
 
         private fun applyPowerSaverPolicy() {

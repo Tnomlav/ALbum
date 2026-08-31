@@ -45,6 +45,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
@@ -73,6 +75,7 @@ fun VaultTopBar(
     onActionClick: (() -> Unit)? = null,
     actionEnabled: Boolean = true,
     actionCapsule: Boolean = false,
+    actionStartPadding: Dp = 0.dp,
     onTitleClick: (() -> Unit)? = null,
     chromeAlpha: Float = 1f
 ) {
@@ -81,6 +84,8 @@ fun VaultTopBar(
     var focusSearchOnExpand by remember { mutableStateOf(false) }
     val searchFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val destructiveAction = actionLabel == appText("清除", english)
+    val actionColor = if (destructiveAction) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
 
     LaunchedEffect(searchEnabled, focusSearchOnExpand) {
         if (searchEnabled && focusSearchOnExpand) {
@@ -193,11 +198,12 @@ fun VaultTopBar(
                     if (actionCapsule) {
                         Box(
                             modifier = Modifier
+                                .padding(start = actionStartPadding)
                                 .height(34.dp)
                                 .widthIn(min = 48.dp)
                                 .clip(RoundedCornerShape(50))
                                 .background(
-                                    if (actionEnabled) MaterialTheme.colorScheme.primary.copy(alpha = .12f)
+                                    if (actionEnabled) actionColor.copy(alpha = if (destructiveAction) .14f else .12f)
                                     else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)
                                 )
                                 .clickable(enabled = actionEnabled, onClick = onActionClick)
@@ -206,7 +212,7 @@ fun VaultTopBar(
                         ) {
                             Text(
                                 actionLabel,
-                                color = if (actionEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
+                                color = if (actionEnabled) actionColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
                                 fontSize = 12.sp,
                                 maxLines = 1,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -215,9 +221,9 @@ fun VaultTopBar(
                     } else {
                         Text(
                             actionLabel,
-                            modifier = Modifier.height(48.dp).widthIn(min = 44.dp)
+                            modifier = Modifier.padding(start = actionStartPadding).height(48.dp).widthIn(min = 44.dp)
                                 .clickable(enabled = actionEnabled, onClick = onActionClick),
-                            color = if (actionEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
+                            color = if (actionEnabled) actionColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
                             fontSize = 12.sp,
                             maxLines = 1,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center

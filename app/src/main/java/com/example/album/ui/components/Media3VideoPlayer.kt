@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
+import android.media.AudioFocusRequest
+import android.media.AudioAttributes
 import android.os.Build
 import android.provider.Settings
 import android.view.OrientationEventListener
@@ -104,6 +106,7 @@ import com.example.album.playback.MediaPlaybackService
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
 import com.example.album.ui.theme.VaultDimens
+import com.example.album.ui.editor.EditorPrototypeIcons
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
@@ -226,6 +229,7 @@ internal fun Media3VideoPlayer(
     var controlsLocked by remember { mutableStateOf(false) }
     var controlsInteraction by remember { mutableIntStateOf(0) }
     var playerMenuOpen by remember { mutableStateOf(false) }
+    var mirrorVideo by remember { mutableStateOf(false) }
     var popupWasPlaying by remember { mutableStateOf(false) }
     var settingsPausePending by remember { mutableStateOf(false) }
     val autoHideControls = preferences.getBoolean("video_auto_hide", true)
@@ -253,11 +257,14 @@ internal fun Media3VideoPlayer(
         val max = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC)?.coerceAtLeast(1) ?: 1
         mutableFloatStateOf(((audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: max).toFloat() / max).coerceIn(0f, 1f))
     }
-    var orientationMode by remember { mutableIntStateOf(0) }
+    var orientationMode by remember {
+        mutableIntStateOf(preferences.getInt("video_orientation_mode", 0).coerceIn(0, 2))
+    }
     var displayedOrientationMode by remember { mutableIntStateOf(0) }
     var sensorLandscape by remember { mutableStateOf(false) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     val hostActivity = context as? Activity
+    val initialOrientation = remember(hostActivity) { hostActivity?.requestedOrientation }
     val initialScreenBrightness = remember(hostActivity) {
         hostActivity?.window?.attributes?.screenBrightness
     }
@@ -268,10 +275,12 @@ internal fun Media3VideoPlayer(
     var restoreMediaVolume by remember(audioManager) { mutableStateOf(initialMediaVolume) }
     var restoreSystemBrightnessOnExit by remember { mutableStateOf(false) }
     var hasLeftPlayer by remember { mutableStateOf(false) }
+    var pausedForBackground by remember { mutableStateOf(false) }
     fun exitPlayer() {
-        // Request portrait before the viewer's exit animation starts so the
-        // window rotation happens in parallel with the surface dismissal.
-        hostActivity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        // Restore the Activity policy before the viewer leaves. The player may
+        // have changed it to landscape, portrait, or sensor mode.
+        hostActivity?.requestedOrientation = initialOrientation
+            ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         onBack()
     }
     DisposableEffect(context) {
@@ -330,7 +339,8 @@ internal fun Media3VideoPlayer(
     }
     DisposableEffect(hostActivity) {
         onDispose {
-            hostActivity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            hostActivity?.requestedOrientation = initialOrientation
+                ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             hostActivity?.let { activity ->
                 if (restoreSystemBrightnessOnExit) {
                     activity.window.attributes = activity.window.attributes.apply { screenBrightness = -1f }
@@ -359,10 +369,72 @@ internal fun Media3VideoPlayer(
                 setMediaItems(items, currentIndex, 0L)
                 prepare()
                 playWhenReady = preferences.getBoolean("video_autoplay", true)
-            }
+        }
     }
 
     DisposableEffect(player) {
+        val lifecycle = (hostActivity as? ComponentActivity)?.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    if (preferences.getBoolean("video_pause_on_background", true) && player.playWhenReady) {
+                        pausedForBackground = true
+                        player.pause()
+                    }
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    if (pausedForBackground) {
+                        pausedForBackground = false
+                        player.play()
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
+    }
+
+    DisposableEffect(player) {
+        var pausedForAudioFocus = false
+        val audioFocusListener = AudioManager.OnAudioFocusChangeListener { change ->
+            when (change) {
+                AudioManager.AUDIOFOCUS_LOSS,
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    if (player.isPlaying || player.playWhenReady) {
+                        pausedForAudioFocus = true
+                        player.pause()
+                    }
+                }
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    if (pausedForAudioFocus) {
+                        pausedForAudioFocus = false
+                        player.play()
+                    }
+                }
+            }
+        }
+        val audioFocusRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                        .build()
+                )
+                .setOnAudioFocusChangeListener(audioFocusListener)
+                .build()
+        } else null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioManager?.requestAudioFocus(audioFocusRequest!!)
+        } else {
+            audioManager?.requestAudioFocus(
+                audioFocusListener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+            )
+        }
         val listener = object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                 videos.firstOrNull { it.uri.toString() == mediaItem?.mediaId }?.let { changed ->
@@ -399,6 +471,11 @@ internal fun Media3VideoPlayer(
                 preferences.edit().putLong("video_position_${current.uri.hashCode()}", player.currentPosition).apply()
             }
             player.removeListener(listener)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                audioFocusRequest?.let { audioManager?.abandonAudioFocusRequest(it) }
+            } else {
+                audioManager?.abandonAudioFocus(audioFocusListener)
+            }
             player.release()
         }
     }
@@ -567,7 +644,9 @@ internal fun Media3VideoPlayer(
                 }
             },
             update = { it.player = player },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                scaleX = if (mirrorVideo) -1f else 1f
+            }
         )
         if (!pictureInPictureMode) {
             Box(
@@ -835,6 +914,7 @@ internal fun Media3VideoPlayer(
                                 else -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
                             }
                             orientationMode = nextMode
+                            preferences.edit().putInt("video_orientation_mode", nextMode).apply()
                             refreshControls()
                         }))
                     }.forEach { (icon, label, action) ->
@@ -878,6 +958,19 @@ internal fun Media3VideoPlayer(
                                     leadingIconColor = Color.White
                                 ),
                                 onClick = { playerMenuOpen = false; onShare(); resumeAfterPopup() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (mirrorVideo) appText("取消镜像", english) else appText("镜像翻转", english), color = Color.White) },
+                                leadingIcon = { Icon(EditorPrototypeIcons.FlipHorizontal, null, tint = Color.White) },
+                                colors = MenuDefaults.itemColors(
+                                    textColor = Color.White,
+                                    leadingIconColor = Color.White
+                                ),
+                                onClick = {
+                                    mirrorVideo = !mirrorVideo
+                                    playerMenuOpen = false
+                                    resumeAfterPopup()
+                                }
                             )
                             DropdownMenuItem(
                                 text = { Text(appText("设置", english), color = Color.White) },

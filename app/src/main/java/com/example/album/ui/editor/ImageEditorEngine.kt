@@ -19,6 +19,7 @@ import android.provider.MediaStore
 import androidx.core.content.res.ResourcesCompat
 import com.example.album.R
 import com.example.album.data.MediaItem
+import com.example.album.data.PixivArchiveRepository
 import com.example.album.data.openMediaInputStream
 import com.example.album.data.openMediaOutputStream
 import java.io.File
@@ -264,15 +265,20 @@ fun croppedGeometryBitmap(
 ): Bitmap = cropBitmap(bitmap, state, referenceWidth, referenceHeight)
 
 /** Crops a wallpaper composition frame using the same geometry as the editor. */
-fun cropWallpaperBitmap(bitmap: Bitmap, frame: NormalizedRect, ratio: Float): Bitmap =
-    cropBitmap(
+fun cropWallpaperBitmap(bitmap: Bitmap, frame: NormalizedRect, ratio: Float, rotation: Int = 0, straighten: Float = 0f): Bitmap {
+    val rotated = if (rotation % 360 == 0 && straighten == 0f) bitmap else geometryBitmap(
         bitmap,
+        ImageEditState(rotation = rotation, straighten = straighten)
+    )
+    return cropBitmap(
+        rotated,
         ImageEditState(
             crop = CropPreset.Custom,
             customCropRatio = ratio,
             cropRect = frame
         )
     )
+}
 
 suspend fun saveEditedBitmap(
     context: Context,
@@ -283,6 +289,8 @@ suspend fun saveEditedBitmap(
     quality: Int,
     replaceOriginal: Boolean = false
 ): android.net.Uri? = withContext(Dispatchers.IO) {
+    // Bitmap re-encoding drops embedded metadata. Capture source tags first.
+    val sourceTags = PixivArchiveRepository(context).readTags(sourceItem)
     val exportSource = loadExportBitmap(context, sourceItem) ?: source
     val referenceGeometry = geometryBitmap(exportSource, state.copy(straighten = 0f))
     var working = geometryBitmap(exportSource, state)
@@ -348,6 +356,7 @@ suspend fun saveEditedBitmap(
                     }, null, null)
                 }
             }
+            PixivArchiveRepository(context).updateTags(sourceItem, sourceTags)
             sourceItem.uri
         }.getOrElse {
             runCatching {
@@ -368,10 +377,10 @@ suspend fun saveEditedBitmap(
             put(MediaStore.Images.Media.DATE_MODIFIED, sourceItem.dateTaken / 1000L)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/相册/已编辑")
+            put(MediaStore.Images.Media.RELATIVE_PATH, editedCopyRelativePath(sourceItem))
             put(MediaStore.Images.Media.IS_PENDING, 1)
         } else {
-            val directory = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "相册/已编辑")
+            val directory = editedCopyDirectory(context, sourceItem)
             directory.mkdirs()
             put(MediaStore.Images.Media.DATA, File(directory, displayName).absolutePath)
         }
@@ -384,12 +393,53 @@ suspend fun saveEditedBitmap(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             resolver.update(target, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
         }
+        val copiedItem = sourceItem.copy(
+            id = target.toString().hashCode().toLong(),
+            uri = target,
+            name = displayName,
+            mimeType = "image/jpeg",
+            relativePath = editedCopyRelativePath(sourceItem)
+        )
+        PixivArchiveRepository(context).updateTags(copiedItem, sourceTags)
         target
     }.getOrElse {
         resolver.delete(target, null, null)
         null
     }
         .also { if (working !== source && !working.isRecycled) working.recycle() }
+}
+
+private fun editedCopyRelativePath(sourceItem: MediaItem): String {
+    sourceItem.relativePath?.trim('/')?.takeIf { it.isNotBlank() }?.let { return "$it/" }
+    sourceItem.uri.takeIf { it.scheme.equals("file", ignoreCase = true) }?.path?.let { path ->
+        val parent = File(path).parentFile
+        val externalRoot = runCatching { Environment.getExternalStorageDirectory().canonicalPath }.getOrNull()
+        val parentPath = runCatching { parent?.canonicalPath }.getOrNull()
+        if (externalRoot != null && parentPath != null && parentPath.startsWith("$externalRoot/")) {
+            return "${parentPath.removePrefix("$externalRoot/").trim('/')}/"
+        }
+    }
+    return "${Environment.DIRECTORY_PICTURES}/${sourceItem.folder.trim('/')}/"
+}
+
+private fun editedCopyDirectory(context: Context, sourceItem: MediaItem): File {
+    val path = if (sourceItem.uri.scheme.equals("file", ignoreCase = true)) {
+        sourceItem.uri.path
+    } else {
+        runCatching {
+            context.contentResolver.query(
+                sourceItem.uri,
+                arrayOf(MediaStore.MediaColumns.DATA),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        }.getOrNull()
+    }
+    path?.let { File(it).parentFile?.let { directory -> return directory } }
+    return File(Environment.getExternalStorageDirectory(), editedCopyRelativePath(sourceItem).trim('/'))
 }
 
 private fun loadExportBitmap(context: Context, item: MediaItem): Bitmap? = runCatching {
