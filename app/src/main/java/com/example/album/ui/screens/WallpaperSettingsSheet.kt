@@ -5,6 +5,8 @@ import android.os.PowerManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,16 +46,22 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.album.ui.LocalAppEnglish
+import com.example.album.ui.components.VaultTextInputSheet
+import com.example.album.ui.components.VaultWheelChoiceSheet
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.collect
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 
 private enum class WallpaperOrder { InOrder, TrueRandom, Shuffle }
 private enum class WallpaperSound { Disabled, ForegroundOnly, BackgroundNoFocus, BackgroundWithFocus }
 private enum class WallpaperSettingDialog { Span, Order, Frequency, Sound }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WallpaperSettingsSheet(
     preferences: SharedPreferences,
@@ -119,7 +127,6 @@ fun WallpaperSettingsSheet(
                 Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(text("壁纸类型", "Wallpaper type"), fontSize = 13.sp)
                 Row(
                     Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
                         .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
@@ -170,11 +177,52 @@ fun WallpaperSettingsSheet(
                         fontSize = 13.sp,
                         color = if (dynamicBackground && sound != WallpaperSound.Disabled) androidx.compose.material3.MaterialTheme.colorScheme.onSurface else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f)
                     )
+                    val volumeActiveColor = androidx.compose.material3.MaterialTheme.colorScheme.primary
+                    val volumeInactiveColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant
+                    val volumeEnabled = dynamicBackground && sound != WallpaperSound.Disabled
                     Slider(
                         value = wallpaperVolume,
                         onValueChange = { wallpaperVolume = it },
-                        enabled = dynamicBackground && sound != WallpaperSound.Disabled,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)
+                        enabled = volumeEnabled,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                        track = { sliderState ->
+                            Canvas(Modifier.fillMaxWidth().height(4.dp)) {
+                                val fraction = ((sliderState.value - sliderState.valueRange.start) /
+                                    (sliderState.valueRange.endInclusive - sliderState.valueRange.start))
+                                    .coerceIn(0f, 1f)
+                                val centerY = size.height / 2f
+                                val thumbCenter = size.width * fraction
+                                drawLine(
+                                    volumeActiveColor,
+                                    androidx.compose.ui.geometry.Offset(0f, centerY),
+                                    androidx.compose.ui.geometry.Offset(thumbCenter, centerY),
+                                    strokeWidth = size.height,
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                                )
+                                drawLine(
+                                    volumeInactiveColor,
+                                    androidx.compose.ui.geometry.Offset(thumbCenter, centerY),
+                                    androidx.compose.ui.geometry.Offset(size.width, centerY),
+                                    strokeWidth = size.height,
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                                )
+                            }
+                        },
+                        thumb = {
+                            Box(
+                                Modifier.size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(volumeActiveColor, CircleShape)
+                            )
+                        },
+                        colors = SliderDefaults.colors(
+                            activeTrackColor = androidx.compose.ui.graphics.Color.Transparent,
+                            inactiveTrackColor = androidx.compose.ui.graphics.Color.Transparent,
+                            thumbColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledActiveTrackColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledInactiveTrackColor = androidx.compose.ui.graphics.Color.Transparent,
+                            disabledThumbColor = androidx.compose.ui.graphics.Color.Transparent
+                        )
                     )
                 }
             }
@@ -188,14 +236,14 @@ fun WallpaperSettingsSheet(
             text("壁纸范围", "Wallpaper span"),
             listOf(text("单屏宽度", "Single screen"), text("跨屏宽度", "Across screens")),
             if (spanMode == "single") 0 else 1,
-            { spanMode = if (it == 0) "single" else "scrolling" },
+            { spanMode = if (it == 0) "single" else "scrolling"; dialog = null },
             { dialog = null }
         )
         WallpaperSettingDialog.Order -> ChoiceDialog(
             text("轮播顺序", "Rotation order"),
             listOf(text("顺序播放", "In order"), text("完全随机", "True random"), text("洗牌后播放", "Shuffle then play")),
             order.ordinal,
-            { order = WallpaperOrder.entries[it] },
+            { order = WallpaperOrder.entries[it]; dialog = null },
             { dialog = null }
         )
         WallpaperSettingDialog.Frequency -> FrequencyDialog(
@@ -207,7 +255,7 @@ fun WallpaperSettingsSheet(
             text("声音播放", "Sound playback"),
             listOf(text("禁用声音", "Disabled"), text("仅前台播放", "Foreground only"), text("后台播放，不抢占音频", "Background, no audio focus"), text("后台播放，优先占用音频", "Background, audio focus")),
             sound.ordinal,
-            { sound = WallpaperSound.entries[it] },
+            { sound = WallpaperSound.entries[it]; dialog = null },
             { dialog = null }
         )
         null -> Unit
@@ -273,13 +321,14 @@ private fun ChoiceDialog(
     onSelected: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            WheelChoice(options, selectedIndex, onSelected)
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("确定") } }
+    VaultWheelChoiceSheet(
+        title = title,
+        options = options,
+        selected = options.getOrNull(selectedIndex) ?: options.firstOrNull().orEmpty(),
+        onDismiss = onDismiss,
+        onApply = { option ->
+            options.indexOf(option).takeIf { it >= 0 }?.let(onSelected)
+        }
     )
 }
 
@@ -297,99 +346,45 @@ private fun FrequencyDialog(
     var showCustomSeconds by remember { mutableStateOf(false) }
     val frequencies = listOf("1", "3", "5", "10", "30", "60", "custom")
     val text = { zh: String, en: String -> if (english) en else zh }
-    AlertDialog(
-        onDismissRequest = { if (showCustomSeconds) showCustomSeconds = false else onDismiss() },
-        title = {
-            Text(
-                if (showCustomSeconds) text("自定义轮播时间", "Custom rotation time")
-                else text("轮播频率", "Rotation frequency")
-            )
-        },
-        text = {
-            if (showCustomSeconds) {
-                OutlinedTextField(
-                    value = draftSeconds,
-                    onValueChange = { draftSeconds = it.filter(Char::isDigit).take(4) },
-                    label = { Text(text("秒数（1-3600）", "Seconds (1-3600)")) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            } else {
-                WheelChoice(
-                    frequencies.map { value ->
-                        when (value) {
-                            "custom" -> text("自定义秒数", "Custom seconds")
-                            "60" -> text("1分钟", "1 min")
-                            else -> if (english) "$value s" else "${value}秒"
-                        }
-                    },
-                    frequencies.indexOf(selected)
-                ) { index ->
-                    selected = frequencies[index]
-                    if (selected == "custom") {
-                        draftSeconds = seconds
-                        showCustomSeconds = true
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            if (showCustomSeconds) {
-                TextButton(
-                    enabled = draftSeconds.toLongOrNull()?.let { it in 1L..3600L } == true,
-                    onClick = {
-                        seconds = draftSeconds
-                        selected = "custom"
-                        showCustomSeconds = false
-                    }
-                ) { Text(text("确定", "OK")) }
-            } else {
-                TextButton(onClick = { onApply(selected, seconds) }) { Text(text("确定", "OK")) }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = { if (showCustomSeconds) showCustomSeconds = false else onDismiss() }) {
-                Text(text("取消", "Cancel"))
-            }
-        }
-    )
-}
-
-@Composable
-private fun WheelChoice(options: List<String>, selectedIndex: Int, onSelected: (Int) -> Unit) {
-    val listState = rememberLazyListState()
-    LaunchedEffect(Unit) {
-        listState.scrollToItem(selectedIndex.coerceIn(0, (options.size - 1).coerceAtLeast(0)))
-    }
-    LaunchedEffect(listState, options) {
-        snapshotFlow {
-            val visible = listState.layoutInfo.visibleItemsInfo
-            val center = listState.layoutInfo.viewportStartOffset + listState.layoutInfo.viewportEndOffset / 2
-            visible.minByOrNull { kotlin.math.abs((it.offset + it.size / 2) - center) }?.index
-        }.filter { it != null }.map { it!! }.distinctUntilChanged().collect { index ->
-            if (index in options.indices) onSelected(index)
+    val options = frequencies.map { value ->
+        when (value) {
+            "custom" -> text("自定义秒数", "Custom seconds")
+            "60" -> text("1分钟", "1 min")
+            else -> if (english) "$value s" else "${value}秒"
         }
     }
-    Box(Modifier.fillMaxWidth().height(216.dp), contentAlignment = Alignment.Center) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(vertical = 84.dp)
-        ) {
-            itemsIndexed(options) { index, option ->
-                Box(
-                    Modifier.fillMaxWidth().height(48.dp)
-                        .background(
-                            if (index == selectedIndex) androidx.compose.material3.MaterialTheme.colorScheme.primary.copy(alpha = .12f)
-                            else androidx.compose.ui.graphics.Color.Transparent,
-                            androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(option, fontSize = 14.sp, textAlign = TextAlign.Center)
+    if (!showCustomSeconds) {
+        VaultWheelChoiceSheet(
+            title = text("轮播频率", "Rotation frequency"),
+            options = options,
+            selected = options.getOrNull(frequencies.indexOf(selected)) ?: options.first(),
+            onDismiss = onDismiss,
+            onApply = { option ->
+                val index = options.indexOf(option)
+                selected = frequencies[index]
+                if (selected == "custom") {
+                    draftSeconds = seconds
+                    showCustomSeconds = true
+                } else {
+                    onApply(selected, seconds)
                 }
             }
-        }
+        )
+    }
+    if (showCustomSeconds) {
+        VaultTextInputSheet(
+            title = text("自定义轮播时间", "Custom rotation time"),
+            value = draftSeconds,
+            onValueChange = { draftSeconds = it.filter(Char::isDigit).take(4) },
+            label = text("秒数（1-3600）", "Seconds (1-3600)"),
+            confirmLabel = text("应用", "Apply"),
+            confirmEnabled = draftSeconds.toLongOrNull()?.let { it in 1L..3600L } == true,
+            onDismiss = { showCustomSeconds = false },
+            onConfirm = {
+                seconds = draftSeconds
+                onApply("custom", seconds)
+            }
+        )
     }
 }
 

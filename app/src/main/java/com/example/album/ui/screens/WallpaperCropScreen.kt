@@ -26,7 +26,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,6 +42,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.graphicsLayer
@@ -52,6 +52,7 @@ import com.example.album.ui.appText
 import com.example.album.ui.editor.NormalizedRect
 import com.example.album.ui.editor.cropWallpaperBitmap
 import com.example.album.ui.editor.loadWallpaperBitmap
+import com.example.album.ui.editor.EditorRuler
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -176,12 +177,13 @@ fun WallpaperCropScreen(
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
-                Slider(
+                EditorRuler(
                     value = straighten,
-                    onValueChange = { straighten = it },
                     valueRange = -45f..45f,
-                    steps = 89,
-                    modifier = Modifier.fillMaxWidth()
+                    onValueChange = { straighten = it },
+                    modifier = Modifier.fillMaxWidth().height(34.dp),
+                    tickSpacing = 5.dp,
+                    edgeInset = 14.dp
                 )
             }
         }
@@ -201,32 +203,55 @@ private fun CropFrame(
     onFrameChange: (NormalizedRect) -> Unit,
     modifier: Modifier
 ) {
-    val minSize = .08f
+    val density = LocalDensity.current
+    val minSize = .06f
     Canvas(
-        modifier.pointerInput(frame) {
-            var handle = -1
+        modifier.pointerInput(frame, normalizedRatio) {
+            var handle = -1 // 0..3 corners, 4..7 edges, 8 whole-frame move
             var working = frame
             detectDragGestures(
                 onDragStart = { point ->
-                    val points = listOf(
-                        Offset(frame.left * size.width, frame.top * size.height),
-                        Offset(frame.right * size.width, frame.top * size.height),
-                        Offset(frame.left * size.width, frame.bottom * size.height),
-                        Offset(frame.right * size.width, frame.bottom * size.height)
+                    val pointX = point.x / size.width
+                    val pointY = point.y / size.height
+                    val radiusX = (48f * density.density / size.width).coerceAtLeast(.024f)
+                    val radiusY = (48f * density.density / size.height).coerceAtLeast(.024f)
+                    val radius = maxOf(radiusX, radiusY)
+                    val corners = listOf(
+                        Offset(frame.left, frame.top), Offset(frame.right, frame.top),
+                        Offset(frame.left, frame.bottom), Offset(frame.right, frame.bottom)
                     )
-                    val hit = points.withIndex().minByOrNull { (it.value - point).getDistance() }
-                    handle = if (hit != null && (hit.value - point).getDistance() <= 64f) hit.index else if (
-                        point.x in frame.left * size.width..frame.right * size.width &&
-                        point.y in frame.top * size.height..frame.bottom * size.height
-                    ) 4 else -1
+                    handle = corners.indices.minByOrNull {
+                        val dx = corners[it].x - pointX
+                        val dy = corners[it].y - pointY
+                        dx * dx + dy * dy
+                    }?.takeIf {
+                        val dx = corners[it].x - pointX
+                        val dy = corners[it].y - pointY
+                        dx * dx + dy * dy <= radius * radius
+                    } ?: -1
+                    if (handle < 0) {
+                        val edgeTolerance = radius
+                        val candidates = listOf(
+                            if (pointX in frame.left - edgeTolerance..frame.right + edgeTolerance) abs(pointY - frame.top) else Float.POSITIVE_INFINITY,
+                            if (pointX in frame.left - edgeTolerance..frame.right + edgeTolerance) abs(pointY - frame.bottom) else Float.POSITIVE_INFINITY,
+                            if (pointY in frame.top - edgeTolerance..frame.bottom + edgeTolerance) abs(pointX - frame.left) else Float.POSITIVE_INFINITY,
+                            if (pointY in frame.top - edgeTolerance..frame.bottom + edgeTolerance) abs(pointX - frame.right) else Float.POSITIVE_INFINITY
+                        )
+                        handle = candidates.indices.minByOrNull { candidates[it] }
+                            ?.takeIf { candidates[it] <= edgeTolerance }?.plus(4) ?: -1
+                    }
+                    if (handle < 0 && pointX in frame.left..frame.right && pointY in frame.top..frame.bottom) handle = 8
                 },
                 onDrag = { change, amount ->
                     if (handle < 0) return@detectDragGestures
                     change.consume()
                     val dx = amount.x / size.width
                     val dy = amount.y / size.height
+                    val x = (change.position.x / size.width).coerceIn(0f, 1f)
+                    val y = (change.position.y / size.height).coerceIn(0f, 1f)
                     working = when (handle) {
-                        0, 1, 2, 3 -> resizeCorner(working, handle, dx, dy, normalizedRatio, minSize)
+                        0, 1, 2, 3 -> resizeCornerFromPointer(working, handle, x, y, normalizedRatio, minSize)
+                        4, 5, 6, 7 -> resizeEdgeFromPointer(working, handle, x, y, normalizedRatio, minSize)
                         else -> {
                             val left = (working.left + dx).coerceIn(0f, 1f - working.width)
                             val top = (working.top + dy).coerceIn(0f, 1f - working.height)
@@ -235,7 +260,8 @@ private fun CropFrame(
                     }
                     onFrameChange(working)
                 },
-                onDragEnd = { handle = -1 }
+                onDragEnd = { handle = -1 },
+                onDragCancel = { handle = -1 }
             )
         }
     ) {
@@ -248,9 +274,70 @@ private fun CropFrame(
         drawRect(Color.Black.copy(alpha = .52f), topLeft = Offset(0f, top), size = androidx.compose.ui.geometry.Size(left, bottom - top))
         drawRect(Color.Black.copy(alpha = .52f), topLeft = Offset(right, top), size = androidx.compose.ui.geometry.Size(size.width - right, bottom - top))
         drawRect(Color.White, topLeft = Offset(left, top), size = androidx.compose.ui.geometry.Size(right - left, bottom - top), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
-        listOf(Offset(left, top), Offset(right, top), Offset(left, bottom), Offset(right, bottom)).forEach {
-            drawCircle(Color.White, radius = 7.dp.toPx(), center = it)
-        }
+        val corner = 20.dp.toPx()
+        listOf(
+            Offset(left, top) to listOf(Offset(left + corner, top), Offset(left, top + corner)),
+            Offset(right, top) to listOf(Offset(right - corner, top), Offset(right, top + corner)),
+            Offset(left, bottom) to listOf(Offset(left + corner, bottom), Offset(left, bottom - corner)),
+            Offset(right, bottom) to listOf(Offset(right - corner, bottom), Offset(right, bottom - corner))
+        ).forEach { (start, ends) -> ends.forEach { end -> drawLine(Color.White, start, end, 5.dp.toPx(), androidx.compose.ui.graphics.StrokeCap.Round) } }
+    }
+}
+
+private fun resizeCornerFromPointer(
+    base: NormalizedRect,
+    handle: Int,
+    x: Float,
+    y: Float,
+    ratio: Float,
+    minSize: Float
+): NormalizedRect {
+    val anchorX = if (handle == 0 || handle == 2) base.right else base.left
+    val anchorY = if (handle == 0 || handle == 1) base.bottom else base.top
+    val directionX = if (handle == 0 || handle == 2) -1f else 1f
+    val directionY = if (handle == 0 || handle == 1) -1f else 1f
+    val rawWidth = if (directionX < 0f) anchorX - x else x - anchorX
+    val rawHeight = if (directionY < 0f) anchorY - y else y - anchorY
+    val width = maxOf(minSize, rawWidth, rawHeight * ratio).coerceAtMost(
+        minOf(
+            if (directionX < 0f) anchorX else 1f - anchorX,
+            (if (directionY < 0f) anchorY else 1f - anchorY) * ratio
+        ).coerceAtLeast(minSize)
+    )
+    val height = (width / ratio).coerceAtLeast(minSize)
+    val left = if (directionX < 0f) anchorX - width else anchorX
+    val top = if (directionY < 0f) anchorY - height else anchorY
+    return NormalizedRect(left, top, left + width, top + height)
+}
+
+private fun resizeEdgeFromPointer(
+    base: NormalizedRect,
+    handle: Int,
+    x: Float,
+    y: Float,
+    ratio: Float,
+    minSize: Float
+): NormalizedRect {
+    return if (handle == 4 || handle == 5) {
+        val anchorY = if (handle == 4) base.bottom else base.top
+        val centerX = (base.left + base.right) / 2f
+        val maxHeight = if (handle == 4) anchorY else 1f - anchorY
+        val height = (if (handle == 4) anchorY - y else y - anchorY)
+            .coerceAtLeast(minSize / ratio.coerceAtLeast(.0001f))
+            .coerceAtMost(maxHeight)
+        val width = (height * ratio).coerceAtMost(2f * min(centerX, 1f - centerX))
+        val top = if (handle == 4) anchorY - height else anchorY
+        NormalizedRect(centerX - width / 2f, top, centerX + width / 2f, top + height)
+    } else {
+        val anchorX = if (handle == 6) base.right else base.left
+        val centerY = (base.top + base.bottom) / 2f
+        val maxWidth = if (handle == 6) anchorX else 1f - anchorX
+        val width = (if (handle == 6) anchorX - x else x - anchorX)
+            .coerceAtLeast(minSize)
+            .coerceAtMost(maxWidth)
+        val height = (width / ratio.coerceAtLeast(.0001f)).coerceAtMost(2f * min(centerY, 1f - centerY))
+        val left = if (handle == 6) anchorX - width else anchorX
+        NormalizedRect(left, centerY - height / 2f, left + width, centerY + height / 2f)
     }
 }
 

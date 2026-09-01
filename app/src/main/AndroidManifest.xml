@@ -69,6 +69,7 @@
         <activity
             android:name=".PixivWebActivity"
             android:exported="false"
+            android:process=":pixiv_login"
             android:theme="@style/Theme.Album"
             android:windowSoftInputMode="adjustResize" />
         <activity

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,6 +61,9 @@ import com.example.album.ui.SortDirection
 import com.example.album.ui.searchAlbums
 import com.example.album.ui.filterAlbums
 import com.example.album.ui.appText
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SelectionScreen(
@@ -73,6 +77,7 @@ fun SelectionScreen(
     searching: Boolean = false,
     sort: MediaSort = MediaSort.Time,
     sortDirection: SortDirection = SortDirection.Descending,
+    showDateHeaders: Boolean = false,
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
@@ -86,10 +91,16 @@ fun SelectionScreen(
         }
         if (sortDirection == SortDirection.Descending) sorted.reversed() else sorted
     }
-    val orderedMedia = remember(sortedMedia, orderUris) {
+    val orderedMedia = remember(media, sortedMedia, orderUris) {
         if (orderUris.isEmpty()) sortedMedia else {
             val positions = orderUris.withIndex().associate { it.value to it.index }
-            sortedMedia.sortedBy { positions[it.uri.toString()] ?: Int.MAX_VALUE }
+            val sourcePositions = media.withIndex().associate { it.value.uri.toString() to it.index }
+            // Preserve the frozen pre-selection order exactly. Items that
+            // appeared after selection started are appended in source order.
+            media.sortedWith(
+                compareBy<MediaItem> { positions[it.uri.toString()] ?: Int.MAX_VALUE }
+                    .thenBy { sourcePositions[it.uri.toString()] ?: Int.MAX_VALUE }
+            )
         }
     }
     val english = LocalAppEnglish.current
@@ -120,6 +131,10 @@ fun SelectionScreen(
         }
     }
     LazyGridMediaPrefetch(gridState, orderedMedia)
+    val dateFormatter = remember { SimpleDateFormat("yyyy年M月d日", Locale.CHINA) }
+    val dateSections = remember(orderedMedia, dateFormatter) {
+        orderedMedia.groupBy { dateFormatter.format(Date(it.dateTaken)) }.entries.toList()
+    }
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns.coerceIn(1, 6)),
         state = gridState,
@@ -144,31 +159,62 @@ fun SelectionScreen(
                 )
             }
         }
-        items(orderedMedia, key = { it.uri.toString() }) { item ->
-            val selected = item.uri.toString() in selectedUris
-            val markScale by animateFloatAsState(if (selected) 1f else .82f, tween(120), label = "selection-scale")
-            val markColor by animateColorAsState(
-                if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = .75f),
-                tween(120),
-                label = "selection-color"
-            )
-            Box(Modifier.fillMaxWidth().aspectRatio(1f).clickable { onToggle(item) }) {
-                MediaThumbnail(item, Modifier.fillMaxSize())
-                Surface(
-                    modifier = Modifier.align(Alignment.TopEnd).padding(5.dp).graphicsLayer { scaleX = markScale; scaleY = markScale },
-                    shape = CircleShape,
-                    color = markColor,
-                    border = androidx.compose.foundation.BorderStroke(2.dp, Color.White)
+        if (showDateHeaders) dateSections.forEach { (date, sectionItems) ->
+            item(key = "selection-date:$date", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 38.dp)
+                        .padding(start = 2.dp, end = 2.dp, top = 8.dp, bottom = 5.dp),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
                 ) {
-                    Box(Modifier.size(VaultDimens.SelectionMarkSize), contentAlignment = Alignment.Center) {
-                        AnimatedVisibility(
-                            visible = selected,
-                            enter = fadeIn(tween(120)) + scaleIn(tween(120), initialScale = .7f),
-                            exit = fadeOut(tween(100)) + scaleOut(tween(100), targetScale = .7f)
-                        ) {
-                            Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
-                        }
-                    }
+                    Text(
+                        timelineDateLabel(sectionItems.first().dateTaken, english),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        sectionItems.size.toString(),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+            items(sectionItems, key = { it.uri.toString() }) { item ->
+                SelectionMediaCell(item, selectedUris, onToggle)
+            }
+        } else items(orderedMedia, key = { it.uri.toString() }) { item ->
+            SelectionMediaCell(item, selectedUris, onToggle)
+        }
+    }
+}
+
+@Composable
+private fun SelectionMediaCell(
+    item: MediaItem,
+    selectedUris: Set<String>,
+    onToggle: (MediaItem) -> Unit
+) {
+    val selected = item.uri.toString() in selectedUris
+    val markScale by animateFloatAsState(if (selected) 1f else .82f, tween(120), label = "selection-scale")
+    val markColor by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = .75f),
+        tween(120),
+        label = "selection-color"
+    )
+    Box(Modifier.fillMaxWidth().aspectRatio(1f).clickable { onToggle(item) }) {
+        MediaThumbnail(item, Modifier.fillMaxSize())
+        Surface(
+            modifier = Modifier.align(Alignment.TopEnd).padding(5.dp).graphicsLayer { scaleX = markScale; scaleY = markScale },
+            shape = CircleShape,
+            color = markColor,
+            border = androidx.compose.foundation.BorderStroke(2.dp, Color.White)
+        ) {
+            Box(Modifier.size(VaultDimens.SelectionMarkSize), contentAlignment = Alignment.Center) {
+                AnimatedVisibility(
+                    visible = selected,
+                    enter = fadeIn(tween(120)) + scaleIn(tween(120), initialScale = .7f),
+                    exit = fadeOut(tween(100)) + scaleOut(tween(100), targetScale = .7f)
+                ) {
+                    Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
                 }
             }
         }

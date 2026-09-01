@@ -14,6 +14,8 @@ import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.example.album.MainActivity
@@ -57,6 +59,13 @@ class MediaPlaybackService : Service() {
         player?.release()
         player = runCatching {
             ExoPlayer.Builder(this).build().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(C.USAGE_MEDIA)
+                        .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                        .build(),
+                    true
+                )
                 setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
                 prepare()
                 seekTo(position)

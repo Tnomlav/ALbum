@@ -48,6 +48,7 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Wallpaper
 import androidx.compose.material.icons.outlined.Settings as SettingsIcon
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -214,6 +215,7 @@ internal fun Media3VideoPlayer(
     favorite: Boolean,
     onFavorite: () -> Unit,
     onShare: () -> Unit,
+    onWallpaper: () -> Unit = {},
     onSettings: () -> Unit = {},
     settingsVersion: Int = 0
 ) {
@@ -371,6 +373,10 @@ internal fun Media3VideoPlayer(
                 playWhenReady = preferences.getBoolean("video_autoplay", true)
         }
     }
+    // ExoPlayer may dispatch a media-item transition after the next tap has
+    // already arrived. Keep the latest requested item independently so rapid
+    // navigation does not repeatedly calculate from a stale player index.
+    var requestedIndex by remember(player) { mutableIntStateOf(currentIndex) }
 
     DisposableEffect(player) {
         val lifecycle = (hostActivity as? ComponentActivity)?.lifecycle
@@ -438,7 +444,9 @@ internal fun Media3VideoPlayer(
         val listener = object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                 videos.firstOrNull { it.uri.toString() == mediaItem?.mediaId }?.let { changed ->
-                    currentIndex = videos.indexOf(changed).coerceAtLeast(0)
+                    val changedIndex = videos.indexOf(changed).coerceAtLeast(0)
+                    requestedIndex = changedIndex
+                    currentIndex = changedIndex
                     onCurrentChanged(changed)
                 }
             }
@@ -448,16 +456,18 @@ internal fun Media3VideoPlayer(
             override fun onPlaybackStateChanged(state: Int) {
                 if (state != Player.STATE_ENDED || videos.isEmpty()) return
                 when (latestMode) {
-                    1 -> { player.seekTo(currentIndex, 0L); player.play() }
+                    1 -> { player.seekTo(requestedIndex, 0L); player.play() }
                     2 -> {
-                        val next = (0 until videos.size).filter { it != currentIndex }.randomOrNull() ?: currentIndex
+                        val next = (0 until videos.size).filter { it != requestedIndex }.randomOrNull() ?: requestedIndex
+                        requestedIndex = next
                         currentIndex = next
                         player.seekTo(next, 0L)
                         player.play()
                     }
                     3 -> player.pause()
                     else -> {
-                        val next = (currentIndex + 1) % videos.size
+                        val next = (requestedIndex + 1) % videos.size
+                        requestedIndex = next
                         currentIndex = next
                         player.seekTo(next, 0L)
                         player.play()
@@ -576,10 +586,11 @@ internal fun Media3VideoPlayer(
 
     fun adjacent(next: Boolean) {
         if (videos.isEmpty()) return
-        val target = if (next) (currentIndex + 1) % videos.size else (currentIndex - 1 + videos.size) % videos.size
+        val target = if (next) (requestedIndex + 1) % videos.size else (requestedIndex - 1 + videos.size) % videos.size
+        requestedIndex = target
         currentIndex = target
         player.seekTo(target, 0L)
-        player.prepare()
+        if (player.playbackState == Player.STATE_IDLE) player.prepare()
         player.playWhenReady = true
         onCurrentChanged(videos[target])
         refreshControls()
@@ -958,6 +969,15 @@ internal fun Media3VideoPlayer(
                                     leadingIconColor = Color.White
                                 ),
                                 onClick = { playerMenuOpen = false; onShare(); resumeAfterPopup() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(appText("设置为壁纸", english), color = Color.White) },
+                                leadingIcon = { Icon(Icons.Outlined.Wallpaper, null, tint = Color.White) },
+                                colors = MenuDefaults.itemColors(
+                                    textColor = Color.White,
+                                    leadingIconColor = Color.White
+                                ),
+                                onClick = { playerMenuOpen = false; onWallpaper(); resumeAfterPopup() }
                             )
                             DropdownMenuItem(
                                 text = { Text(if (mirrorVideo) appText("取消镜像", english) else appText("镜像翻转", english), color = Color.White) },

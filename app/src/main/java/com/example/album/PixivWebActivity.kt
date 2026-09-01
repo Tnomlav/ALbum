@@ -4,12 +4,16 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.WebChromeClient
+import android.webkit.ConsoleMessage
 import android.webkit.WebSettings
 import android.view.MotionEvent
 import android.view.WindowManager
@@ -53,10 +57,19 @@ class PixivWebActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private var checkingWebSession = false
     private var pageLoadFailed by mutableStateOf(false)
+    private val recoveryHandler = Handler(Looper.getMainLooper())
+    private var committedUrl: String? = null
+    private var fallbackAttempted = false
+    private var rendererRecoveryAttempted = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !webViewDataDirectoryConfigured) {
+            WebView.setDataDirectorySuffix("pixiv_login")
+            webViewDataDirectoryConfigured = true
+        }
         super.onCreate(savedInstanceState)
+        rendererRecoveryAttempted = intent.getBooleanExtra(EXTRA_RENDERER_RECOVERED, false)
         webView = WebView(this).apply {
             isFocusable = true
             isFocusableInTouchMode = true
@@ -83,6 +96,10 @@ class PixivWebActivity : ComponentActivity() {
                 setAcceptThirdPartyCookies(currentWebView, true)
             }
             webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                    android.util.Log.w("PixivWeb", "${message.message()} @ ${message.sourceId()}:${message.lineNumber()}")
+                    return true
+                }
                 override fun onCreateWindow(
                     view: WebView,
                     isDialog: Boolean,
@@ -100,6 +117,13 @@ class PixivWebActivity : ComponentActivity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                     pageLoadFailed = false
+                    committedUrl = null
+                    scheduleBlankPageRecovery(url)
+                }
+
+                override fun onPageCommitVisible(view: WebView, url: String) {
+                    committedUrl = url
+                    pageLoadFailed = false
                 }
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -114,7 +138,39 @@ class PixivWebActivity : ComponentActivity() {
                     request: WebResourceRequest,
                     error: android.webkit.WebResourceError
                 ) {
-                    if (request.isForMainFrame) pageLoadFailed = true
+                    android.util.Log.e(
+                        "PixivWeb",
+                        "load error main=${request.isForMainFrame} code=${error.errorCode} description=${error.description} url=${request.url}"
+                    )
+                    if (request.isForMainFrame) recoverFailedMainFrame(request.url.toString())
+                }
+
+                override fun onReceivedHttpError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    errorResponse: android.webkit.WebResourceResponse
+                ) {
+                    android.util.Log.e(
+                        "PixivWeb",
+                        "http error main=${request.isForMainFrame} status=${errorResponse.statusCode} reason=${errorResponse.reasonPhrase} url=${request.url}"
+                    )
+                    if (request.isForMainFrame) recoverFailedMainFrame(request.url.toString())
+                }
+
+                override fun onRenderProcessGone(
+                    view: WebView,
+                    detail: android.webkit.RenderProcessGoneDetail
+                ): Boolean {
+                    android.util.Log.e("PixivWeb", "renderer gone crashed=${detail.didCrash()}")
+                    if (!rendererRecoveryAttempted) {
+                        rendererRecoveryAttempted = true
+                        intent.putExtra(EXTRA_RENDERER_RECOVERED, true)
+                        view.destroy()
+                        recreate()
+                    } else {
+                        pageLoadFailed = true
+                    }
+                    return true
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
@@ -147,7 +203,7 @@ class PixivWebActivity : ComponentActivity() {
                     webView = webView,
                     english = language == "English",
                     pageLoadFailed = pageLoadFailed,
-                    onRetry = { pageLoadFailed = false; webView.reload() },
+                    onRetry = ::retryLoginPage,
                     onClose = ::finish,
                     onDone = ::complete
                 )
@@ -164,6 +220,41 @@ class PixivWebActivity : ComponentActivity() {
             it.scheme == "https" && it.host.orEmpty().let { host -> host == "pixiv.net" || host.endsWith(".pixiv.net") }
         }?.toString() ?: "https://www.pixiv.net/"
         webView.loadUrl(url)
+    }
+
+    private fun scheduleBlankPageRecovery(url: String) {
+        recoveryHandler.postDelayed({
+            if (isFinishing || isDestroyed || committedUrl == url) return@postDelayed
+            android.util.Log.w("PixivWeb", "no visible page commit for $url")
+            recoverFailedMainFrame(url)
+        }, PAGE_VISIBLE_TIMEOUT_MS)
+    }
+
+    private fun recoverFailedMainFrame(url: String) {
+        if (isFinishing || isDestroyed) return
+        if (!fallbackAttempted && isLoginUrl(url)) {
+            fallbackAttempted = true
+            pageLoadFailed = false
+            webView.stopLoading()
+            webView.loadUrl(ALTERNATE_LOGIN_URL)
+        } else {
+            pageLoadFailed = true
+        }
+    }
+
+    private fun isLoginUrl(url: String): Boolean {
+        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
+        return uri.host.equals("accounts.pixiv.net", ignoreCase = true) ||
+            uri.path.orEmpty().contains("login", ignoreCase = true)
+    }
+
+    private fun retryLoginPage() {
+        fallbackAttempted = false
+        committedUrl = null
+        pageLoadFailed = false
+        webView.stopLoading()
+        webView.clearCache(true)
+        webView.loadUrl(LOGIN_URL)
     }
 
     private fun complete() {
@@ -226,19 +317,19 @@ class PixivWebActivity : ComponentActivity() {
                     cookie.substringAfter('=', "").isNotBlank()
             }
             val finalAuthenticated = authenticated || cookieAuthenticated
-            if (finalAuthenticated) {
-                getSharedPreferences("pixiv_archive", MODE_PRIVATE)
-                    .edit().putBoolean("session_verified", true).apply()
-            }
             setResult(
                 Activity.RESULT_OK,
-                Intent().putExtra(EXTRA_AUTHENTICATED, finalAuthenticated)
+                Intent()
+                    .putExtra(EXTRA_AUTHENTICATED, finalAuthenticated)
+                    .putExtra(EXTRA_PIXIV_COOKIES, CookieManager.getInstance().getCookie("https://www.pixiv.net/"))
+                    .putExtra(EXTRA_ACCOUNT_COOKIES, CookieManager.getInstance().getCookie("https://accounts.pixiv.net/"))
             )
             finish()
         }
     }
 
     override fun onDestroy() {
+        recoveryHandler.removeCallbacksAndMessages(null)
         webView.stopLoading()
         webView.destroy()
         super.onDestroy()
@@ -247,7 +338,13 @@ class PixivWebActivity : ComponentActivity() {
     companion object {
         const val EXTRA_URL = "pixiv_url"
         const val EXTRA_AUTHENTICATED = "pixiv_authenticated"
+        const val EXTRA_PIXIV_COOKIES = "pixiv_cookies"
+        const val EXTRA_ACCOUNT_COOKIES = "pixiv_account_cookies"
+        private const val EXTRA_RENDERER_RECOVERED = "pixiv_renderer_recovered"
         const val LOGIN_URL = "https://accounts.pixiv.net/login?lang=zh&source=pc&view_type=page"
+        const val ALTERNATE_LOGIN_URL = "https://www.pixiv.net/login.php?return_to=%2F"
+        private const val PAGE_VISIBLE_TIMEOUT_MS = 8_000L
+        @Volatile private var webViewDataDirectoryConfigured = false
     }
 }
 

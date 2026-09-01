@@ -129,6 +129,7 @@ fun setStaticWallpaperBitmap(context: Context, bitmap: Bitmap, english: Boolean)
 fun setDynamicWallpaper(context: Context, items: List<MediaItem>, english: Boolean) {
     CoroutineScope(Dispatchers.Main.immediate).launch {
         val copied = runCatching {
+            val videoItems = items.filter { it.isVideo }
             val directory = withContext(Dispatchers.IO) {
                 File(context.filesDir, "live_wallpaper_queue_staging_${System.nanoTime()}").apply {
                     mkdirs()
@@ -137,7 +138,34 @@ fun setDynamicWallpaper(context: Context, items: List<MediaItem>, english: Boole
             val lowPower = context.getSharedPreferences("album_preferences", Context.MODE_PRIVATE)
                 .getBoolean("wallpaper_low_power", false) ||
                 (context.getSystemService(PowerManager::class.java)?.isPowerSaveMode == true)
-            val names = items.filter { it.isVideo }.mapIndexedNotNull { index, item ->
+            // Keep the original single-video path. The system wallpaper
+            // preview reliably opens this fixed app-private file, while the
+            // queue path remains used for multiple videos.
+            if (videoItems.size == 1) {
+                val item = videoItems.single()
+                val target = File(context.filesDir, "live_wallpaper_video")
+                val success = if (lowPower) {
+                    transcodeLowPowerVideo(context, item, target)
+                } else {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            context.contentResolver.openInputStream(item.uri)?.use { input ->
+                                target.outputStream().use { output -> input.copyTo(output) }
+                            } ?: error("Unable to read video")
+                        }.isSuccess
+                    }
+                }
+                if (!success || !target.isFile || target.length() == 0L) error("Unable to read video")
+                directory.delete()
+                context.getSharedPreferences("album_preferences", Context.MODE_PRIVATE).edit()
+                    .putBoolean("wallpaper_low_power", lowPower)
+                    .remove("live_wallpaper_queue")
+                    .remove("live_wallpaper_shuffle")
+                    .putInt("live_wallpaper_index", 0)
+                    .apply()
+                return@runCatching target
+            }
+            val names = videoItems.mapIndexedNotNull { index, item ->
                 val target = File(directory, "video_${index.toString().padStart(5, '0')}.mp4")
                 val success = if (lowPower) transcodeLowPowerVideo(context, item, target) else withContext(Dispatchers.IO) {
                     runCatching {

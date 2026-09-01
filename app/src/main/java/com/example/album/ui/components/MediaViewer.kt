@@ -157,6 +157,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.C
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem.Builder
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -305,6 +306,12 @@ fun MediaViewer(
     }
 
     fun closeViewer() {
+        // Request portrait before the exit animation starts. The player menu,
+        // system back gesture, and top bar all converge here, so restoring the
+        // window policy during disposal would leave a visible rotation lag.
+        if (current.isVideo) {
+            (context as? Activity)?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
         if (useSharedElementTransition && !current.isVideo) {
             if (closing) return
             closing = true
@@ -388,6 +395,7 @@ fun MediaViewer(
                     favorite = favorite(current),
                     onFavorite = { onFavorite(current) },
                     onShare = { share(context, current, english) },
+                    onWallpaper = onWallpaper?.let { action -> { action(current) } } ?: {},
                     onSettings = { showVideoSettings = true },
                     settingsVersion = videoSettingsVersion
                 )
@@ -969,6 +977,7 @@ private fun NativeVideoPlayer(
         // for manual landscape mode instead of rotating the device window.
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
     }
+    val initialPlayerIndex = videos.indexOfFirst { it.uri == current.uri }.coerceAtLeast(0)
     val player = remember(videos) {
         ExoPlayer.Builder(
             context,
@@ -983,18 +992,29 @@ private fun NativeVideoPlayer(
             .setSeekBackIncrementMs(seekIncrement)
             .setSeekForwardIncrementMs(seekIncrement)
             .build().apply {
+            // Let Media3 own audio focus so another app's media pauses this
+            // player, and playback can resume when the focus is returned.
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build(),
+                true
+            )
             setSeekParameters(SeekParameters.EXACT)
             setMediaItems(videos.map { Builder().setUri(it.uri).setMediaId(it.uri.toString()).build() })
-            val initialIndex = videos.indexOfFirst { it.uri == current.uri }.coerceAtLeast(0)
             val resume = playbackResumeRequest?.takeIf { it.uri == current.uri.toString() }
             val savedPosition = resume?.positionMs
                 ?: if (rememberProgress) preferences.getLong(progressKey(current), 0L) else 0L
-            seekTo(initialIndex, savedPosition)
+            seekTo(initialPlayerIndex, savedPosition)
             prepare()
             playWhenReady = resume?.playWhenReady ?: preferences.getBoolean("video_autoplay", true)
         }
     }
     val renderPlayer = player
+    // Keep rapid next/previous taps progressing while ExoPlayer dispatches
+    // the previous media-item transition callback.
+    var requestedMediaIndex by remember(player) { mutableIntStateOf(initialPlayerIndex) }
     var nativePlayerView by remember { mutableStateOf<VideoPlayerView?>(null) }
     val overlayBounds = remember { mutableStateMapOf<Int, RectF>() }
     val overlayRootBounds = remember { mutableStateMapOf<Int, RectF>() }
@@ -1015,8 +1035,12 @@ private fun NativeVideoPlayer(
             context.stopService(Intent(context, MediaPlaybackService::class.java))
             if (player.currentMediaItemIndex != videos.indexOfFirst { it.uri.toString() == request.uri }) {
                 val index = videos.indexOfFirst { it.uri.toString() == request.uri }
-                if (index >= 0) player.seekTo(index, request.positionMs)
+                if (index >= 0) {
+                    requestedMediaIndex = index
+                    player.seekTo(index, request.positionMs)
+                }
             } else {
+                requestedMediaIndex = player.currentMediaItemIndex.coerceAtLeast(0)
                 player.seekTo(request.positionMs)
             }
             player.playWhenReady = request.playWhenReady
@@ -1038,6 +1062,7 @@ private fun NativeVideoPlayer(
 
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                 videos.firstOrNull { it.uri.toString() == mediaItem?.mediaId }?.let { changed ->
+                    requestedMediaIndex = videos.indexOfFirst { it.uri == changed.uri }.coerceAtLeast(0)
                     renderRecoveryAttempted = false
                     onCurrentChanged(changed)
                     if (rememberProgress) {
@@ -1176,6 +1201,14 @@ private fun NativeVideoPlayer(
         }
     }
 
+    LaunchedEffect(miniMode) {
+        if (miniMode) {
+            // Custom mini-player playback is independent of the background-playback setting.
+            player.playWhenReady = true
+            player.play()
+        }
+    }
+
     fun refreshControls() {
         videoControlsVisible = true
         controlsInteraction++
@@ -1222,19 +1255,12 @@ private fun NativeVideoPlayer(
 
     fun seekAdjacent(next: Boolean) {
         if (videos.isEmpty()) return
-        val currentIndex = player.currentMediaItemIndex.coerceIn(0, videos.lastIndex.coerceAtLeast(0))
+        val currentIndex = requestedMediaIndex.coerceIn(0, videos.lastIndex)
         val targetIndex = if (next) (currentIndex + 1) % videos.size else (currentIndex - 1 + videos.size) % videos.size
-        if (targetIndex != C.INDEX_UNSET) {
-            player.seekTo(targetIndex, 0L)
-            player.playWhenReady = true
-            if (player.playbackState == Player.STATE_IDLE) player.prepare()
-        } else {
-            Toast.makeText(
-                context,
-                appText(if (next) "已经是最后一个视频" else "已经是第一个视频", english),
-                Toast.LENGTH_SHORT
-            ).show()
-        }
+        requestedMediaIndex = targetIndex
+        player.seekTo(targetIndex, 0L)
+        player.playWhenReady = true
+        if (player.playbackState == Player.STATE_IDLE) player.prepare()
     }
 
     fun invokeComposeHit(action: Int) {
@@ -1291,21 +1317,31 @@ private fun NativeVideoPlayer(
         onBack()
     }
 
-    LaunchedEffect(miniMode, miniRootSize) {
+    val miniVideoAspect = if (current.width > 0 && current.height > 0) {
+        (current.width.toFloat() / current.height.toFloat()).coerceIn(.45f, 2.4f)
+    } else {
+        16f / 9f
+    }
+
+    LaunchedEffect(miniMode, miniRootSize, miniVideoAspect, current.uri) {
         if (!miniMode || miniRootSize == IntSize.Zero) return@LaunchedEffect
+        val horizontalLimit = (miniRootSize.width - with(density) { 24.dp.toPx() }).coerceAtLeast(1f)
+        val verticalLimit = (miniRootSize.height - with(density) { 100.dp.toPx() }).coerceAtLeast(1f)
         val targetWidth = with(density) { 250.dp.toPx() }
-            .coerceAtMost((miniRootSize.width - with(density) { 24.dp.toPx() }).coerceAtLeast(1f))
+            .coerceAtMost(horizontalLimit)
+            .coerceAtMost(verticalLimit * miniVideoAspect)
         if (!miniPositionInitialized) {
             miniWidthPx = targetWidth
             val margin = with(density) { 12.dp.toPx() }
             val bottom = with(density) { 84.dp.toPx() }
+            val height = targetWidth / miniVideoAspect
             miniOffset = Offset(
                 x = (miniRootSize.width - targetWidth - margin).coerceAtLeast(margin),
-                y = (miniRootSize.height - targetWidth * 9f / 16f - bottom).coerceAtLeast(margin)
+                y = (miniRootSize.height - height - bottom).coerceAtLeast(margin)
             )
             miniPositionInitialized = true
         } else {
-            val height = miniWidthPx * 9f / 16f
+            val height = miniWidthPx / miniVideoAspect
             miniOffset = Offset(
                 miniOffset.x.coerceIn(8f, (miniRootSize.width - miniWidthPx - 8f).coerceAtLeast(8f)),
                 miniOffset.y.coerceIn(8f, (miniRootSize.height - height - 8f).coerceAtLeast(8f))
@@ -1328,16 +1364,17 @@ private fun NativeVideoPlayer(
                 playing = playerPlaying,
                 widthPx = miniWidthPx,
                 offset = miniOffset,
+                aspectRatio = miniVideoAspect,
                 seekIncrement = seekIncrement,
                 onMove = { delta ->
-                    val height = miniWidthPx * 9f / 16f
+                    val height = miniWidthPx / miniVideoAspect
                     miniOffset = Offset(
                         (miniOffset.x + delta.x).coerceIn(8f, (miniRootSize.width - miniWidthPx - 8f).coerceAtLeast(8f)),
                         (miniOffset.y + delta.y).coerceIn(8f, (miniRootSize.height - height - 8f).coerceAtLeast(8f))
                     )
                 },
                 onResize = { delta, fromLeft, fromTop ->
-                    val ratio = 16f / 9f
+                    val ratio = miniVideoAspect
                     val horizontalDelta = if (fromLeft) -delta.x else delta.x
                     val verticalDelta = (if (fromTop) -delta.y else delta.y) * ratio
                     val sizeDelta = if (abs(horizontalDelta) >= abs(verticalDelta)) horizontalDelta else verticalDelta
@@ -1360,7 +1397,6 @@ private fun NativeVideoPlayer(
                             .coerceIn(8f, (miniRootSize.height - newHeight - 8f).coerceAtLeast(8f))
                     )
                 },
-                onBackground = ::startBackgroundPlayback,
                 onRestore = { onMiniModeChange(false) },
                 onClose = onBack
             )
@@ -1604,6 +1640,9 @@ private fun NativeVideoPlayer(
             AnimatedVisibility(videoControlsVisible && !pictureInPictureMode, modifier = Modifier.align(Alignment.CenterStart).zIndex(controlSurfaceZ), enter = fadeIn(tween(180)), exit = fadeOut(tween(180))) {
                 Column(Modifier.padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     VideoTool(Icons.Outlined.PictureInPictureAlt, appText("画中画", english)) {
+                        // Entering either Android PiP or the custom mini-player must resume playback.
+                        player.playWhenReady = true
+                        player.play()
                         if (!onEnterPictureInPicture()) onMiniModeChange(true)
                     }
                     VideoTool(Icons.Outlined.Headphones, appText("后台播放", english), onClick = ::startBackgroundPlayback)
@@ -1748,10 +1787,10 @@ private fun MiniVideoPlayer(
     playing: Boolean,
     widthPx: Float,
     offset: Offset,
+    aspectRatio: Float,
     seekIncrement: Long,
     onMove: (Offset) -> Unit,
     onResize: (Offset, Boolean, Boolean) -> Unit,
-    onBackground: () -> Unit,
     onRestore: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -1765,7 +1804,7 @@ private fun MiniVideoPlayer(
         Modifier
             .offset { IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }
             .width(widthDp)
-            .aspectRatio(16f / 9f)
+            .aspectRatio(aspectRatio)
             .shadow(14.dp, RoundedCornerShape(7.dp), ambientColor = Color.Black.copy(alpha = .34f), spotColor = Color.Black.copy(alpha = .34f))
             .clip(RoundedCornerShape(7.dp))
             .background(Color.Black)
@@ -1808,43 +1847,52 @@ private fun MiniVideoPlayer(
                 )
             }
         )
-        Row(
-            Modifier.align(Alignment.TopEnd)
-                .zIndex(1000f)
-                .background(Color.Black.copy(alpha = .52f), RoundedCornerShape(bottomStart = 10.dp))
-                .padding(start = 5.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        MiniVideoButton(
+            Icons.Outlined.Fullscreen,
+            appText("恢复全屏播放", english),
+            Modifier.align(Alignment.TopStart).zIndex(1000f),
+            onRestore
+        )
+        MiniVideoButton(
+            Icons.Outlined.Close,
+            appText("关闭", english),
+            Modifier.align(Alignment.TopEnd).zIndex(1000f),
+            onClose
+        )
+        MiniVideoButton(
+            Icons.Outlined.FastRewind,
+            appText("快退", english),
+            Modifier.align(Alignment.CenterStart).zIndex(1000f)
         ) {
-            MiniVideoButton(Icons.Outlined.Minimize, appText("后台播放", english), onBackground)
-            MiniVideoButton(Icons.Outlined.Fullscreen, appText("恢复全屏播放", english), onRestore)
-            MiniVideoButton(Icons.Outlined.Close, appText("关闭", english), onClose)
+            seekToVideoFrame(player, player.currentPosition - seekIncrement)
         }
-        Row(
-            Modifier.align(Alignment.BottomCenter)
-                .zIndex(1000f)
-                .background(Color.Black.copy(alpha = .58f), RoundedCornerShape(18.dp))
-                .padding(horizontal = 5.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
+        MiniVideoButton(
+            if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+            appText(if (playing) "暂停" else "播放", english),
+            Modifier.align(Alignment.Center).zIndex(1000f)
         ) {
-            MiniVideoButton(Icons.Outlined.FastRewind, appText("快退", english)) {
-                seekToVideoFrame(player, player.currentPosition - seekIncrement)
-            }
-            MiniVideoButton(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, appText(if (playing) "暂停" else "播放", english)) {
-                if (player.isPlaying) player.pause() else player.play()
-            }
-            MiniVideoButton(Icons.Outlined.FastForward, appText("快进", english)) {
-                seekToVideoFrame(player, player.currentPosition + seekIncrement)
-            }
+            if (player.isPlaying) player.pause() else player.play()
+        }
+        MiniVideoButton(
+            Icons.Outlined.FastForward,
+            appText("快进", english),
+            Modifier.align(Alignment.CenterEnd).zIndex(1000f)
+        ) {
+            seekToVideoFrame(player, player.currentPosition + seekIncrement)
         }
     }
 }
 
 @Composable
-private fun MiniVideoButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun MiniVideoButton(
+    icon: ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
     IconButton(
         onClick = onClick,
-        modifier = Modifier.size(40.dp).background(Color.Black.copy(alpha = .38f), CircleShape)
+        modifier = modifier.size(40.dp).background(Color.Black.copy(alpha = .48f), CircleShape)
     ) {
         Icon(icon, label, tint = Color.White, modifier = Modifier.size(23.dp))
     }

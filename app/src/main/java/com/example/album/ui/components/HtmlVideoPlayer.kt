@@ -93,6 +93,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem.Builder
 import androidx.media3.common.Player
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
@@ -212,6 +214,13 @@ internal fun HtmlVideoPlayer(
                 .setEnableDecoderFallback(true)
                 .forceDisableMediaCodecAsynchronousQueueing()
         ).setSeekBackIncrementMs(normalSkip).setSeekForwardIncrementMs(normalSkip).build().apply {
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build(),
+                true
+            )
             setMediaItems(videos.map { item ->
                 Builder().setUri(item.uri).setMediaId(item.uri.toString())
                     .setMimeType(item.mimeType.takeIf { it.startsWith("video/") && it != "video/*" })
@@ -224,6 +233,7 @@ internal fun HtmlVideoPlayer(
             playWhenReady = preferences.getBoolean("video_autoplay", true)
         }
     }
+    var requestedIndex by remember(player) { mutableIntStateOf(selectedIndex) }
     val latestMode by rememberUpdatedState(mode)
     DisposableEffect(player) {
         var recoveryAttempted = false
@@ -252,7 +262,9 @@ internal fun HtmlVideoPlayer(
                 bufferingSuppressed = false
                 bufferingSince = 0L
                 videos.firstOrNull { it.uri.toString() == mediaItem?.mediaId }?.let { changed ->
-                    selectedIndex = videos.indexOf(changed).coerceAtLeast(0)
+                    val changedIndex = videos.indexOf(changed).coerceAtLeast(0)
+                    requestedIndex = changedIndex
+                    selectedIndex = changedIndex
                     onCurrentChanged(changed)
                 }
             }
@@ -264,12 +276,20 @@ internal fun HtmlVideoPlayer(
                 if (state == Player.STATE_ENDED && videos.isNotEmpty()) {
                     when (latestMode) {
                         3 -> player.pause()
-                        1 -> { player.seekTo(player.currentMediaItemIndex, 0L); player.play() }
+                        1 -> { player.seekTo(requestedIndex, 0L); player.play() }
                         2 -> {
-                            val next = if (videos.size <= 1) 0 else (0 until videos.size).filter { it != player.currentMediaItemIndex }.random()
+                            val next = if (videos.size <= 1) 0 else (0 until videos.size).filter { it != requestedIndex }.random()
+                            requestedIndex = next
+                            selectedIndex = next
                             player.seekTo(next, 0L); player.play()
                         }
-                        else -> { player.seekTo((player.currentMediaItemIndex + 1) % videos.size, 0L); player.play() }
+                        else -> {
+                            val next = (requestedIndex + 1) % videos.size
+                            requestedIndex = next
+                            selectedIndex = next
+                            player.seekTo(next, 0L)
+                            player.play()
+                        }
                     }
                 }
             }
@@ -353,8 +373,9 @@ internal fun HtmlVideoPlayer(
     }
     fun seekAdjacent(next: Boolean) {
         if (videos.isEmpty()) return
-        val index = selectedIndex.coerceIn(0, videos.lastIndex)
+        val index = requestedIndex.coerceIn(0, videos.lastIndex)
         val target = if (next) (index + 1) % videos.size else (index - 1 + videos.size) % videos.size
+        requestedIndex = target
         selectedIndex = target
         bufferingSuppressed = false
         bufferingSince = 0L
@@ -365,10 +386,9 @@ internal fun HtmlVideoPlayer(
         onCurrentChanged(videos[target])
         // Keep the prepared queue stable. Replacing all media items here can
         // invalidate the current surface and leave a recovered player idle.
-        player.stop()
         player.seekTo(target, 0L)
         player.playWhenReady = true
-        player.prepare()
+        if (player.playbackState == Player.STATE_IDLE) player.prepare()
         refresh()
     }
     fun cycleOrientation() {

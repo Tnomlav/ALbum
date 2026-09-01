@@ -319,6 +319,8 @@ fun AlbumApp(
     var wallpaperSelectionMode by rememberSaveable { mutableStateOf(false) }
     var wallpaperSelectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var wallpaperSelectionOrder by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pixivReloadGeneration by remember { mutableIntStateOf(0) }
+    var pixivReloadJob by remember { mutableStateOf<Job?>(null) }
     var wallpaperColumns by rememberSaveable { mutableIntStateOf(4) }
     var wallpaperLayout by rememberSaveable { mutableStateOf(MediaLayout.Grid) }
     var wallpaperSort by rememberSaveable { mutableStateOf(WallpaperSort.Time) }
@@ -497,21 +499,27 @@ fun AlbumApp(
     } }
     suspend fun reloadPixivPage() {
         if (!pixivTabEnabled || cleanupOpen) return
+        val generation = ++pixivReloadGeneration
         pixivPageRefreshing = true
         try {
             val snapshot = pixivRepository.loadLibrary(defaultPixivImages)
+            if (generation != pixivReloadGeneration) return
             pixivLibraryImages = snapshot.items
             pixivTagsByUri = snapshot.tagsByUri
             pixivFolderNames = snapshot.folderNames
             pixivSourceFolderName = snapshot.sourceFolderName
         } finally {
-            pixivPageRefreshing = false
+            if (generation == pixivReloadGeneration) pixivPageRefreshing = false
         }
+    }
+    fun requestPixivReload() {
+        pixivReloadJob?.cancel()
+        pixivReloadJob = scope.launch { reloadPixivPage() }
     }
     LaunchedEffect(pixivTabEnabled, pixivRefreshKey, cleanupOpen, defaultPixivImages) {
         // Include archived artist folders in the P page; Pixiv itself is
         // pinned separately below so it remains the first folder.
-        reloadPixivPage()
+        requestPixivReload()
     }
     val needsFolderSearchIndex by remember {
         derivedStateOf {
@@ -605,14 +613,11 @@ fun AlbumApp(
     fun freezeSelectionSort() {
         selectionMediaSort = mediaSort
         selectionMediaSortDirection = sortDirection
-        val ordered = when (mediaSort) {
-            MediaSort.Time, MediaSort.Count -> selectionMedia.sortedBy { it.dateTaken }
-            MediaSort.Name -> selectionMedia.sortedBy { it.name.lowercase() }
-            MediaSort.Size -> selectionMedia.sortedBy { it.size }
-            MediaSort.Duration -> selectionMedia.sortedBy { it.duration }
-        }
-        selectionMediaOrderUris = (if (sortDirection == SortDirection.Descending) ordered.reversed() else ordered)
-            .map { it.uri.toString() }
+        // selectionMedia is already the exact list shown by the current
+        // folder, search, timeline, or Pixiv view. Re-sorting it here makes
+        // entering selection visibly reorder the grid when that view has a
+        // more specific display order than the global sort setting.
+        selectionMediaOrderUris = selectionMedia.map { it.uri.toString() }
     }
     // Search is a view over the source; it must never become the source of
     // truth for a selection. Actions resolve selected keys from the complete
@@ -1420,6 +1425,7 @@ fun AlbumApp(
             session = pixivArchiveSession,
             onStartScan = { source, maxBatchSize ->
                 if (pixivArchiveSession.state.value != ArchiveUiState.Scanning) {
+                    pixivArchiveSession.beginScan()
                     val intent = Intent(context, PixivArchiveScanService::class.java).apply {
                         action = PixivArchiveScanService.ACTION_SCAN
                         putExtra(PixivArchiveScanService.EXTRA_SOURCE_URI, source.toString())
@@ -1435,6 +1441,15 @@ fun AlbumApp(
                         }
                 }
             },
+            onCancelScan = {
+                pixivArchiveSession.cancelScan()
+                context.startService(
+                    Intent(context, PixivArchiveScanService::class.java).apply {
+                        action = PixivArchiveScanService.ACTION_CANCEL
+                    }
+                )
+            },
+            onClearScan = { pixivArchiveSession.clearScanResults() },
             onBack = {
                 pixivArchiveSession.selectionMode.value = false
                 pixivArchiveSession.selectedUris.value = emptySet()
@@ -1452,6 +1467,7 @@ fun AlbumApp(
                     // Reload directly after the media index and SAF target
                     // folders are current, so new folders and their ordering
                     // appear on the P page immediately.
+                    pixivReloadJob?.cancel()
                     reloadPixivPage()
                 } finally {
                     archiveMediaRefreshing = false
@@ -2244,9 +2260,10 @@ fun AlbumApp(
                         openedFolder != null -> folderColumns
                         else -> albumColumns
                     },
-                    topTrailingCount = selectionMedia.size.takeIf { openedFolder != null },
+                    topTrailingCount = selectionMedia.size.takeIf { openedFolder != null || tab == MainTab.Timeline },
                     query = appliedQuery,
                     searching = library.loading,
+                    showDateHeaders = tab == MainTab.Timeline,
                     initialFirstVisibleItem = selectionMediaFirstVisibleItem,
                     initialFirstVisibleOffset = selectionMediaFirstVisibleOffset,
                     onScrollPositionChanged = { index, offset ->
@@ -2485,7 +2502,7 @@ fun AlbumApp(
                     },
                     onAlbumSelectionGestureEnd = { selectionMode = true },
                     onRefresh = {
-                        scope.launch { reloadPixivPage() }
+                        requestPixivReload()
                     },
                     openedFolder = openedFolder,
                     onOpenedFolderChange = ::openFolder,

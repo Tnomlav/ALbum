@@ -19,11 +19,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 
 /** Owns Pixiv discovery independently from the Compose screen lifecycle. */
 class PixivArchiveScanService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var scanStarted = false
+    private var scanJob: kotlinx.coroutines.Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -31,6 +33,11 @@ class PixivArchiveScanService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_CANCEL) {
+            scanJob?.cancel()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (intent?.action != ACTION_SCAN || scanStarted) return START_REDELIVER_INTENT
         val source = intent.getStringExtra(EXTRA_SOURCE_URI)?.let(Uri::parse)
         if (source == null) {
@@ -39,7 +46,7 @@ class PixivArchiveScanService : Service() {
         }
         startAsForeground(buildNotification("正在准备 Pixiv 扫描"))
         scanStarted = true
-        serviceScope.launch {
+        scanJob = serviceScope.launch {
             val session = PixivArchiveSession(applicationContext)
             val preferences = getSharedPreferences("pixiv_archive", MODE_PRIVATE)
             val resumingInitialScan = session.state.value == ArchiveUiState.Scanning &&
@@ -58,10 +65,14 @@ class PixivArchiveScanService : Service() {
             try {
                 val repository = PixivArchiveRepository(applicationContext)
                 val onProgress: suspend (PixivArchiveProgress) -> Unit = { update ->
+                    ensureActive()
+                    if (session.isScanCancellationRequested()) throw CancellationException("扫描已终止")
                     session.persistScanProgress(update)
                     updateNotification(update.message)
                 }
                 val onRecord: suspend (com.example.album.data.PixivArchiveRecord) -> Unit = { record ->
+                    ensureActive()
+                    if (session.isScanCancellationRequested()) throw CancellationException("扫描已终止")
                     session.upsertRecord(record)
                 }
                 val scanned = if (!scanSource && existingRecords.isNotEmpty()) {
@@ -74,6 +85,7 @@ class PixivArchiveScanService : Service() {
                         onRecord
                     )
                 }
+                if (session.isScanCancellationRequested()) throw CancellationException("扫描已中止")
                 session.mergeRecords(scanned)
                 session.setScanState(ArchiveUiState.Ready)
                 session.persistScanProgress(PixivArchiveProgress(
@@ -148,6 +160,7 @@ class PixivArchiveScanService : Service() {
 
     companion object {
         const val ACTION_SCAN = "com.example.album.action.PIXIV_ARCHIVE_SCAN"
+        const val ACTION_CANCEL = "com.example.album.action.PIXIV_ARCHIVE_CANCEL"
         const val EXTRA_SOURCE_URI = "source_uri"
         const val EXTRA_MAX_BATCH = "max_batch"
         private const val CHANNEL_ID = "pixiv_archive_scan"
