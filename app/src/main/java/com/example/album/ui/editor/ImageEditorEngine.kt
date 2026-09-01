@@ -266,17 +266,28 @@ fun croppedGeometryBitmap(
 
 /** Crops a wallpaper composition frame using the same geometry as the editor. */
 fun cropWallpaperBitmap(bitmap: Bitmap, frame: NormalizedRect, ratio: Float, rotation: Int = 0, straighten: Float = 0f): Bitmap {
-    val rotated = if (rotation % 360 == 0 && straighten == 0f) bitmap else geometryBitmap(
-        bitmap,
-        ImageEditState(rotation = rotation, straighten = straighten)
+    // Keep the frame coordinates relative to the right-angle geometry. The
+    // crop step then applies the same safe scale used by the editor so a
+    // straightened frame cannot include transparent corners outside the
+    // rotated source image.
+    val referenceGeometry = geometryBitmap(bitmap, ImageEditState(rotation = rotation))
+    // Apply the fine-angle rotation to the already right-angle-rotated image,
+    // matching the preview and avoiding a second transform with mismatched
+    // source dimensions.
+    val displayGeometry = if (straighten == 0f) referenceGeometry else geometryBitmap(
+        referenceGeometry,
+        ImageEditState(straighten = straighten)
     )
     return cropBitmap(
-        rotated,
+        displayGeometry,
         ImageEditState(
             crop = CropPreset.Custom,
             customCropRatio = ratio,
-            cropRect = frame
-        )
+            cropRect = frame,
+            straighten = straighten
+        ),
+        referenceGeometry.width,
+        referenceGeometry.height
     )
 }
 

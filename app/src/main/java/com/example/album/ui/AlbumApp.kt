@@ -116,6 +116,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.example.album.data.MediaItem
+import com.example.album.data.transferFolderPath
 import com.example.album.data.displayAddress
 import com.example.album.data.PixivArchiveRepository
 import com.example.album.data.TransferMode
@@ -147,6 +148,7 @@ import com.example.album.ui.screens.AlbumSelectionScreen
 import com.example.album.ui.screens.CleanupScreen
 import com.example.album.ui.screens.WallpaperManagerScreen
 import com.example.album.ui.screens.WallpaperSort
+import com.example.album.ui.screens.sortWallpaperMedia
 import com.example.album.ui.screens.WallpaperSettingsSheet
 import com.example.album.ui.screens.WallpaperCropScreen
 import com.example.album.ui.screens.PixivArchiveScreen
@@ -245,6 +247,7 @@ fun AlbumApp(
     appLanguage: String,
     onAppLanguageChange: (String) -> Unit,
     externalMediaUri: Uri? = null,
+    externalWallpaperUri: Uri? = null,
     playbackResumeRequest: PlaybackResumeRequest? = null,
     onPlaybackResumeConsumed: (Long) -> Unit = {},
     pictureInPictureMode: Boolean = false,
@@ -397,6 +400,8 @@ fun AlbumApp(
     var selectionInfoItem by remember { mutableStateOf<MediaItem?>(null) }
     var tagEditorItem by remember { mutableStateOf<MediaItem?>(null) }
     var tagEditorText by remember { mutableStateOf("") }
+    var folderBackStack by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
+    var folderReturnQuery by rememberSaveable { mutableStateOf<String?>(null) }
     var navReorderEnabled by remember { mutableStateOf(albumSettings.getBoolean("nav_reorder", false)) }
     var pixivTabEnabled by remember { mutableStateOf(pixivEnabledAtStart) }
     var pixivLibraryImages by remember { mutableStateOf<List<MediaItem>?>(null) }
@@ -452,7 +457,7 @@ fun AlbumApp(
         preferences.edit().putString("wallpaper_queue_order", JSONArray(updatedOrder).toString()).apply()
     }
     fun requestWallpaper(item: MediaItem) {
-        if (item.isVideo) setWallpaper(context, item, english) else wallpaperCropItem = item
+        launchWallpaperAppChooser(context, item, english)
     }
     var backgroundOptimizationEnabled by remember {
         mutableStateOf(albumSettings.getBoolean("background_optimization", true))
@@ -685,20 +690,18 @@ fun AlbumApp(
     } else tab.label
 
     fun mediaInDisplayOrder(items: List<MediaItem>): List<MediaItem> {
-        val ordered = when (mediaSort) {
-            MediaSort.Time, MediaSort.Count -> items.sortedBy { it.dateTaken }
-            MediaSort.Name -> items.sortedBy { it.name.lowercase() }
-            MediaSort.Size -> items.sortedBy { it.size }
-            MediaSort.Duration -> items.sortedBy { it.duration }
-        }
-        return if (sortDirection == SortDirection.Descending) ordered.reversed() else ordered
+        return sortMediaItems(items, mediaSort, sortDirection)
     }
 
     fun openMedia(item: MediaItem) {
         // Video playback has no shared-image destination; keep its thumbnail
         // visible while the native player performs its regular entrance.
         activeSharedMediaKey = item.takeUnless { it.isVideo }?.let { "media:${it.uri}" }
-        viewerScope = mediaInDisplayOrder(currentSelectionMedia
+        // A folder owns the exact ordered list emitted by AlbumsScreen. Keep
+        // using that scope while opening from a folder; the global search list
+        // is only appropriate on the root/search views.
+        val visibleSource = if (openedFolder != null) currentSelectionMedia else selectionMedia
+        viewerScope = mediaInDisplayOrder(visibleSource
             .filter { it.isVideo == item.isVideo })
             .takeIf { scope -> scope.any { it.uri == item.uri } }
             ?: if (item.isVideo) {
@@ -729,6 +732,25 @@ fun AlbumApp(
         )
         selectedTab = if (externalItem.isVideo) MainTab.Videos else MainTab.Albums
         openMedia(externalItem)
+    }
+
+    LaunchedEffect(externalWallpaperUri) {
+        val uri = externalWallpaperUri ?: return@LaunchedEffect
+        val mime = context.contentResolver.getType(uri).orEmpty()
+        if (!mime.startsWith("image/") && !mime.startsWith("video/")) return@LaunchedEffect
+        val name = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null } ?: "外部壁纸"
+        val externalItem = MediaItem(
+            id = uri.toString().hashCode().toLong() and 0xffffffffL,
+            uri = uri,
+            name = name,
+            folder = "外部壁纸",
+            dateTaken = 0L,
+            mimeType = mime,
+            isVideo = mime.startsWith("video/"),
+            isDocument = true
+        )
+        if (externalItem.isVideo) setWallpaper(context, externalItem, english)
+        else wallpaperCropItem = externalItem
     }
 
     LaunchedEffect(playbackResumeRequest, library.videos, library.localVideos) {
@@ -763,11 +785,25 @@ fun AlbumApp(
     fun closeFolder() {
         openedFolder = null
         folderScope = null
-        query = ""
+        folderBackStack = emptyList()
+        query = folderReturnQuery.orEmpty()
+        folderReturnQuery = null
         searchOpen = true
     }
 
     fun openFolder(folder: String?) {
+        if (folder == null) {
+            folderBackStack = emptyList()
+            folderReturnQuery = null
+        } else {
+            if (openedFolder == null) {
+                folderReturnQuery = query.takeIf { it.isNotBlank() } ?: suspendedSearchQuery
+                folderBackStack = listOf(folder)
+            } else {
+                val currentPath = folderBackStack.ifEmpty { listOfNotNull(openedFolder) }
+                folderBackStack = if (currentPath.lastOrNull() == folder) currentPath else currentPath + folder
+            }
+        }
         openedFolder = folder
         folderScope = null
         if (folder != null) {
@@ -776,6 +812,19 @@ fun AlbumApp(
             query = ""
             suspendedSearchQuery = null
             searchOpen = false
+        }
+    }
+
+    fun navigateFolderBack() {
+        if (openedFolder == null) return
+        val currentPath = folderBackStack.ifEmpty { listOfNotNull(openedFolder) }
+        if (currentPath.size > 1) {
+            folderBackStack = currentPath.dropLast(1)
+            openedFolder = folderBackStack.last()
+            folderScope = null
+            query = ""
+        } else {
+            closeFolder()
         }
     }
 
@@ -794,12 +843,15 @@ fun AlbumApp(
         searchOpen = true
         openedFolder = null
         folderScope = null
+        folderBackStack = emptyList()
+        folderReturnQuery = null
         clearSelection()
         timelineJumpDate = null
     }
 
     fun returnToPrimaryTab() {
         clearSelection()
+        folderReturnQuery = null
         closeFolder()
         timelineJumpDate = null
         favoriteFilter = false
@@ -810,13 +862,16 @@ fun AlbumApp(
     }
 
     fun suspendSearch() {
-        if (query.isNotBlank()) {
-            suspendedSearchQuery = query
-            query = ""
-            // Keep the draft visible in the always-expanded home search field,
-            // while removing it from the active filter until search resumes.
+        if (query.isBlank()) {
+            suspendedSearchQuery = null
             searchOpen = false
+            return
         }
+        suspendedSearchQuery = query
+        query = ""
+        // Keep the draft visible in the always-expanded home search field,
+        // while removing it from the active filter until search resumes.
+        searchOpen = false
     }
 
     fun resumeSearch() {
@@ -875,7 +930,7 @@ fun AlbumApp(
                 }
             }
             wallpaperManagerOpen -> wallpaperManagerOpen = false
-            openedFolder != null -> closeFolder()
+            openedFolder != null -> navigateFolderBack()
             query.isNotBlank() -> suspendSearch()
             searchOpen -> suspendSearch()
             favoriteFilter -> favoriteFilter = false
@@ -1254,15 +1309,17 @@ fun AlbumApp(
         }
         val transferMedia = (library.images + library.videos + library.localImages + library.localVideos)
             .distinctBy { it.uri.toString() }
-        val mediaFolders = transferMedia.map { it.folder }
+        // BUCKET_DISPLAY_NAME is only a leaf name. Use the full relative path
+        // here so moving into a nested folder cannot fall back to Pictures/<leaf>.
+        val mediaFolders = transferMedia.map { it.transferFolderPath() }
         val searchableTransferFolders = library.searchableFolderNames +
             library.searchableFolderChildren.values.flatten()
         val folderCovers = transferMedia
-            .groupBy { it.folder }
+            .groupBy { it.transferFolderPath() }
             .mapValues { (_, media) -> media.firstOrNull() }
             .filterValues { it != null }
             .mapValues { (_, item) -> item!! }
-        val folderItems = transferMedia.groupBy { it.folder }
+        val folderItems = transferMedia.groupBy { it.transferFolderPath() }
         val recentFolders = transferPreferences.getString("recent_folders", "").orEmpty()
             .split('\u001f').filter { it.isNotBlank() }.take(8)
         DestinationScreen(
@@ -1713,7 +1770,12 @@ fun AlbumApp(
                         wallpaperSelectedUris = emptySet()
                         wallpaperSelectionOrder = emptyList()
                     } else {
-                        val currentItems = wallpaperQueueMedia.filter { it.isVideo == wallpaperShowVideos }
+                        val currentItems = sortWallpaperMedia(
+                            media = wallpaperQueueMedia.filter { it.isVideo == wallpaperShowVideos },
+                            sort = wallpaperSort,
+                            sortDirection = wallpaperSortDirection,
+                            queueOrder = wallpaperQueueOrder
+                        )
                         if (wallpaperShowVideos) {
                             setDynamicWallpaper(context, currentItems, english)
                         } else {
@@ -1773,7 +1835,7 @@ fun AlbumApp(
                 onWallpaper = selectedItemsForAction.singleOrNull()?.takeIf { !selectingFolders }?.let { selected -> {
                     requestWallpaper(selected)
                 }},
-                onAddToWallpaperQueue = if (!selectingFolders) {
+                onAddToWallpaperQueue = if (selectedItemsForAction.isNotEmpty()) {
                     {
                         addToWallpaperQueue(selectedItemsForAction)
                         clearSelection()
@@ -1898,8 +1960,8 @@ fun AlbumApp(
                     }
                 },
                 onBack = when {
-                    searchOpen && (query.isNotBlank() || openedFolder != null) -> ::suspendSearch
-                    openedFolder != null && tab != MainTab.Timeline -> ::closeFolder
+                    openedFolder != null && tab != MainTab.Timeline -> ::navigateFolderBack
+                    searchOpen && query.isNotBlank() -> ::suspendSearch
                     else -> null
                 },
                 searchPlaceholder = if (tab == MainTab.Pixiv) {

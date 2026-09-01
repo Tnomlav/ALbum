@@ -52,3 +52,8 @@ internal fun resolveTransferTargetName(
         }
     }
 }
+
+internal fun resolveMediaStoreRelativePath(destinationFolder: String): String {
+    val normalized = destinationFolder.trim('/').replace('\\', '/')
+    return "$normalized/"
+}

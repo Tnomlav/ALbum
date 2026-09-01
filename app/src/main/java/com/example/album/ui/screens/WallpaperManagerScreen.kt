@@ -56,6 +56,25 @@ enum class WallpaperSort(val label: String) {
     QueueOrder("加入顺序")
 }
 
+/** Applies the same order used by the wallpaper manager to a wallpaper queue. */
+fun sortWallpaperMedia(
+    media: List<MediaItem>,
+    sort: WallpaperSort,
+    sortDirection: SortDirection,
+    queueOrder: List<String>
+): List<MediaItem> {
+    val ordered = when (sort) {
+        WallpaperSort.Time -> media.sortedBy { it.dateTaken }
+        WallpaperSort.Name -> media.sortedBy { it.name.lowercase() }
+        WallpaperSort.Size -> media.sortedBy { it.size }
+        WallpaperSort.QueueOrder -> media.sortedBy { item ->
+            val index = queueOrder.indexOf(item.uri.toString())
+            if (index < 0) Int.MAX_VALUE else index
+        }
+    }
+    return if (sortDirection == SortDirection.Descending) ordered.reversed() else ordered
+}
+
 @Composable
 fun WallpaperManagerScreen(
     queuedMedia: List<MediaItem>,
@@ -86,16 +105,7 @@ fun WallpaperManagerScreen(
     }
     val baseVisibleMedia = if (query.isBlank()) queuedMedia else baseMatchingMedia
     val visibleMedia = remember(baseVisibleMedia, sort, sortDirection, queueOrder, selectionMode, selectionOrder) {
-        val ordered = when (sort) {
-            WallpaperSort.Time -> baseVisibleMedia.sortedBy { it.dateTaken }
-            WallpaperSort.Name -> baseVisibleMedia.sortedBy { it.name.lowercase() }
-            WallpaperSort.Size -> baseVisibleMedia.sortedBy { it.size }
-            WallpaperSort.QueueOrder -> baseVisibleMedia.sortedBy { item ->
-                val index = queueOrder.indexOf(item.uri.toString())
-                if (index < 0) Int.MAX_VALUE else index
-            }
-        }
-        val sorted = if (sortDirection == SortDirection.Descending) ordered.reversed() else ordered
+        val sorted = sortWallpaperMedia(baseVisibleMedia, sort, sortDirection, queueOrder)
         if (selectionMode && query.isBlank() && selectionOrder.isNotEmpty()) {
             val positions = selectionOrder.withIndex().associate { it.value to it.index }
             sorted.sortedBy { positions[it.uri.toString()] ?: Int.MAX_VALUE }

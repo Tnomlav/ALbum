@@ -1,18 +1,16 @@
 package com.example.album.ui
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.app.WallpaperManager
 import android.content.ComponentName
 import android.widget.Toast
 import android.graphics.Bitmap
-import androidx.core.content.FileProvider
 import com.example.album.data.MediaItem
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -38,6 +36,36 @@ fun setWallpaper(context: Context, item: MediaItem, english: Boolean) {
         return
     }
     setStaticWallpaper(context, listOf(item), english)
+}
+
+/** Opens Android's app resolver for wallpaper-capable handlers. */
+fun launchWallpaperAppChooser(context: Context, item: MediaItem, english: Boolean) {
+    val uri = item.uri
+    val intent = Intent(Intent.ACTION_ATTACH_DATA).setDataAndType(
+        uri,
+        if (item.isVideo) "video/*" else "image/*"
+    ).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).apply {
+        clipData = ClipData.newRawUri("wallpaper", uri)
+    }
+    val hasHandler = context.packageManager.queryIntentActivities(
+        intent,
+        android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+    ).isNotEmpty()
+    if (!hasHandler) {
+        Toast.makeText(
+            context,
+            if (english) "No wallpaper app is available" else "未找到可用的壁纸应用",
+            Toast.LENGTH_SHORT
+        ).show()
+        return
+    }
+    runCatching { context.startActivity(intent) }.onFailure {
+        Toast.makeText(
+            context,
+            if (english) "Unable to open wallpaper apps" else "无法打开壁纸应用选择器",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
 }
 
 /** Imports the complete static queue before opening the static wallpaper service. */

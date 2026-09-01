@@ -45,4 +45,36 @@ class MediaTransferTest {
             resolveTransferTargetName("photo", setOf("photo", "photo (1)"), ConflictPolicy.KeepBoth)
         )
     }
+
+    @Test
+    fun transferUsesFullRelativePathForNestedMediaStoreFolder() {
+        assertEquals(
+            "AI生成/AI生成1",
+            transferFolderPath("AI生成/AI生成1/", "AI生成1")
+        )
+    }
+
+    @Test
+    fun sameLeafFoldersKeepDifferentTransferIdentities() {
+        assertEquals(
+            "AI生成/AI生成1",
+            transferFolderPath("AI生成/AI生成1/", "AI生成1")
+        )
+        assertEquals(
+            "Pictures/其他/AI生成1",
+            transferFolderPath("Pictures/其他/AI生成1/", "AI生成1")
+        )
+    }
+
+    @Test
+    fun mediaStorePathDoesNotDuplicateAnExplicitPublicRoot() {
+        assertEquals(
+            "AI生成/AI生成1/",
+            resolveMediaStoreRelativePath("AI生成/AI生成1")
+        )
+        assertEquals(
+            "Pictures/AI生成/AI生成1/",
+            resolveMediaStoreRelativePath("Pictures/AI生成/AI生成1")
+        )
+    }
 }

@@ -1,17 +1,13 @@
 package com.example.album.wallpaper
 
 import android.media.AudioManager
-import android.net.Uri
+import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.service.wallpaper.WallpaperService
 import android.util.Log
 import android.view.SurfaceHolder
-import androidx.media3.common.AudioAttributes
-import androidx.media3.common.C
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
 import org.json.JSONArray
 import java.io.File
 
@@ -21,7 +17,7 @@ class VideoWallpaperService : WallpaperService() {
     override fun onCreateEngine(): Engine = VideoEngine()
 
     private inner class VideoEngine : Engine() {
-        private var player: ExoPlayer? = null
+        private var player: MediaPlayer? = null
         private var visible = false
         private var hasBeenVisible = false
         private var surfaceReady = false
@@ -39,7 +35,7 @@ class VideoWallpaperService : WallpaperService() {
             when (change) {
                 AudioManager.AUDIOFOCUS_LOSS,
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> if (playerReady) player?.pause()
-                AudioManager.AUDIOFOCUS_GAIN -> if (visible && playerReady) player?.play()
+                AudioManager.AUDIOFOCUS_GAIN -> if (shouldPlay() && playerReady) player?.start()
             }
         }
 
@@ -50,7 +46,7 @@ class VideoWallpaperService : WallpaperService() {
             if (isVisible) hasBeenVisible = true
             if (isVisible) startPlayback()
             else if (playerReady) {
-                if (keepPlayingInBackground()) player?.play() else player?.pause()
+                if (keepPlayingInBackground()) player?.start() else player?.pause()
             }
             updateAudioOutput()
         }
@@ -65,7 +61,12 @@ class VideoWallpaperService : WallpaperService() {
             super.onSurfaceChanged(holder, format, width, height)
             if (!holder.surface.isValid) return
             surfaceReady = true
-            runCatching { player?.setVideoSurface(holder.surface) }
+            runCatching {
+                player?.let {
+                    applyVideoScaling(it)
+                    it.setSurface(holder.surface)
+                }
+            }
                 .onFailure { Log.w(TAG, "surface rebind failed", it) }
             if (player == null) startPlayback(holder)
         }
@@ -73,7 +74,6 @@ class VideoWallpaperService : WallpaperService() {
         override fun onSurfaceDestroyed(holder: SurfaceHolder) {
             surfaceReady = false
             playerReady = false
-            player?.clearVideoSurface()
             player?.release()
             player = null
             super.onSurfaceDestroyed(holder)
@@ -83,7 +83,6 @@ class VideoWallpaperService : WallpaperService() {
             volumeHandler.removeCallbacks(volumeUpdater)
             audioManager.abandonAudioFocus(audioFocusListener)
             playerReady = false
-            player?.clearVideoSurface()
             player?.release()
             player = null
             super.onDestroy()
@@ -94,7 +93,8 @@ class VideoWallpaperService : WallpaperService() {
             val targetHolder = holder ?: surfaceHolder ?: return
             if (!targetHolder.surface.isValid) return
             player?.let {
-                if (visible && playerReady) it.play()
+                applyVideoScaling(it)
+                if (shouldPlay() && playerReady && !it.isPlaying) it.start()
                 return
             }
             val source = currentSource() ?: return
@@ -104,43 +104,41 @@ class VideoWallpaperService : WallpaperService() {
             }
             playerReady = false
             player = runCatching {
-                ExoPlayer.Builder(applicationContext).build().apply {
-                    setVideoSurface(targetHolder.surface)
-                    // Preserve the source aspect ratio while filling the entire
-                    // wallpaper surface. Excess edges are cropped instead of
-                    // leaving black bars or stretching the video.
-                    setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING)
-                    setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(C.USAGE_MEDIA)
-                            .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
-                            .build(),
-                        soundMode() == "BackgroundWithFocus"
-                    )
-                    setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.fromFile(source)))
-                    repeatMode = Player.REPEAT_MODE_ONE
-                    volume = wallpaperOutputVolume(soundMode())
-                    addListener(object : Player.Listener {
-                        override fun onPlaybackStateChanged(state: Int) {
-                            if (state != Player.STATE_READY) return
-                            playerReady = true
-                            prepareRetryCount = 0
-                            Log.i(TAG, "video ready: ${source.name} visible=$visible surfaceReady=$surfaceReady")
-                            // Re-apply after the codec is created. Some vendor
-                            // decoders ignore the pre-prepare value.
-                            setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING)
-                            playWhenReady = shouldPlay()
-                        }
-
-                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                            Log.e(TAG, "video playback error: ${source.absolutePath}", error)
-                            playerReady = false
-                            player?.release()
-                            player = null
-                            if (surfaceReady && prepareRetryCount++ < 1) startPlayback()
-                        }
-                    })
-                    prepare()
+                MediaPlayer().apply {
+                    // Set the native renderer mode before attaching the Surface
+                    // and before prepareAsync, preventing the default stretched
+                    // transform from being used for the first decoded frame.
+                    setDataSource(source.absolutePath)
+                    applyVideoScaling(this)
+                    setSurface(targetHolder.surface)
+                    isLooping = true
+                    val mode = soundMode()
+                    val outputVolume = wallpaperOutputVolume(mode)
+                    setVolume(outputVolume, outputVolume)
+                    if (mode == "BackgroundWithFocus") {
+                        audioManager.requestAudioFocus(
+                            audioFocusListener,
+                            AudioManager.STREAM_MUSIC,
+                            AudioManager.AUDIOFOCUS_GAIN
+                        )
+                    } else {
+                        audioManager.abandonAudioFocus(audioFocusListener)
+                    }
+                    setOnPreparedListener { prepared ->
+                        playerReady = true
+                        prepareRetryCount = 0
+                        applyVideoScaling(prepared)
+                        if (shouldPlay()) prepared.start()
+                    }
+                    setOnErrorListener { failedPlayer, what, extra ->
+                        Log.e(TAG, "video playback error: ${source.absolutePath} what=$what extra=$extra")
+                        playerReady = false
+                        if (player === failedPlayer) player = null
+                        failedPlayer.release()
+                        if (surfaceReady && prepareRetryCount++ < 1) startPlayback()
+                        true
+                    }
+                    prepareAsync()
                 }
             }.getOrElse {
                 Log.e(TAG, "video player setup failed: ${source.absolutePath}", it)
@@ -150,6 +148,10 @@ class VideoWallpaperService : WallpaperService() {
             }
             volumeHandler.removeCallbacks(volumeUpdater)
             volumeHandler.post(volumeUpdater)
+        }
+
+        private fun applyVideoScaling(mediaPlayer: MediaPlayer) {
+            mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING)
         }
 
         private fun keepPlayingInBackground(): Boolean =
@@ -163,7 +165,10 @@ class VideoWallpaperService : WallpaperService() {
                 .getString("wallpaper_sound", "Disabled") ?: "Disabled"
 
         private fun updateAudioOutput() {
-            player?.volume = wallpaperOutputVolume(soundMode())
+            player?.let {
+                val outputVolume = wallpaperOutputVolume(soundMode())
+                it.setVolume(outputVolume, outputVolume)
+            }
         }
 
         private fun wallpaperOutputVolume(mode: String): Float {
@@ -209,7 +214,6 @@ class VideoWallpaperService : WallpaperService() {
                 "Shuffle" -> queue.indices.shuffled().first()
                 else -> (current + 1) % queue.size
             }
-            player?.clearVideoSurface()
             player?.release()
             player = null
             playerReady = false

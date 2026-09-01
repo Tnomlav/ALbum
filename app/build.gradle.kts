@@ -72,6 +72,7 @@ android {
 tasks.matching { it.name == "packageRelease" }.configureEach {
     outputs.upToDateWhen { false }
     doLast {
+        if (releaseStoreFile.isBlank()) return@doLast
         val nextProperties = Properties().apply {
             putAll(releaseVersionProperties)
             val patch = getProperty("VERSION_PATCH", "0").toInt()
