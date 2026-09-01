@@ -28,6 +28,7 @@ import com.example.album.playback.PlaybackResumeRequest
 class MainActivity : ComponentActivity() {
     private var playbackResumeRequest by mutableStateOf<PlaybackResumeRequest?>(null)
     private var externalMediaUri by mutableStateOf<Uri?>(null)
+    private var externalWallpaperUri by mutableStateOf<Uri?>(null)
     private var pictureInPictureMode by mutableStateOf(false)
     @Suppress("DEPRECATION")
     private val memoryCallbacks = object : ComponentCallbacks2 {
@@ -62,6 +63,7 @@ class MainActivity : ComponentActivity() {
         application.registerComponentCallbacks(memoryCallbacks)
         playbackResumeRequest = intent.toPlaybackResumeRequest()
         externalMediaUri = intent.toExternalMediaUri()
+        externalWallpaperUri = intent.toExternalWallpaperUri()
         enableEdgeToEdge()
         setContent {
             val preferences = remember { getSharedPreferences("album_settings", MODE_PRIVATE) }
@@ -105,6 +107,7 @@ class MainActivity : ComponentActivity() {
                             },
                             playbackResumeRequest = playbackResumeRequest,
                             externalMediaUri = externalMediaUri,
+                            externalWallpaperUri = externalWallpaperUri,
                             onPlaybackResumeConsumed = { requestId ->
                                 if (playbackResumeRequest?.requestId == requestId) {
                                     playbackResumeRequest = null
@@ -129,10 +132,18 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         playbackResumeRequest = intent.toPlaybackResumeRequest()
         externalMediaUri = intent.toExternalMediaUri()
+        externalWallpaperUri = intent.toExternalWallpaperUri()
     }
 
     private fun Intent.toExternalMediaUri(): Uri? {
         if (action != Intent.ACTION_VIEW) return null
+        val uri = data ?: return null
+        val type = type.orEmpty()
+        return uri.takeIf { type.startsWith("image/") || type.startsWith("video/") }
+    }
+
+    private fun Intent.toExternalWallpaperUri(): Uri? {
+        if (action != Intent.ACTION_ATTACH_DATA) return null
         val uri = data ?: return null
         val type = type.orEmpty()
         return uri.takeIf { type.startsWith("image/") || type.startsWith("video/") }

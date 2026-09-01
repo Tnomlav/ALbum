@@ -6,8 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -51,21 +49,26 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.album.ui.theme.AlbumTheme
 import com.example.album.ui.theme.ThemeAccent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 class PixivWebActivity : ComponentActivity() {
     private lateinit var webView: WebView
     private var checkingWebSession = false
     private var pageLoadFailed by mutableStateOf(false)
-    private val recoveryHandler = Handler(Looper.getMainLooper())
-    private var committedUrl: String? = null
-    private var fallbackAttempted = false
     private var rendererRecoveryAttempted = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !webViewDataDirectoryConfigured) {
-            WebView.setDataDirectorySuffix("pixiv_login")
+            // Keep login rendering and cookies away from scan fallback WebViews.
+            // The versioned suffix also avoids reusing a previously corrupted profile.
+            WebView.setDataDirectorySuffix("pixiv_login_v2")
             webViewDataDirectoryConfigured = true
         }
         super.onCreate(savedInstanceState)
@@ -86,6 +89,7 @@ class PixivWebActivity : ComponentActivity() {
             settings.allowFileAccess = false
             settings.cacheMode = WebSettings.LOAD_DEFAULT
             settings.mediaPlaybackRequiresUserGesture = false
+            settings.userAgentString = browserCompatibleUserAgent(settings.userAgentString)
             setOnTouchListener { view, event ->
                 if (event.action == MotionEvent.ACTION_DOWN) view.requestFocusFromTouch()
                 false
@@ -117,12 +121,9 @@ class PixivWebActivity : ComponentActivity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                     pageLoadFailed = false
-                    committedUrl = null
-                    scheduleBlankPageRecovery(url)
                 }
 
                 override fun onPageCommitVisible(view: WebView, url: String) {
-                    committedUrl = url
                     pageLoadFailed = false
                 }
 
@@ -142,7 +143,7 @@ class PixivWebActivity : ComponentActivity() {
                         "PixivWeb",
                         "load error main=${request.isForMainFrame} code=${error.errorCode} description=${error.description} url=${request.url}"
                     )
-                    if (request.isForMainFrame) recoverFailedMainFrame(request.url.toString())
+                    if (request.isForMainFrame) pageLoadFailed = true
                 }
 
                 override fun onReceivedHttpError(
@@ -154,7 +155,7 @@ class PixivWebActivity : ComponentActivity() {
                         "PixivWeb",
                         "http error main=${request.isForMainFrame} status=${errorResponse.statusCode} reason=${errorResponse.reasonPhrase} url=${request.url}"
                     )
-                    if (request.isForMainFrame) recoverFailedMainFrame(request.url.toString())
+                    if (request.isForMainFrame) pageLoadFailed = true
                 }
 
                 override fun onRenderProcessGone(
@@ -175,10 +176,6 @@ class PixivWebActivity : ComponentActivity() {
 
                 override fun onPageFinished(view: WebView, url: String) {
                     CookieManager.getInstance().flush()
-                    val host = Uri.parse(url).host.orEmpty().lowercase()
-                    if (checkingWebSession && (host == "pixiv.net" || host.endsWith(".pixiv.net")) && host != "accounts.pixiv.net") {
-                        checkWebSession(view, 3)
-                    }
                 }
             }
         }
@@ -222,35 +219,7 @@ class PixivWebActivity : ComponentActivity() {
         webView.loadUrl(url)
     }
 
-    private fun scheduleBlankPageRecovery(url: String) {
-        recoveryHandler.postDelayed({
-            if (isFinishing || isDestroyed || committedUrl == url) return@postDelayed
-            android.util.Log.w("PixivWeb", "no visible page commit for $url")
-            recoverFailedMainFrame(url)
-        }, PAGE_VISIBLE_TIMEOUT_MS)
-    }
-
-    private fun recoverFailedMainFrame(url: String) {
-        if (isFinishing || isDestroyed) return
-        if (!fallbackAttempted && isLoginUrl(url)) {
-            fallbackAttempted = true
-            pageLoadFailed = false
-            webView.stopLoading()
-            webView.loadUrl(ALTERNATE_LOGIN_URL)
-        } else {
-            pageLoadFailed = true
-        }
-    }
-
-    private fun isLoginUrl(url: String): Boolean {
-        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
-        return uri.host.equals("accounts.pixiv.net", ignoreCase = true) ||
-            uri.path.orEmpty().contains("login", ignoreCase = true)
-    }
-
     private fun retryLoginPage() {
-        fallbackAttempted = false
-        committedUrl = null
         pageLoadFailed = false
         webView.stopLoading()
         webView.clearCache(true)
@@ -259,68 +228,67 @@ class PixivWebActivity : ComponentActivity() {
 
     private fun complete() {
         if (checkingWebSession) return
-        // Confirm inside the same WebView that performed the login. The
-        // WebView cookie store and a normal Android HTTP client are not always
-        // observable at the same moment on real devices.
+        // Verify from the login process itself. Waiting for onPageFinished is
+        // unreliable here: Pixiv may stay on the account host, redirect as a
+        // SPA, or leave a blank WebView while the authenticated cookies are
+        // already available.
         checkingWebSession = true
         CookieManager.getInstance().flush()
-        val cookies = listOf(
-            CookieManager.getInstance().getCookie("https://www.pixiv.net/"),
-            CookieManager.getInstance().getCookie("https://accounts.pixiv.net/")
-        ).filterNot { it.isNullOrBlank() }.joinToString(";")
-        if (cookies.split(';').any { cookie ->
-                cookie.substringBefore('=').trim().equals("PHPSESSID", ignoreCase = true) &&
-                    cookie.substringAfter('=', "").isNotBlank()
-            }) {
+        lifecycleScope.launch {
+            val authenticated = repeatAuthenticatedCheck()
+            if (isFinishing || isDestroyed || !checkingWebSession) return@launch
             checkingWebSession = false
-            finishWithAuthentication(true)
-            return
+            finishWithAuthentication(authenticated)
         }
-        webView.loadUrl("https://www.pixiv.net/")
-        webView.postDelayed({
-            if (checkingWebSession) {
-                checkingWebSession = false
-                finishWithAuthentication(false)
-            }
-        }, 10_000L)
     }
 
-    private fun checkWebSession(view: WebView, retries: Int) {
-        view.postDelayed({
-            if (!checkingWebSession || isFinishing) return@postDelayed
-            view.evaluateJavascript(
-                """(async()=>{try{const r=await fetch('/ajax/user/self?lang=zh',{credentials:'include',cache:'no-store'});const j=await r.json();return !!(j&&!j.error&&String((j.userData&&j.userData.id)||(j.body&&j.body.userId)||'').length>0)}catch(e){return false}})()"""
-            ) { raw ->
-                val authenticated = raw.trim().trim('"') == "true"
-                if (authenticated) {
-                    checkingWebSession = false
-                    finishWithAuthentication(true)
-                } else if (retries > 0) {
-                    checkWebSession(view, retries - 1)
-                } else {
-                    checkingWebSession = false
-                    finishWithAuthentication(false)
+    private suspend fun repeatAuthenticatedCheck(): Boolean {
+        repeat(5) { attempt ->
+            val cookies = CookieManager.getInstance().getCookie("https://www.pixiv.net/")
+                .orEmpty()
+                .plus(";")
+                .plus(CookieManager.getInstance().getCookie("https://accounts.pixiv.net/").orEmpty())
+                .trim(';')
+            if (cookies.isNotBlank() && requestAuthenticatedSession(cookies)) return true
+            if (attempt < 4) delay(500L)
+        }
+        return false
+    }
+
+    private suspend fun requestAuthenticatedSession(cookies: String): Boolean {
+        val userAgent = webView.settings.userAgentString
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val connection = (URL("https://www.pixiv.net/ajax/user/self?lang=zh").openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 6_000
+                    readTimeout = 6_000
+                    requestMethod = "GET"
+                    setRequestProperty("Accept", "application/json")
+                    setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                    setRequestProperty("User-Agent", userAgent)
+                    setRequestProperty("Referer", "https://www.pixiv.net/")
+                    setRequestProperty("Origin", "https://www.pixiv.net")
+                    setRequestProperty("X-Requested-With", "XMLHttpRequest")
+                    setRequestProperty("Cookie", cookies)
+                }
+                try {
+                    if (connection.responseCode !in 200..299) return@runCatching false
+                    pixivSelfResponseAuthenticated(connection.inputStream.bufferedReader().use { it.readText() })
+                } finally {
+                    connection.disconnect()
                 }
             }
-        }, if (retries == 3) 500L else 900L)
+                .getOrDefault(false)
+        }
     }
 
     private fun finishWithAuthentication(authenticated: Boolean) {
         lifecycleScope.launch {
             CookieManager.getInstance().flush()
-            val cookies = listOf(
-                CookieManager.getInstance().getCookie("https://www.pixiv.net/"),
-                CookieManager.getInstance().getCookie("https://accounts.pixiv.net/")
-            ).filterNot { it.isNullOrBlank() }.joinToString(";")
-            val cookieAuthenticated = cookies.split(';').any { cookie ->
-                cookie.substringBefore('=').trim().equals("PHPSESSID", ignoreCase = true) &&
-                    cookie.substringAfter('=', "").isNotBlank()
-            }
-            val finalAuthenticated = authenticated || cookieAuthenticated
             setResult(
                 Activity.RESULT_OK,
                 Intent()
-                    .putExtra(EXTRA_AUTHENTICATED, finalAuthenticated)
+                    .putExtra(EXTRA_AUTHENTICATED, authenticated)
                     .putExtra(EXTRA_PIXIV_COOKIES, CookieManager.getInstance().getCookie("https://www.pixiv.net/"))
                     .putExtra(EXTRA_ACCOUNT_COOKIES, CookieManager.getInstance().getCookie("https://accounts.pixiv.net/"))
             )
@@ -329,7 +297,6 @@ class PixivWebActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        recoveryHandler.removeCallbacksAndMessages(null)
         webView.stopLoading()
         webView.destroy()
         super.onDestroy()
@@ -342,11 +309,32 @@ class PixivWebActivity : ComponentActivity() {
         const val EXTRA_ACCOUNT_COOKIES = "pixiv_account_cookies"
         private const val EXTRA_RENDERER_RECOVERED = "pixiv_renderer_recovered"
         const val LOGIN_URL = "https://accounts.pixiv.net/login?lang=zh&source=pc&view_type=page"
-        const val ALTERNATE_LOGIN_URL = "https://www.pixiv.net/login.php?return_to=%2F"
-        private const val PAGE_VISIBLE_TIMEOUT_MS = 8_000L
         @Volatile private var webViewDataDirectoryConfigured = false
     }
 }
+
+internal fun browserCompatibleUserAgent(defaultUserAgent: String): String = defaultUserAgent
+    .replace("; wv", "")
+    .replace(Regex("\\s*Version/4\\.0\\s*"), " ")
+    .replace(Regex("\\s{2,}"), " ")
+    .trim()
+
+internal fun pixivSelfResponseAuthenticated(json: String): Boolean = runCatching {
+    val root = JSONObject(json)
+    val error = root.opt("error")
+    if (error == true || error?.toString()?.equals("true", ignoreCase = true) == true) {
+        return@runCatching false
+    }
+    fun value(objectName: String, key: String): String =
+        root.optJSONObject(objectName)?.opt(key)?.toString().orEmpty()
+    listOfNotNull(
+        value("userData", "id"),
+        value("body", "userId"),
+        value("body", "id"),
+        value("data", "userId"),
+        value("data", "id")
+    ).any { it.isNotBlank() }
+}.getOrDefault(false)
 
 @SuppressLint("SetJavaScriptEnabled")
 @androidx.compose.runtime.Composable

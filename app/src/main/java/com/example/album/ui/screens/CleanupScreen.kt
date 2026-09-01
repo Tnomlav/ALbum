@@ -1210,8 +1210,16 @@ class PixivArchiveSession(context: Context) {
         preferences.edit()
             .putBoolean(KEY_SCAN_CANCEL_REQUESTED, false)
             .putBoolean(KEY_SCAN_CANCELLED, false)
-            .apply()
+            .putString(KEY_SCAN_STATE, ArchiveUiState.Scanning.name)
+            .commit()
         scanCancelled.value = false
+        state.value = ArchiveUiState.Scanning
+        completed.value = 0
+        failed.value = 0
+        activity.value = ArchiveActivity(
+            phase = PixivArchivePhase.Discover,
+            message = "正在准备扫描"
+        )
     }
 
     /** Clears a stopped scan and returns the archive page to its initial state. */
@@ -1330,6 +1338,12 @@ class PixivArchiveSession(context: Context) {
         records.value.forEach { byUri[it.uri.toString()] = it }
         scanned.forEach { byUri[it.uri.toString()] = it }
         records.value = byUri.values.toList()
+        persistRecords()
+    }
+
+    /** Replaces the persisted result after a complete source-tree scan. */
+    fun replaceRecords(scanned: List<PixivArchiveRecord>) {
+        records.value = scanned
         persistRecords()
     }
 
@@ -1546,7 +1560,10 @@ private fun ArchiveContent(
             )
             cookieManager.flush()
             if (resultData?.getBooleanExtra(PixivWebActivity.EXTRA_AUTHENTICATED, false) == true) {
-                preferences.edit().putBoolean("session_verified", true).apply()
+                preferences.edit()
+                    .putBoolean("session_verified_api_v2", true)
+                    .remove("session_verified")
+                    .apply()
             }
             // WebView may flush its cookies a little after the login page closes.
             // Confirm the session from the repository after returning to the app.
@@ -1555,11 +1572,7 @@ private fun ArchiveContent(
             pixivSessionConnected = false
             repeat(24) {
                 if (!checkingPixivLogin) return@launch
-                // On some real devices Pixiv rejects the follow-up HTTP request
-                // even though WebView already has the authenticated PHPSESSID.
-                // Treat that same WebView session as the fallback proof after
-                // giving the API check a chance to succeed.
-                if (repository.verifyAuthenticatedSession() || repository.hasAuthenticatedSession()) {
+                if (repository.verifyAuthenticatedSession()) {
                     pixivSessionConnected = true
                     checkingPixivLogin = false
                     return@launch
@@ -2564,6 +2577,8 @@ private fun ArchiveThumbnail(record: PixivArchiveRecord, modifier: Modifier) {
             folder = "Pixiv",
             dateTaken = 0L,
             mimeType = record.mimeType,
+            dateModified = record.dateModified,
+            isVideo = record.mimeType.startsWith("video/", ignoreCase = true),
             isDocument = true
         )
     }
@@ -2572,9 +2587,17 @@ private fun ArchiveThumbnail(record: PixivArchiveRecord, modifier: Modifier) {
         initialValue = ThumbnailRepository.peek(item, requestedSize, preferences),
         item.uri,
         item.name,
-        item.mimeType
+        item.mimeType,
+        item.size,
+        item.dateModified
     ) {
-        value = ThumbnailRepository.load(context, item, requestedSize, preferences)
+        // SAF providers may not expose a newly scanned file to loadThumbnail
+        // on the first request. Retry briefly before leaving the cell blank.
+        repeat(3) { attempt ->
+            value = ThumbnailRepository.load(context, item, requestedSize, preferences)
+            if (value != null || attempt == 2) return@produceState
+            delay(250L)
+        }
     }
     Box(modifier.background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
         bitmap?.let { Image(it.asImageBitmap(), record.filename, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }

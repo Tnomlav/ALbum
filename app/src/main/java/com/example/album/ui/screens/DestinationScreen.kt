@@ -116,22 +116,47 @@ fun DestinationScreen(
     var createFolderError by remember { mutableStateOf(false) }
     var createdFolders by remember { mutableStateOf<Set<String>>(emptySet()) }
     val scope = rememberCoroutineScope()
-    fun coverFor(path: String): MediaItem? =
-        folderCovers[path] ?: folderCovers[path.substringAfterLast('/')]
+    fun coverFor(path: String): MediaItem? = folderCovers[path]
     val allFolders = remember(folders, createdFolders, selectedFolder) {
         (folders + createdFolders + listOfNotNull(selectedFolder))
             .filter { it.isNotBlank() }.distinct()
     }
-    val folderEntries = remember(allFolders, folderChildren, currentFolder) {
+    val folderEntries = remember(allFolders, folderChildren, currentFolder, query) {
         currentFolder?.let { current ->
             val childPrefix = "$current/"
-            val names = (folderChildren[current.substringAfterLast('/')].orEmpty() +
+            val pathChildren = allFolders.asSequence()
+                .filter { it.startsWith(childPrefix) }
+                .map { it.removePrefix(childPrefix).substringBefore('/') }
+            val names = (folderChildren[current.substringAfterLast('/')].orEmpty() + pathChildren +
                 createdFolders.filter { it.startsWith(childPrefix) }
                     .map { it.removePrefix(childPrefix).substringBefore('/') })
                 .toList()
             names.distinct().map { name -> name to "$current/$name" }
-        } ?: allFolders.map { path ->
-            path.substringAfterLast('/') to path
+        } ?: if (query.isNotBlank()) {
+            // Searching may address a nested folder directly, but the value
+            // kept in the entry remains its complete path.
+            allFolders.map { path -> path.substringAfterLast('/') to path }
+        } else run {
+            // A destination picker must expose only root folders here. A
+            // nested path such as Pictures/AI生成/AI生成1 is opened one level
+            // at a time, so its leaf name cannot accidentally be selected as
+            // Pictures/AI生成1.
+            val pathRoots = allFolders.map { it.substringBefore('/') }.toSet()
+            val knownPathSegments = allFolders
+                .filter { it.contains('/') }
+                .flatMap { it.split('/') }
+                .toSet()
+            allFolders.asSequence()
+                .filter { path ->
+                    if (path.contains('/')) true
+                    else path !in knownPathSegments || path in pathRoots
+                }
+                .map { path ->
+                    val root = path.substringBefore('/')
+                    root to root
+                }
+                .distinctBy { it.second }
+                .toList()
         }
     }
     val visibleFolders = remember(folderEntries, query) {
@@ -139,14 +164,18 @@ fun DestinationScreen(
     }
     val recentEntries = remember(recentFolders, allFolders, query) {
         recentFolders
-            .filter { it in allFolders && searchTextMatches(query, it.substringAfterLast('/')) }
+            .mapNotNull { recent ->
+                if (recent in allFolders) recent
+                else allFolders
+                    .filter { it.substringAfterLast('/') == recent }
+                    .singleOrNull()
+            }
+            .filter { searchTextMatches(query, it.substringAfterLast('/')) }
             .distinct()
             .map { it.substringAfterLast('/') to it }
     }
     val currentFolderItems = currentFolder?.let { folder ->
-        folderItems[folder].orEmpty().ifEmpty {
-            folderItems[folder.substringAfterLast('/')].orEmpty()
-        }
+        folderItems[folder].orEmpty()
     }.orEmpty()
 
     BackHandler {

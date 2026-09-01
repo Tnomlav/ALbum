@@ -117,18 +117,17 @@ class PixivArchiveRepository(private val context: Context) {
     private val webViewFallbackSemaphore = Semaphore(1)
 
     fun hasAuthenticatedSession(): Boolean = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
-        .getBoolean("session_verified", false) || hasPixivSessionCookie(pixivCookies())
+        .getBoolean(VERIFIED_SESSION_KEY, false)
 
     suspend fun verifyAuthenticatedSession(): Boolean {
-        if (context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
-                .getBoolean("session_verified", false)
-        ) return true
+        val preferences = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
+        if (preferences.getBoolean(VERIFIED_SESSION_KEY, false)) return true
         // WebView's CookieManager is backed by the UI process on real devices.
         // Read it on the main thread before doing the network request off-thread.
         val cookies = withContext(Dispatchers.Main.immediate) { pixivCookies() }
             ?.takeIf(::hasPixivSessionCookie)
             ?: return false
-        return withContext(Dispatchers.IO) { runCatching {
+        val verified = withContext(Dispatchers.IO) { runCatching {
             val connection = (URL("https://www.pixiv.net/ajax/user/self?lang=zh").openConnection() as HttpURLConnection).apply {
                 connectTimeout = 5_000
                 readTimeout = 5_000
@@ -152,13 +151,18 @@ class PixivArchiveRepository(private val context: Context) {
                 connection.disconnect()
             }
         }.getOrDefault(false) }
+        if (verified) preferences.edit().putBoolean(VERIFIED_SESSION_KEY, true).apply()
+        return verified
     }
 
     fun clearAuthenticatedSession() {
         CookieManager.getInstance().removeAllCookies(null)
         CookieManager.getInstance().flush()
         context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
-            .edit().putBoolean("session_verified", false).apply()
+            .edit()
+            .putBoolean(VERIFIED_SESSION_KEY, false)
+            .remove("session_verified")
+            .apply()
     }
 
     private fun pixivCookies(): String? = listOf(
@@ -462,8 +466,14 @@ class PixivArchiveRepository(private val context: Context) {
             onProgress(PixivArchiveProgress(PixivArchivePhase.Folders, completed, total, failed, record.filename, metadata.artist, "正在创建画师目录", "创建目录 ${metadata.artist} [${metadata.artistId}]", itemProgress = 0.05f))
             val folderName = sanitize("${metadata.artist} [${metadata.artistId}]")
             val folder = root.findFile(folderName)?.takeIf { it.isDirectory } ?: root.createDirectory(folderName)
-            val targetName = if (keepOriginalFilename) record.filename else canonicalName(record)
-            val target = folder?.let { createUniqueFile(it, record.mimeType, targetName) }
+            val targetName = if (keepOriginalFilename) {
+                normalizeArchiveFilename(record.filename)
+            } else {
+                canonicalName(record)
+            }
+            val target = folder?.let {
+                createUniqueFile(it, archiveMimeType(targetName, record.mimeType), targetName)
+            }
             val copied = target != null && copy(record.uri, target.uri) { copyProgress ->
                 onProgress(PixivArchiveProgress(
                     PixivArchivePhase.Move,
@@ -966,7 +976,22 @@ class PixivArchiveRepository(private val context: Context) {
             candidate = "$base ($index)$extension"
             index++
         }
-        return folder.createFile(mimeType, candidate)
+        val created = folder.createFile(mimeType, candidate) ?: return null
+        val actualName = created.name
+        if (actualName == candidate) return created
+
+        // Some SAF providers append the MIME extension even when the display
+        // name already contains it. Correct that provider-side result before
+        // any bytes are copied, so a PNG cannot be left as .png.png.
+        if (actualName != null && normalizeArchiveFilename(actualName) == candidate) {
+            val renamed = runCatching {
+                DocumentsContract.renameDocument(context.contentResolver, created.uri, candidate)
+            }.getOrNull()?.let { DocumentFile.fromSingleUri(context, it) }
+            if (renamed?.name == candidate) return renamed
+            runCatching { created.delete() }
+            return null
+        }
+        return created
     }
 
     private fun canonicalName(record: PixivArchiveRecord): String {
@@ -974,8 +999,35 @@ class PixivArchiveRepository(private val context: Context) {
         return "${record.pid}_p${record.page}.$extension"
     }
 
-    private fun sanitize(value: String): String = value.replace(Regex("[\\/:*?\"<>|]"), "_").trim().take(120)
+private fun sanitize(value: String): String = value.replace(Regex("[\\/:*?\"<>|]"), "_").trim().take(120)
 
+}
+
+/** Prevents duplicated terminal extensions from being carried into archives. */
+internal fun normalizeArchiveFilename(filename: String): String {
+    var normalized = filename
+    val extension = normalized.substringAfterLast('.', "").lowercase(Locale.ROOT)
+    if (extension !in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "avif")) {
+        return normalized
+    }
+    val suffix = ".${extension}"
+    while (normalized.endsWith(suffix + suffix, ignoreCase = true)) {
+        normalized = normalized.dropLast(suffix.length)
+    }
+    return normalized
+}
+
+internal fun archiveMimeType(filename: String, fallback: String): String = when (
+    filename.substringAfterLast('.', "").lowercase(Locale.ROOT)
+) {
+    "jpg", "jpeg" -> "image/jpeg"
+    "png" -> "image/png"
+    "webp" -> "image/webp"
+    "gif" -> "image/gif"
+    "bmp" -> "image/bmp"
+    "heic", "heif" -> "image/heif"
+    "avif" -> "image/avif"
+    else -> fallback
 }
 
 private val PIXIV_EXTENSION = "(?:jpe?g|png|webp|gif)"
@@ -998,9 +1050,13 @@ internal fun parsePixivFilename(filename: String): Pair<String, Int>? {
 }
 
 internal fun hasPixivSessionCookie(cookies: String?): Boolean = cookies.orEmpty().split(';').any { cookie ->
-    cookie.substringBefore('=').trim().equals("PHPSESSID", ignoreCase = true) &&
-        cookie.substringAfter('=', "").isNotBlank()
+    if (!cookie.substringBefore('=').trim().equals("PHPSESSID", ignoreCase = true)) return@any false
+    val value = cookie.substringAfter('=', "").trim()
+    val userId = value.substringBefore('_', "")
+    userId.isNotBlank() && userId.all(Char::isDigit) && value.substringAfter('_', "").isNotBlank()
 }
+
+private const val VERIFIED_SESSION_KEY = "session_verified_api_v2"
 
 private val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
 private const val PNG_TEXT_LIMIT = 16 * 1024 * 1024

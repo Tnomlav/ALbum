@@ -51,8 +51,24 @@ class PixivArchiveRepositoryTest {
     }
 
     @Test
+    fun normalizesRepeatedMediaExtensionInArchiveName() {
+        assertEquals("illust_1.png", normalizeArchiveFilename("illust_1.png.png"))
+        assertEquals("illust_2.jpg", normalizeArchiveFilename("illust_2.jpg.jpg.jpg"))
+        assertEquals("illust_3.PNG", normalizeArchiveFilename("illust_3.PNG.PNG"))
+        assertEquals("illust_4.jpg.png", normalizeArchiveFilename("illust_4.jpg.png"))
+    }
+
+    @Test
+    fun derivesArchiveMimeTypeFromFinalExtension() {
+        assertEquals("image/png", archiveMimeType("illust.png", "image/jpeg"))
+        assertEquals("image/jpeg", archiveMimeType("illust.jpg", "application/octet-stream"))
+        assertEquals("application/octet-stream", archiveMimeType("illust.bin", "application/octet-stream"))
+    }
+
+    @Test
     fun detectsOnlyNonEmptyPixivLoginSessionCookies() {
         assertTrue(hasPixivSessionCookie("device_token=abc; PHPSESSID=12345_token; privacy_policy_agreement=1"))
+        assertFalse(hasPixivSessionCookie("PHPSESSID=66ced19ed33026079ee32a3d5345adbc"))
         assertFalse(hasPixivSessionCookie("device_token=abc; PHPSESSID=; privacy_policy_agreement=1"))
         assertFalse(hasPixivSessionCookie("device_token=abc"))
         assertFalse(hasPixivSessionCookie(null))

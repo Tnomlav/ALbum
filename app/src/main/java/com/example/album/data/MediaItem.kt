@@ -20,6 +20,12 @@ data class MediaItem(
     val isDocument: Boolean = false
 )
 
+/** The stable folder identity used by transfer destinations. */
+fun transferFolderPath(relativePath: String?, folder: String): String =
+    relativePath?.trim('/')?.takeIf { it.isNotBlank() } ?: folder.trim('/').replace('\\', '/')
+
+fun MediaItem.transferFolderPath(): String = transferFolderPath(relativePath, folder)
+
 fun MediaItem.isSystemTrashedFile(): Boolean = name.trimStart().startsWith(".trashed", ignoreCase = true)
 
 fun MediaItem.displayAddress(): String {

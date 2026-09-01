@@ -48,7 +48,9 @@ data class RecycleEntry(
     val duration: Long,
     val isVideo: Boolean,
     val deletedAt: Long,
-    val systemTrashed: Boolean = false
+    val systemTrashed: Boolean = false,
+    /** MediaStore DATE_MODIFIED, stored in epoch seconds. */
+    val dateModified: Long = 0L
 )
 
 class CleanupRepository(private val context: Context) {
@@ -166,6 +168,7 @@ class CleanupRepository(private val context: Context) {
                                 originalRelativePath = item.relativePath,
                                 mimeType = item.mimeType,
                                 dateTaken = item.dateTaken,
+                                dateModified = item.dateModified,
                                 duration = item.duration,
                                 isVideo = item.isVideo,
                                 deletedAt = System.currentTimeMillis()
@@ -197,6 +200,7 @@ class CleanupRepository(private val context: Context) {
                 originalRelativePath = item.relativePath,
                 mimeType = item.mimeType,
                 dateTaken = item.dateTaken,
+                dateModified = item.dateModified,
                 duration = item.duration,
                 isVideo = item.isVideo,
                 deletedAt = System.currentTimeMillis(),
@@ -221,6 +225,7 @@ class CleanupRepository(private val context: Context) {
                     originalRelativePath = json.optString("originalRelativePath").takeIf { it.isNotBlank() },
                     mimeType = json.optString("mimeType", "image/*"),
                     dateTaken = json.optLong("dateTaken"),
+                    dateModified = json.optLong("dateModified"),
                     duration = json.optLong("duration"),
                     isVideo = json.optBoolean("isVideo"),
                     deletedAt = json.optLong("deletedAt"),
@@ -271,6 +276,9 @@ class CleanupRepository(private val context: Context) {
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
             if (entry.dateTaken > 0) put(MediaStore.MediaColumns.DATE_TAKEN, entry.dateTaken)
+            if (entry.dateModified > 0) {
+                put(MediaStore.MediaColumns.DATE_MODIFIED, entry.dateModified)
+            }
         }
         val target = context.contentResolver.insert(collection, values) ?: return@withContext null
         runCatching {
@@ -279,7 +287,12 @@ class CleanupRepository(private val context: Context) {
                 file.inputStream().use { it.copyTo(output) }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                context.contentResolver.update(target, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+                context.contentResolver.update(target, ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    if (entry.dateModified > 0) {
+                        put(MediaStore.MediaColumns.DATE_MODIFIED, entry.dateModified)
+                    }
+                }, null, null)
             }
             entry
         }.getOrElse {
@@ -490,6 +503,7 @@ class CleanupRepository(private val context: Context) {
                 put("originalRelativePath", entry.originalRelativePath ?: "")
                 put("mimeType", entry.mimeType)
                 put("dateTaken", entry.dateTaken)
+                put("dateModified", entry.dateModified)
                 put("duration", entry.duration)
                 put("isVideo", entry.isVideo)
                 put("deletedAt", entry.deletedAt)

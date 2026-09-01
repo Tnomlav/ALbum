@@ -24,8 +24,8 @@ import kotlinx.coroutines.ensureActive
 /** Owns Pixiv discovery independently from the Compose screen lifecycle. */
 class PixivArchiveScanService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var scanStarted = false
     private var scanJob: kotlinx.coroutines.Job? = null
+    private var scanGeneration = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -34,26 +34,26 @@ class PixivArchiveScanService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_CANCEL) {
+            scanGeneration++
             scanJob?.cancel()
+            scanJob = null
             stopSelf()
             return START_NOT_STICKY
         }
-        if (intent?.action != ACTION_SCAN || scanStarted) return START_REDELIVER_INTENT
+        if (intent?.action != ACTION_SCAN) return START_NOT_STICKY
         val source = intent.getStringExtra(EXTRA_SOURCE_URI)?.let(Uri::parse)
         if (source == null) {
             stopSelfResult(startId)
             return START_NOT_STICKY
         }
+        // A cancelled job can still be unwinding while Android delivers the
+        // next scan command to this same service instance. Cancel that stale
+        // job and accept the new request instead of silently ignoring it.
+        scanJob?.cancel()
+        val generation = ++scanGeneration
         startAsForeground(buildNotification("正在准备 Pixiv 扫描"))
-        scanStarted = true
         scanJob = serviceScope.launch {
             val session = PixivArchiveSession(applicationContext)
-            val preferences = getSharedPreferences("pixiv_archive", MODE_PRIVATE)
-            val resumingInitialScan = session.state.value == ArchiveUiState.Scanning &&
-                preferences.getBoolean(KEY_INITIAL_SCAN, false)
-            val existingRecords = session.records.value
-            val scanSource = resumingInitialScan || existingRecords.isEmpty()
-            preferences.edit().putBoolean(KEY_INITIAL_SCAN, scanSource).apply()
             session.setScanState(ArchiveUiState.Scanning)
             session.persistScanProgress(PixivArchiveProgress(
                 phase = com.example.album.data.PixivArchivePhase.Discover,
@@ -75,18 +75,17 @@ class PixivArchiveScanService : Service() {
                     if (session.isScanCancellationRequested()) throw CancellationException("扫描已终止")
                     session.upsertRecord(record)
                 }
-                val scanned = if (!scanSource && existingRecords.isNotEmpty()) {
-                    repository.rescan(existingRecords, existingRecords.size, onProgress, onRecord)
-                } else {
-                    repository.scan(
-                        source,
-                        intent.getIntExtra(EXTRA_MAX_BATCH, 200),
-                        onProgress,
-                        onRecord
-                    )
-                }
+                // "重新扫描" must inspect the source tree again. Re-querying
+                // only persisted records misses newly added files and leaves
+                // records for files that no longer exist in the source tree.
+                val scanned = repository.scan(
+                    source,
+                    intent.getIntExtra(EXTRA_MAX_BATCH, 200),
+                    onProgress,
+                    onRecord
+                )
                 if (session.isScanCancellationRequested()) throw CancellationException("扫描已中止")
-                session.mergeRecords(scanned)
+                session.replaceRecords(scanned)
                 session.setScanState(ArchiveUiState.Ready)
                 session.persistScanProgress(PixivArchiveProgress(
                     phase = com.example.album.data.PixivArchivePhase.Ready,
@@ -96,7 +95,6 @@ class PixivArchiveScanService : Service() {
                     message = "扫描完成，共 ${scanned.size} 项结果",
                     log = "扫描完成"
                 ))
-                preferences.edit().remove(KEY_INITIAL_SCAN).apply()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
@@ -110,8 +108,13 @@ class PixivArchiveScanService : Service() {
                     log = error.message ?: "扫描失败"
                 ))
             } finally {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelfResult(startId)
+                // An older cancelled job must not stop the foreground state
+                // or the service instance that now owns a newer scan.
+                if (generation == scanGeneration) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    scanJob = null
+                    stopSelfResult(startId)
+                }
             }
         }
         return START_REDELIVER_INTENT
@@ -165,6 +168,5 @@ class PixivArchiveScanService : Service() {
         const val EXTRA_MAX_BATCH = "max_batch"
         private const val CHANNEL_ID = "pixiv_archive_scan"
         private const val NOTIFICATION_ID = 42
-        private const val KEY_INITIAL_SCAN = "scan_initial_mode"
     }
 }

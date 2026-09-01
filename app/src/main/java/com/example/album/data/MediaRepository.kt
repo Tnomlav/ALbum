@@ -380,13 +380,7 @@ class MediaRepository(private val context: Context) {
             return@withContext false
         }
         val directCreated = runCatching {
-            val publicRoot = if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
-            val firstSegment = normalizedPath.substringBefore('/')
-            val directory = if (firstSegment.equals(publicRoot, ignoreCase = true)) {
-                File(Environment.getExternalStorageDirectory(), normalizedPath)
-            } else {
-                File(Environment.getExternalStoragePublicDirectory(publicRoot), normalizedPath)
-            }
+            val directory = File(Environment.getExternalStorageDirectory(), normalizedPath)
             val target = File(directory, normalizedName)
             target.mkdirs() || target.isDirectory
         }.getOrDefault(false)
@@ -395,12 +389,7 @@ class MediaRepository(private val context: Context) {
 
         // Scoped storage may reject mkdirs(). Creating a temporary file through
         // MediaStore still lets the provider materialize the requested folder.
-        val publicRoot = if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
-        val relativePath = if (normalizedPath.substringBefore('/').equals(publicRoot, ignoreCase = true)) {
-            "$normalizedPath/$normalizedName/"
-        } else {
-            "$publicRoot/$normalizedPath/$normalizedName/"
-        }
+        val relativePath = "$normalizedPath/$normalizedName/"
         val markerName = ".album_folder_marker_${System.currentTimeMillis()}"
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, markerName)
@@ -499,7 +488,7 @@ class MediaRepository(private val context: Context) {
         }
         val resolver = context.contentResolver
         val root = if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
-        val relativePath = "$root/${destinationFolder.trim('/')}"
+        val relativePath = resolveMediaStoreRelativePath(destinationFolder)
         val collection = when {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && item.isVideo ->
                 MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
@@ -540,7 +529,8 @@ class MediaRepository(private val context: Context) {
                 put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             } else {
-                val directory = File(Environment.getExternalStoragePublicDirectory(root), destinationFolder)
+                val destinationPath = relativePath.removeSuffix("/")
+                val directory = File(Environment.getExternalStorageDirectory(), destinationPath)
                 if (!directory.exists()) directory.mkdirs()
                 put(MediaStore.MediaColumns.DATA, File(directory, targetName).absolutePath)
             }
@@ -768,38 +758,20 @@ class MediaRepository(private val context: Context) {
         val normalized = path.trim('/').replace("\\", "/")
         if (normalized.isBlank()) return null
         val external = Environment.getExternalStorageDirectory()
-        val candidates = listOf(
-            File(external, normalized),
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), normalized),
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), normalized),
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), normalized),
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), normalized)
-        )
-        return candidates.firstOrNull { it.isDirectory && it.canWrite() }
+        // Destination paths are relative to shared storage, not implicitly
+        // relative to Pictures. Do not silently select Pictures/<leaf> when
+        // the exact target path cannot be resolved.
+        return File(external, normalized).takeIf { it.isDirectory && it.canWrite() }
     }
 
-    /** Returns the MediaStore path only for a directory under its public root. */
-    private fun mediaStoreRelativePath(directory: File, root: String): String? {
-        val publicRoot = Environment.getExternalStoragePublicDirectory(root).canonicalFile
-        val actual = runCatching { directory.canonicalFile }.getOrNull() ?: return null
-        val rootPath = publicRoot.path
-        val actualPath = actual.path
-        if (actualPath != rootPath && !actualPath.startsWith("$rootPath${File.separator}")) return null
-        val child = actualPath.removePrefix(rootPath).trim(File.separatorChar, '/')
-        return if (child.isBlank()) "$root/" else "$root/$child/"
-    }
-
-    /** Resolves the actual public root instead of assuming image/video roots. */
+    /** Returns the directory path relative to shared storage. */
     private fun mediaStoreRelativePathForDirectory(directory: File): String? {
         val actual = runCatching { directory.canonicalFile }.getOrNull() ?: return null
-        return listOf(
-            Environment.DIRECTORY_PICTURES,
-            Environment.DIRECTORY_MOVIES,
-            Environment.DIRECTORY_DCIM,
-            Environment.DIRECTORY_DOWNLOADS
-        ).firstNotNullOfOrNull { root ->
-            mediaStoreRelativePath(actual, root)
-        }
+        val rootPath = Environment.getExternalStorageDirectory().canonicalPath
+        val actualPath = actual.path
+        if (!actualPath.startsWith("$rootPath${File.separator}")) return null
+        val child = actualPath.removePrefix(rootPath).trim(File.separatorChar, '/')
+        return child.takeIf { it.isNotBlank() }?.let { "$it/" }
     }
 
     private fun transferToPhysicalDirectory(
@@ -858,8 +830,7 @@ class MediaRepository(private val context: Context) {
             selection = "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
             args = arrayOf("${relativePath.trimEnd('/')}/", name)
         } else {
-            val root = if (collection == MediaStore.Video.Media.EXTERNAL_CONTENT_URI) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
-            val path = File(Environment.getExternalStoragePublicDirectory(root), relativePath.substringAfter('/'))
+            val path = File(Environment.getExternalStorageDirectory(), relativePath.trim('/'))
             selection = "${MediaStore.MediaColumns.DATA} = ?"
             args = arrayOf(File(path, name).absolutePath)
         }

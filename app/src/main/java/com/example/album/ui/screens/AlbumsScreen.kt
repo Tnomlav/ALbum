@@ -81,6 +81,7 @@ import com.example.album.ui.MediaSort
 import com.example.album.ui.SortDirection
 import com.example.album.ui.searchAlbums
 import com.example.album.ui.filterAlbums
+import com.example.album.ui.sortMediaItems
 import com.example.album.ui.MediaLayout
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
@@ -141,14 +142,7 @@ fun AlbumsScreen(
     val refreshing = loading || scanning
     val english = LocalAppEnglish.current
     fun itemsInDisplayOrder(items: List<MediaItem>): List<MediaItem> {
-        val base = when (sort) {
-            MediaSort.Time -> items.sortedBy { it.dateTaken }
-            MediaSort.Name -> items.sortedBy { it.name.lowercase() }
-            MediaSort.Size -> items.sortedBy { it.size }
-            MediaSort.Count -> items.sortedBy { it.dateTaken }
-            MediaSort.Duration -> items.sortedBy { it.duration }
-        }
-        return if (sortDirection == SortDirection.Descending) base.reversed() else base
+        return sortMediaItems(items, sort, sortDirection)
     }
     val allAlbums = remember(media, sort, sortDirection, albumQueryMatchesItems, additionalAlbumNames, additionalFileNames, pinnedAlbumName) {
         searchAlbums(

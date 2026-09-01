@@ -4,6 +4,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.example.album.ui.screens.constrainWallpaperFrameToRotatedBounds
 
 class ImageEditorSafetyTest {
     @Test
@@ -50,5 +51,22 @@ class ImageEditorSafetyTest {
         assertEquals(1, editorExportSampleSize(1440, 3120))
         assertEquals(2, editorExportSampleSize(8000, 6000))
         assertEquals(4, editorExportSampleSize(12000, 9000))
+    }
+
+    @Test
+    fun wallpaperCropMoveStaysInsideRotatedImageBounds() {
+        val frame = constrainWallpaperFrameToRotatedBounds(
+            NormalizedRect(.72f, .72f, .92f, .92f),
+            straighten = 45f
+        )
+        val angle = Math.toRadians(45.0)
+        val halfWidth = (frame.width * kotlin.math.cos(angle) + frame.height * kotlin.math.sin(angle)) / 2f
+        val halfHeight = (frame.width * kotlin.math.sin(angle) + frame.height * kotlin.math.cos(angle)) / 2f
+        val centerX = (frame.left + frame.right) / 2f
+        val centerY = (frame.top + frame.bottom) / 2f
+        assertTrue(centerX - halfWidth >= -0.0001f)
+        assertTrue(centerX + halfWidth <= 1.0001f)
+        assertTrue(centerY - halfHeight >= -0.0001f)
+        assertTrue(centerY + halfHeight <= 1.0001f)
     }
 }

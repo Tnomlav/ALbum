@@ -129,7 +129,8 @@ class LocalFolderRepository(private val context: Context) {
             treeUris().map { treeUri ->
                 async {
                     val root = DocumentFile.fromTreeUri(context, treeUri) ?: return@async emptyList()
-                    scan(root, root.name ?: "本地文件夹", listFilesGate)
+                    val rootName = root.name ?: "本地文件夹"
+                    scan(root, rootName, rootName, listFilesGate)
                 }
             }.awaitAll().flatten().distinctBy { it.uri }.sortedByDescending { it.dateTaken }
         }
@@ -297,9 +298,15 @@ class LocalFolderRepository(private val context: Context) {
         return "/android/data/" !in "$path/" && "/android/obb/" !in "$path/"
     }
 
-    private suspend fun scan(file: DocumentFile, folderName: String, listFilesGate: Semaphore): List<MediaItem> {
+    private suspend fun scan(
+        file: DocumentFile,
+        folderName: String,
+        folderPath: String,
+        listFilesGate: Semaphore
+    ): List<MediaItem> {
         if (file.isDirectory) {
             val childFolder = file.name?.takeIf { it.isNotBlank() } ?: folderName
+            val childPath = if (folderPath.isBlank()) childFolder else "$folderPath/$childFolder"
             val children = listFilesGate.withPermit {
                 runCatching { file.listFiles() }.getOrDefault(emptyArray())
             }
@@ -307,17 +314,17 @@ class LocalFolderRepository(private val context: Context) {
             val files = children.filterNot { it.isDirectory }
             return coroutineScope {
                 val nested = directories.map { child ->
-                    async { scan(child, childFolder, listFilesGate) }
+                    async { scan(child, childFolder, childPath, listFilesGate) }
                 }
-                val direct = files.mapNotNull { child -> mediaItem(child, childFolder) }
+                val direct = files.mapNotNull { child -> mediaItem(child, childFolder, childPath) }
                 nested.awaitAll().flatten() + direct
             }
         }
 
-        return mediaItem(file, folderName)?.let(::listOf).orEmpty()
+        return mediaItem(file, folderName, folderPath)?.let(::listOf).orEmpty()
     }
 
-    private fun mediaItem(file: DocumentFile, folderName: String): MediaItem? {
+    private fun mediaItem(file: DocumentFile, folderName: String, folderPath: String): MediaItem? {
         val mime = file.type ?: context.contentResolver.getType(file.uri).orEmpty()
         val isVideo = mime.startsWith("video/")
         if (!isVideo && !mime.startsWith("image/")) return null
@@ -328,6 +335,7 @@ class LocalFolderRepository(private val context: Context) {
             uri = file.uri,
             name = file.name ?: if (isVideo) "未命名视频" else "未命名图片",
             folder = folderName,
+            relativePath = folderPath.trim('/').takeIf { it.isNotBlank() },
             dateTaken = file.lastModified().takeIf { it > 0 } ?: 0L,
             mimeType = mime.ifBlank { if (isVideo) "video/*" else "image/*" },
             size = file.length(),

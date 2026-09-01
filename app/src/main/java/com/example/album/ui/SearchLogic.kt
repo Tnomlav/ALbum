@@ -11,6 +11,20 @@ internal fun searchTextMatches(query: String, vararg values: String): Boolean {
 internal fun mediaMatchesSearch(query: String, item: MediaItem): Boolean =
     searchTextMatches(query, item.folder, item.name)
 
+internal fun sortMediaItems(
+    items: List<MediaItem>,
+    sort: MediaSort,
+    sortDirection: SortDirection
+): List<MediaItem> {
+    val sorted = when (sort) {
+        MediaSort.Time, MediaSort.Count -> items.sortedBy { it.dateTaken }
+        MediaSort.Name -> items.sortedBy { it.name.lowercase() }
+        MediaSort.Size -> items.sortedBy { it.size }
+        MediaSort.Duration -> items.sortedBy { it.duration }
+    }
+    return if (sortDirection == SortDirection.Descending) sorted.reversed() else sorted
+}
+
 internal fun folderMatchesSearch(
     query: String,
     folder: String,
@@ -34,13 +48,7 @@ internal fun searchAlbums(
     pinnedFolderName: String? = null
 ): List<MediaAlbum> {
     fun orderedItems(items: List<MediaItem>): List<MediaItem> {
-        val sorted = when (sort) {
-            MediaSort.Time, MediaSort.Count -> items.sortedBy { it.dateTaken }
-            MediaSort.Name -> items.sortedBy { it.name.lowercase() }
-            MediaSort.Size -> items.sortedBy { it.size }
-            MediaSort.Duration -> items.sortedBy { it.duration }
-        }
-        return if (sortDirection == SortDirection.Descending) sorted.reversed() else sorted
+        return sortMediaItems(items, sort, sortDirection)
     }
 
     val grouped = media.groupBy { it.folder }
