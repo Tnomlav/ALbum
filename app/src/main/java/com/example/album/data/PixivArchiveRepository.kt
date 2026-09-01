@@ -313,7 +313,9 @@ class PixivArchiveRepository(private val context: Context) {
         }
         // Keep the request rate modest; Pixiv may throttle bursts even for a
         // fully authenticated account, especially on real-device networks.
-        val semaphore = Semaphore(2)
+        // Three native requests improve throughput on ordinary networks while
+        // keeping a deliberate ceiling to avoid turning a scan into a burst.
+        val semaphore = Semaphore(PIXIV_METADATA_CONCURRENCY)
         var scanned = 0
         var warnings = 0
         var lastProgressAt = 0L
@@ -391,7 +393,7 @@ class PixivArchiveRepository(private val context: Context) {
             }
         }
         onProgress(PixivArchiveProgress(PixivArchivePhase.Metadata, 0, files.size, 0, message = "正在重新查询 ${files.size} 张图片"))
-        val semaphore = Semaphore(2)
+        val semaphore = Semaphore(PIXIV_METADATA_CONCURRENCY)
         val requests = files.mapNotNull { (_, record) -> record.pid }
             .distinct()
             .associateWith { pid -> async { semaphore.withPermit { resolveMetadata(pid) } } }
@@ -986,6 +988,7 @@ private val COMMON_PIXIV_FILENAME = Regex(
     RegexOption.IGNORE_CASE
 )
 private const val PROGRESS_UPDATE_INTERVAL_MS = 120L
+private const val PIXIV_METADATA_CONCURRENCY = 3
 internal fun parsePixivFilename(filename: String): Pair<String, Int>? {
     val strict = STRICT_PIXIV_FILENAME.matchEntire(filename)
     if (strict != null) return strict.groupValues[1] to (strict.groupValues[2].toIntOrNull() ?: 0)

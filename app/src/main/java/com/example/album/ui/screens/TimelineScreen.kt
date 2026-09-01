@@ -519,7 +519,7 @@ private fun timelineStaggeredGridScrollMetrics(
     )
 }
 
-private fun timelineDateLabel(timestamp: Long, english: Boolean): String {
+internal fun timelineDateLabel(timestamp: Long, english: Boolean): String {
     val date = Calendar.getInstance().apply { timeInMillis = timestamp }
     val today = Calendar.getInstance()
     val yesterday = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }

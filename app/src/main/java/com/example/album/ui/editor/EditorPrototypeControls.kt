@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 
@@ -145,6 +146,7 @@ internal fun EditorCenterCarousel(
     if (itemCount == 0) return
     val state = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    var pendingScrollJob by remember { mutableStateOf<Job?>(null) }
     val flingBehavior = rememberSnapFlingBehavior(
         lazyListState = state,
         snapPosition = SnapPosition.Center
@@ -247,7 +249,8 @@ internal fun EditorCenterCarousel(
                     // this callback additionally brings a clicked card to the
                     // same centered position used by drag snapping.
                     content(index) {
-                        scope.launch { state.scrollToItem(index, 0) }
+                        pendingScrollJob?.cancel()
+                        pendingScrollJob = scope.launch { state.scrollToItem(index, 0) }
                     }
                 }
             }

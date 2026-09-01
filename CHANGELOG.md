@@ -7,6 +7,19 @@ This file records release-level changes. Each exported release should have:
 3. An annotated Git tag with the same version, for example `v1.1.20`.
 4. The APK SHA-256 and verification status recorded in the entry when an APK is exported.
 
+## v1.1.44 - 2026-09-01
+
+- Reworked Pixiv login loading with an isolated WebView process/data directory, automatic fallback login entry, renderer recovery, blank-page timeout recovery, and Cookie handoff back to the archive process.
+- Fixed rapid video next/previous navigation in both player implementations by preserving the requested media index and avoiding repeated `prepare()` calls on an already prepared player.
+- Prevented competing Pixiv reload jobs and stale refresh results from overwriting newer page data.
+- Preserved the current folder/timeline order when entering multi-select, including timeline date headers and spacing; cancelled superseded editor carousel scroll jobs.
+- Updated dynamic wallpaper video scaling to preserve the source aspect ratio while cropping to fill the screen without black bars.
+- Updated the custom mini-player to autoplay independently of background playback, use the video's aspect ratio, and expose dedicated fullscreen, close, rewind, play/pause, and fast-forward controls.
+- APK: `app/release/app-release.apk`
+- SHA-256: `2AC6E9AA1FA39AFA4E8989149779615C0F0F196B6CBE85152535176B23B39B1B`
+- Signature: verified with APK Signature Scheme v2; 1 signer.
+- Verification: `:app:compileDebugKotlin`, `:app:testDebugUnitTest`, and `:app:assembleRelease` passed. Pixiv login still requires real-device verification.
+
 ## v1.1.21 - 2026-08-27
 
 - Changed Move to use native MediaStore/SAF move operations where supported, avoiding duplicate copies and unnecessary source-delete confirmation.

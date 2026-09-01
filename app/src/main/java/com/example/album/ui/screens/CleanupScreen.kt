@@ -12,6 +12,7 @@ import android.os.Environment
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.widget.Toast
+import android.webkit.CookieManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
@@ -333,6 +334,8 @@ fun CleanupScreen(
 fun PixivArchiveScreen(
     session: PixivArchiveSession,
     onStartScan: (Uri, Int) -> Unit,
+    onCancelScan: () -> Unit,
+    onClearScan: () -> Unit,
     onBack: () -> Unit,
     onArchiveComplete: suspend (completed: Int, failed: Int) -> Unit,
     archiveMediaRefreshing: Boolean = false,
@@ -432,6 +435,8 @@ fun PixivArchiveScreen(
                 onEnterSelection = { selectionMode = true },
                 onExitSelection = ::exitSelectionMode,
                 onStartScan = onStartScan,
+                onCancelScan = onCancelScan,
+                onClearScan = onClearScan,
                 onArchiveComplete = onArchiveComplete,
                 onInfo = { infoRecordUri = it.uri.toString() }
             )
@@ -1180,7 +1185,60 @@ class PixivArchiveSession(context: Context) {
     val selectedUris = mutableStateOf<Set<String>>(emptySet())
     val selectableUris = mutableStateOf<Set<String>>(emptySet())
     val selectionMode = mutableStateOf(false)
+    val scanCancelled = mutableStateOf(
+        preferences.getBoolean(KEY_SCAN_CANCELLED, false)
+    )
     var scanJob: Job? = null
+
+    /** Marks cancellation while retaining completed records for archive actions. */
+    fun cancelScan() {
+        preferences.edit()
+            .putBoolean(KEY_SCAN_CANCEL_REQUESTED, true)
+            .putBoolean(KEY_SCAN_CANCELLED, true)
+            .commit()
+        scanJob?.cancel()
+        scanJob = null
+        scanCancelled.value = true
+        // Keep the records that were persisted before cancellation available
+        // for archive actions; only the scan operation is being stopped.
+        persistRecords()
+        state.value = ArchiveUiState.Ready
+        preferences.edit().putString(KEY_SCAN_STATE, ArchiveUiState.Ready.name).apply()
+    }
+
+    fun beginScan() {
+        preferences.edit()
+            .putBoolean(KEY_SCAN_CANCEL_REQUESTED, false)
+            .putBoolean(KEY_SCAN_CANCELLED, false)
+            .apply()
+        scanCancelled.value = false
+    }
+
+    /** Clears a stopped scan and returns the archive page to its initial state. */
+    fun clearScanResults() {
+        preferences.edit()
+            .putBoolean(KEY_SCAN_CANCEL_REQUESTED, true)
+            .remove(KEY_SCAN_RECORDS)
+            .remove(KEY_SCAN_STATE)
+            .remove(KEY_SCAN_ACTIVITY)
+            .remove(KEY_SCAN_COMPLETED)
+            .remove(KEY_SCAN_FAILED)
+            .remove(KEY_SCAN_CANCELLED)
+            .remove(KEY_INITIAL_SCAN)
+            .apply()
+        records.value = emptyList()
+        state.value = ArchiveUiState.Idle
+        completed.value = 0
+        failed.value = 0
+        activity.value = ArchiveActivity()
+        selectedUris.value = emptySet()
+        selectableUris.value = emptySet()
+        selectionMode.value = false
+        scanCancelled.value = false
+    }
+
+    fun isScanCancellationRequested(): Boolean =
+        preferences.getBoolean(KEY_SCAN_CANCEL_REQUESTED, false)
 
     fun persistRecords() {
         val json = JSONArray().apply {
@@ -1341,6 +1399,9 @@ class PixivArchiveSession(context: Context) {
         const val KEY_SCAN_ACTIVITY = "scan_activity"
         const val KEY_SCAN_COMPLETED = "scan_completed"
         const val KEY_SCAN_FAILED = "scan_failed"
+        const val KEY_SCAN_CANCEL_REQUESTED = "scan_cancel_requested"
+        const val KEY_SCAN_CANCELLED = "scan_cancelled"
+        const val KEY_INITIAL_SCAN = "scan_initial_mode"
     }
 
     private fun loadState(): ArchiveUiState = runCatching {
@@ -1373,6 +1434,8 @@ private fun ArchiveContent(
     onEnterSelection: () -> Unit,
     onExitSelection: () -> Unit,
     onStartScan: (Uri, Int) -> Unit,
+    onCancelScan: () -> Unit,
+    onClearScan: () -> Unit,
     onArchiveComplete: suspend (completed: Int, failed: Int) -> Unit,
     onInfo: (PixivArchiveRecord) -> Unit
 ) {
@@ -1465,6 +1528,26 @@ private fun ArchiveContent(
     val pixivLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         scope.launch {
             if (result.resultCode != Activity.RESULT_OK) return@launch
+            val resultData = result.data
+            val cookieManager = CookieManager.getInstance()
+            fun restoreCookies(url: String, cookieHeader: String?) {
+                cookieHeader.orEmpty().split(';')
+                    .map(String::trim)
+                    .filter { it.contains('=') }
+                    .forEach { cookieManager.setCookie(url, it) }
+            }
+            restoreCookies(
+                "https://www.pixiv.net/",
+                resultData?.getStringExtra(PixivWebActivity.EXTRA_PIXIV_COOKIES)
+            )
+            restoreCookies(
+                "https://accounts.pixiv.net/",
+                resultData?.getStringExtra(PixivWebActivity.EXTRA_ACCOUNT_COOKIES)
+            )
+            cookieManager.flush()
+            if (resultData?.getBooleanExtra(PixivWebActivity.EXTRA_AUTHENTICATED, false) == true) {
+                preferences.edit().putBoolean("session_verified", true).apply()
+            }
             // WebView may flush its cookies a little after the login page closes.
             // Confirm the session from the repository after returning to the app.
             checkingPixivLogin = true
@@ -1806,11 +1889,20 @@ private fun ArchiveContent(
             Row(Modifier.fillMaxWidth().padding(start = 10.dp, top = 12.dp, end = 10.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ArchivePrimaryButton(
                     label = when {
-                        state == ArchiveUiState.Scanning -> "重新开始"
+                        state == ArchiveUiState.Scanning -> "中止扫描"
+                        session.scanCancelled.value -> "全部清除"
                         records.isNotEmpty() -> "重新扫描"
                         else -> "开始扫描"
                     },
                     onClick = {
+                        if (state == ArchiveUiState.Scanning) {
+                            onCancelScan()
+                            return@ArchivePrimaryButton
+                        }
+                        if (session.scanCancelled.value) {
+                            onClearScan()
+                            return@ArchivePrimaryButton
+                        }
                         if (!pixivSessionConnected) {
                             showPixivLoginPrompt = true
                             return@ArchivePrimaryButton
@@ -1825,7 +1917,8 @@ private fun ArchiveContent(
                     },
                     enabled = state != ArchiveUiState.Archiving,
                     modifier = Modifier.weight(1f),
-                    filled = false
+                    filled = false,
+                    containerColor = if (state == ArchiveUiState.Scanning) Color(0xFF9E9E9E) else null
                 )
                 ArchivePrimaryButton(
                     label = when {
@@ -2251,20 +2344,22 @@ private fun ArchivePrimaryButton(
     onClick: () -> Unit,
     enabled: Boolean,
     modifier: Modifier = Modifier,
-    filled: Boolean
+    filled: Boolean,
+    containerColor: Color? = null
 ) {
     val accent = MaterialTheme.colorScheme.primary
+    val buttonColor = containerColor ?: if (filled) accent else accent.copy(alpha = .12f)
     val english = LocalAppEnglish.current
     Box(
         modifier
             .height(42.dp)
             .clip(RoundedCornerShape(7.dp))
-            .background(if (filled) accent else accent.copy(alpha = .12f))
+            .background(buttonColor)
             .clickable(enabled = enabled, onClick = onClick)
             .alpha(if (enabled) 1f else .42f),
         contentAlignment = Alignment.Center
     ) {
-        Text(appText(label, english), color = if (filled) Color.White else accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(appText(label, english), color = if (filled || containerColor != null) Color.White else accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 

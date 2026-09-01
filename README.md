@@ -25,12 +25,12 @@ Album 主要服务于希望直接管理本机媒体文件的用户：不上传�
 ## 下载
 
 - [GitHub Releases](https://github.com/Tnomlav/ALbum/releases)
-- 当前版本：[v1.1.33 APK](https://github.com/Tnomlav/ALbum/releases/download/v1.1.33/Album-v1.1.33.apk)
+- 当前版本：[v1.1.44 APK](https://github.com/Tnomlav/ALbum/releases/download/v1.1.44/Album-v1.1.44.apk)
 
 当前 APK SHA-256：
 
 ```text
-81250B42E26051F71036D19C17DCD501DE9F453FBC5EF9C5AF41BE1515A39777
+2AC6E9AA1FA39AFA4E8989149779615C0F0F196B6CBE85152535176B23B39B1B
 ```
 
 安装前请确认文件来自本仓库，并通过 SHA-256 校验下载完整性。正式发布版本和发布说明会优先放在 GitHub Releases。
