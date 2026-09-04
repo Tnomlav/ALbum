@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class
+)
+@file:Suppress("UnsafeOptInUsageError")
 
 package com.example.album.ui.components
 
@@ -247,7 +250,12 @@ fun MediaViewer(
     // overlay, so this only fades the page behind it instead of fading the image.
     val viewerBackgroundAlpha = remember { Animatable(if (sharedPhotoTransition) 0f else 1f) }
     var closing by remember { mutableStateOf(false) }
-    val viewerItems = remember(items, item.isVideo) { items.filter { it.isVideo == item.isVideo } }
+    val viewerItems = remember(items, item.uri, item.isVideo) {
+        val sameType = items.filter { it.isVideo == item.isVideo }
+        // ACTION_VIEW can provide a URI that is not in Album's library yet.
+        // Keep it in the playlist so ExoPlayer always has a valid current item.
+        if (sameType.any { it.uri == item.uri }) sameType else listOf(item) + sameType
+    }
     var currentIndex by remember(item.uri, viewerItems) {
         mutableIntStateOf(viewerItems.indexOfFirst { it.uri == item.uri }.coerceAtLeast(0))
     }
@@ -394,9 +402,10 @@ fun MediaViewer(
                     onEnterPictureInPicture = onEnterPictureInPicture,
                     favorite = favorite(current),
                     onFavorite = { onFavorite(current) },
-                    onShare = { share(context, current, english) },
-                    onWallpaper = onWallpaper?.let { action -> { action(current) } } ?: {},
-                    onSettings = { showVideoSettings = true },
+                     onShare = { share(context, current, english) },
+                     onWallpaper = onWallpaper?.let { action -> { action(current) } } ?: {},
+                     onInfo = { showInfo = true },
+                     onSettings = { showVideoSettings = true },
                     settingsVersion = videoSettingsVersion
                 )
             } else {
@@ -550,6 +559,22 @@ fun MediaViewer(
                     }
 
                 }
+            }
+        }
+
+        if (showInfo && current.isVideo) {
+            Box(
+                Modifier.fillMaxSize()
+                    .zIndex(30f)
+                    .pointerInput(Unit) { detectTapGestures { showInfo = false } }
+            ) {
+                MediaInfoPanel(
+                    current,
+                    Modifier.align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(top = 66.dp, end = 10.dp),
+                    playerStyle = true
+                )
             }
         }
 

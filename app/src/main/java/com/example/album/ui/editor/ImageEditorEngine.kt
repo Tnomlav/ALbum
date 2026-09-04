@@ -52,28 +52,30 @@ enum class EditorFont(val label: String) {
 
 /** Resolves the same bundled font files for both the Compose preview and export. */
 internal object EditorTypefaceRegistry {
-    @Volatile private var context: Context? = null
+    @Volatile private var typefaces: Map<EditorFont, android.graphics.Typeface> = emptyMap()
 
     fun initialize(context: Context) {
-        this.context = context.applicationContext
+        val appContext = context.applicationContext
+        typefaces = EditorFont.entries.mapNotNull { font ->
+            resourceId(font)?.let { id ->
+                runCatching { ResourcesCompat.getFont(appContext, id) }.getOrNull()?.let { font to it }
+            }
+        }.toMap()
     }
 
-    fun resolve(font: EditorFont): android.graphics.Typeface? {
-        val context = context ?: return null
-        val id = when (font) {
-            EditorFont.System -> R.font.noto_sans_sc
-            EditorFont.Serif -> R.font.noto_serif_sc
-            EditorFont.Monospace -> R.font.ma_shan_zheng
-            EditorFont.Kai -> R.font.zhi_mang_xing
-            EditorFont.Song -> R.font.zcool_xiaowei
-            EditorFont.Hei -> R.font.zcool_qingke_huangyou
-            EditorFont.Fang -> R.font.dotgothic16
-            EditorFont.Cursive -> R.font.long_cang
-            EditorFont.Wide -> R.font.liu_jian_mao_cao
-            EditorFont.Rounded -> R.font.zcool_kuaile
-            else -> return null
-        }
-        return runCatching { ResourcesCompat.getFont(context, id) }.getOrNull()
+    fun resolve(font: EditorFont): android.graphics.Typeface? = typefaces[font]
+
+    private fun resourceId(font: EditorFont): Int? = when (font) {
+        EditorFont.System -> R.font.noto_sans_sc
+        EditorFont.Serif -> R.font.noto_serif_sc
+        EditorFont.Monospace -> R.font.ma_shan_zheng
+        EditorFont.Kai -> R.font.zhi_mang_xing
+        EditorFont.Song -> R.font.zcool_xiaowei
+        EditorFont.Hei -> R.font.zcool_qingke_huangyou
+        EditorFont.Fang -> R.font.dotgothic16
+        EditorFont.Cursive -> R.font.long_cang
+        EditorFont.Wide -> R.font.liu_jian_mao_cao
+        EditorFont.Rounded -> R.font.zcool_kuaile
     }
 }
 data class EditorText(
@@ -227,7 +229,12 @@ suspend fun loadEditorBitmap(context: Context, item: MediaItem): Bitmap? = withC
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
         openMediaInputStream(context, item.uri)?.use { BitmapFactory.decodeStream(it, null, options) }
-    }.getOrNull()
+    }.getOrElse {
+        if (it is OutOfMemoryError) {
+            com.example.album.data.ThumbnailRepository.trimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL)
+        }
+        null
+    }
 }
 
 /** Loads a larger preview for wallpaper composition without decoding unbounded source files. */
@@ -246,7 +253,12 @@ suspend fun loadWallpaperBitmap(context: Context, item: MediaItem): Bitmap? = wi
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
         openMediaInputStream(context, item.uri)?.use { BitmapFactory.decodeStream(it, null, options) }
-    }.getOrNull()
+    }.getOrElse {
+        if (it is OutOfMemoryError) {
+            com.example.album.data.ThumbnailRepository.trimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL)
+        }
+        null
+    }
 }
 
 fun geometryBitmap(source: Bitmap, state: ImageEditState): Bitmap {

@@ -262,6 +262,9 @@ class MediaRepository(private val context: Context) {
                 mimeType = mime,
                 size = target.length()
             )
+        } catch (_: OutOfMemoryError) {
+            runCatching { target.delete() }
+            null
         } catch (_: Exception) {
             runCatching { target.delete() }
             null
@@ -317,6 +320,9 @@ class MediaRepository(private val context: Context) {
                 mimeType = mime,
                 size = context.contentResolver.openAssetFileDescriptor(target, "r")?.use { it.length } ?: 0L
             )
+        } catch (_: OutOfMemoryError) {
+            context.contentResolver.delete(target, null, null)
+            null
         } catch (_: Exception) {
             context.contentResolver.delete(target, null, null)
             null
@@ -416,6 +422,81 @@ class MediaRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Moves a document into an existing directory without creating a second
+     * copy first. This is shared by normal Move and Pixiv archive Move.
+     */
+    suspend fun moveUriToDirectory(
+        sourceUri: Uri,
+        destination: DocumentFile,
+        targetName: String
+    ): DirectMoveResult? = withContext(Dispatchers.IO) {
+        if (!destination.isDirectory || !destination.canWrite()) return@withContext null
+
+        val physicalSource = physicalFileForUri(sourceUri)
+        val physicalDestination = physicalFileForUri(destination.uri)
+        if (physicalSource != null && physicalDestination?.isDirectory == true) {
+            val target = File(physicalDestination, targetName)
+            if (physicalSource.canonicalFile == target.canonicalFile) {
+                return@withContext DirectMoveResult(Uri.fromFile(target), target.name)
+            }
+            if (target.exists()) return@withContext null
+            if (physicalSource.renameTo(target)) {
+                MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null)
+                return@withContext DirectMoveResult(Uri.fromFile(target), target.name)
+            }
+        }
+
+        // DocumentsContract.moveDocument is only valid within one provider.
+        if (sourceUri.authority != destination.uri.authority) return@withContext null
+        val parent = findPersistedDocumentParent(sourceUri) ?: return@withContext null
+        val moved = runCatching {
+            DocumentsContract.moveDocument(context.contentResolver, sourceUri, parent.uri, destination.uri)
+        }.getOrNull() ?: return@withContext null
+        val movedFile = DocumentFile.fromSingleUri(context, moved)
+        val movedName = movedFile?.name
+        if (!movedName.isNullOrBlank() && movedName != targetName) {
+            val renamed = runCatching {
+                DocumentsContract.renameDocument(context.contentResolver, moved, targetName)
+            }.getOrNull()
+            if (renamed != null) return@withContext DirectMoveResult(renamed, targetName)
+        }
+        DirectMoveResult(moved, movedName?.takeIf { it.isNotBlank() } ?: targetName)
+    }
+
+    /** Deletes a source without using DocumentFile.delete(), which may trash it. */
+    fun deleteUriPermanently(uri: Uri): Boolean {
+        physicalFileForUri(uri)?.let { file ->
+            return !file.exists() || file.delete()
+        }
+        return runCatching {
+            DocumentsContract.deleteDocument(context.contentResolver, uri)
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun physicalFileForUri(uri: Uri): File? {
+        if (uri.scheme.equals("file", ignoreCase = true)) return uri.path?.let(::File)
+        runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull()
+            ?.takeIf { it.startsWith("primary:", ignoreCase = true) }
+            ?.substringAfter(':')
+            ?.let { relative -> File(Environment.getExternalStorageDirectory(), Uri.decode(relative.trim('/'))) }
+            ?.takeIf { it.exists() }
+            ?.let { return it }
+        return runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns.DATA),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val index = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                if (index >= 0 && cursor.moveToFirst()) cursor.getString(index)?.let(::File) else null
+            }
+        }.getOrNull()?.takeIf { it.exists() }
+    }
+
     suspend fun transfer(
         item: MediaItem,
         destinationFolder: String,
@@ -438,6 +519,7 @@ class MediaRepository(private val context: Context) {
             localFolders.findAuthorizedDirectory(destinationFolder)?.let { directory ->
             if (mode == TransferMode.Move) {
                 moveToDocumentDirectory(item, directory, conflictPolicy)?.let { return@withContext it }
+                return@withContext moveByCopyAndPermanentDelete(item, directory, conflictPolicy)
             }
             return@withContext transferToDocumentDirectory(item, directory, conflictPolicy)
         }
@@ -467,6 +549,18 @@ class MediaRepository(private val context: Context) {
                         return@withContext it
                     }
                 }
+            }
+            if (mode == TransferMode.Move) {
+                val destination = DocumentFile.fromFile(directory)
+                moveUriToDirectory(item.uri, destination, item.name)?.let { moved ->
+                    return@withContext TransferResult(
+                        item,
+                        success = true,
+                        targetName = moved.name,
+                        movedDirectly = true
+                    )
+                }
+                return@withContext moveByCopyAndPermanentDelete(item, destination, conflictPolicy)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val root = if (item.isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
@@ -663,32 +757,59 @@ class MediaRepository(private val context: Context) {
         } else null
     }
 
-    private fun moveToDocumentDirectory(
+    private suspend fun moveToDocumentDirectory(
         item: MediaItem,
         directory: DocumentFile,
         conflictPolicy: ConflictPolicy
     ): TransferResult? {
-        // Archive sources can come from a Pixiv-specific SAF tree that is not
-        // part of the local-folder index. Find the source parent from every
-        // persisted tree so Move can stay a real provider-side move instead
-        // of falling back to copy-then-delete.
-        val parent = findPersistedDocumentParent(item.uri) ?: return null
         val existingNames = runCatching { directory.listFiles().mapNotNull { it.name }.toSet() }
             .getOrDefault(emptySet())
         val targetChoice = resolveTransferTargetName(item.name, existingNames, conflictPolicy)
         if (targetChoice.skipped) {
             return TransferResult(item, success = true, skipped = true, targetName = item.name, movedDirectly = true)
         }
-        if (targetChoice.name != item.name && conflictPolicy == ConflictPolicy.KeepBoth) return null
         val existing = runCatching { directory.findFile(item.name) }.getOrNull()
         if (existing?.uri == item.uri) {
             return TransferResult(item, success = true, skipped = true, targetName = item.name, movedDirectly = true)
         }
-        if (existing != null && conflictPolicy == ConflictPolicy.Overwrite && !existing.delete()) return null
-        val moved = runCatching {
-            DocumentsContract.moveDocument(context.contentResolver, item.uri, parent.uri, directory.uri)
-        }.getOrNull() ?: return null
-        return TransferResult(item, success = true, targetName = moved?.let { targetChoice.name } ?: item.name, movedDirectly = true)
+        if (existing != null && conflictPolicy == ConflictPolicy.Overwrite && !deleteUriPermanently(existing.uri)) return null
+        val moved = moveUriToDirectory(item.uri, directory, targetChoice.name) ?: return null
+        return TransferResult(item, success = true, targetName = moved.name, movedDirectly = true)
+    }
+
+    private fun moveByCopyAndPermanentDelete(
+        item: MediaItem,
+        directory: DocumentFile,
+        conflictPolicy: ConflictPolicy
+    ): TransferResult {
+        if (!directory.isDirectory || !directory.canWrite()) return TransferResult(item, success = false)
+        val targetChoice = resolveTransferTargetName(
+            item.name,
+            runCatching { directory.listFiles().mapNotNull { it.name }.toSet() }.getOrDefault(emptySet()),
+            conflictPolicy
+        )
+        if (targetChoice.skipped) return TransferResult(item, success = true, skipped = true, targetName = item.name)
+        val existing = runCatching { directory.findFile(item.name) }.getOrNull()
+        if (existing != null && conflictPolicy == ConflictPolicy.Overwrite && !deleteUriPermanently(existing.uri)) {
+            return TransferResult(item, success = false)
+        }
+        val target = runCatching { directory.createFile(transferMimeType(item), targetChoice.name) }.getOrNull()
+            ?: return TransferResult(item, success = false)
+        return runCatching {
+            context.contentResolver.openInputStream(item.uri).use { input ->
+                context.contentResolver.openOutputStream(target.uri).use { output ->
+                    requireNotNull(input)
+                    requireNotNull(output)
+                    input.copyTo(output)
+                }
+            }
+            if (!target.exists()) throw IOException("Target file was not created")
+            if (!deleteUriPermanently(item.uri)) throw IOException("Unable to permanently remove original")
+            TransferResult(item, success = true, targetName = targetChoice.name)
+        }.getOrElse {
+            deleteUriPermanently(target.uri)
+            TransferResult(item, success = false)
+        }
     }
 
     private fun findPersistedDocumentParent(targetUri: Uri): DocumentFile? {

@@ -26,7 +26,9 @@ fun transferFolderPath(relativePath: String?, folder: String): String =
 
 fun MediaItem.transferFolderPath(): String = transferFolderPath(relativePath, folder)
 
-fun MediaItem.isSystemTrashedFile(): Boolean = name.trimStart().startsWith(".trashed", ignoreCase = true)
+fun isSystemTrashedName(name: String?): Boolean = name.orEmpty().trimStart().startsWith(".trashed", ignoreCase = true)
+
+fun MediaItem.isSystemTrashedFile(): Boolean = isSystemTrashedName(name)
 
 fun MediaItem.displayAddress(): String {
     val relative = relativePath?.trim()?.trim('/')

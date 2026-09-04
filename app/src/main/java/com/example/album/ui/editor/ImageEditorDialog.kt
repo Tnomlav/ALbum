@@ -290,7 +290,7 @@ fun ImageEditorDialog(
             !item.isDocument &&
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
             !(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && MediaStore.canManageMedia(context)) &&
-            !(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())
+            !Environment.isExternalStorageManager()
         ) {
             runCatching {
                 val request = MediaStore.createWriteRequest(context.contentResolver, listOf(item.uri))
@@ -317,10 +317,14 @@ fun ImageEditorDialog(
             val window = activity?.window
             val oldStatus = window?.statusBarColor
             val oldNavigation = window?.navigationBarColor
-            val oldNavigationDivider = window?.navigationBarDividerColor
+            val oldNavigationDivider = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                window?.navigationBarDividerColor
+            } else null
             window?.statusBarColor = android.graphics.Color.WHITE
             window?.navigationBarColor = android.graphics.Color.WHITE
-            window?.navigationBarDividerColor = android.graphics.Color.WHITE
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                window?.navigationBarDividerColor = android.graphics.Color.WHITE
+            }
             window?.let {
                 WindowInsetsControllerCompat(it, it.decorView).apply {
                     isAppearanceLightStatusBars = true
@@ -330,7 +334,9 @@ fun ImageEditorDialog(
             onDispose {
                 if (oldStatus != null) window?.statusBarColor = oldStatus
                 if (oldNavigation != null) window?.navigationBarColor = oldNavigation
-                if (oldNavigationDivider != null) window?.navigationBarDividerColor = oldNavigationDivider
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && oldNavigationDivider != null) {
+                    window?.navigationBarDividerColor = oldNavigationDivider
+                }
             }
     }
     Surface(

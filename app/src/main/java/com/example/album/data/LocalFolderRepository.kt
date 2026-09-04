@@ -347,10 +347,13 @@ class LocalFolderRepository(private val context: Context) {
     }
 
     private fun readVideoDuration(uri: Uri): Long = runCatching {
-        MediaMetadataRetriever().use { retriever ->
+        val retriever = MediaMetadataRetriever()
+        try {
             retriever.setDataSource(context, uri)
             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                 ?.toLongOrNull() ?: 0L
+        } finally {
+            retriever.release()
         }
     }.getOrDefault(0L)
 

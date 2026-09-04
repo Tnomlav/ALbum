@@ -1,5 +1,7 @@
 package com.example.album.data
 
+import android.net.Uri
+
 enum class TransferMode {
     Copy,
     Move
@@ -17,6 +19,12 @@ data class TransferResult(
     val skipped: Boolean = false,
     val targetName: String? = null,
     val movedDirectly: Boolean = false
+)
+
+/** Result of moving a document into an exact destination directory. */
+data class DirectMoveResult(
+    val uri: Uri,
+    val name: String
 )
 
 data class TransferRequest(

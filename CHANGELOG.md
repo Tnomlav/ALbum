@@ -7,6 +7,30 @@ This file records release-level changes. Each exported release should have:
 3. An annotated Git tag with the same version, for example `v1.1.20`.
 4. The APK SHA-256 and verification status recorded in the entry when an APK is exported.
 
+## v1.1.57 - 2026-09-04 (unreleased)
+
+- Added defensive handling for low-memory image conversion, thumbnail decoding, and editor loading paths.
+- Moved rename, delete, cache-size, duplicate-scan, and transfer file work off the main thread.
+- Added direct provider/file moves with permanent-delete fallback, conflict-safe naming, and stale Pixiv scan-state protection.
+- Hardened API compatibility for navigation bar, media metadata, WebView renderer, and Media3 integrations.
+- Added Android 11 package-visibility queries and expanded CI coverage to include `lintDebug`.
+- Verification: `:app:lintDebug`, `:app:testDebugUnitTest`, `:app:assembleDebug`, and `:app:assembleRelease` passed. Real-device/API 24/28/29 and Pixiv login verification remain outstanding.
+
+## v1.1.56 - 2026-09-04 (local signed build, pending release)
+
+- APK: `app/release/app-release.apk`
+- SHA-256: `92346A37696359C3B281D047594D2D381646CA65D5AB4763872DA7D31F2AD2D6`
+- Signature: verified with APK Signature Scheme v2; 1 signer.
+
+## v1.1.50 - 2026-09-01
+
+- Fixed nested transfer destinations and unified shared-storage, MediaStore, and SAF path handling.
+- Made folder navigation return one directory at a time and preserved image preview ordering.
+- Preserved original modified dates during recycle-bin move and restore operations.
+- APK: `app/release/app-release.apk`
+- SHA-256: `C21E7DDD7B5308B185D590EB542FF630FA11B333927F931825564227676C30C3`
+- Signature: verified with APK Signature Scheme v2; 1 signer.
+
 ## v1.1.44 - 2026-09-01
 
 - Reworked Pixiv login loading with an isolated WebView process/data directory, automatic fallback login entry, renderer recovery, blank-page timeout recovery, and Cookie handoff back to the archive process.

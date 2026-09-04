@@ -1,5 +1,6 @@
 package com.example.album.ui.screens
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.ClipData
@@ -343,12 +344,13 @@ fun PixivArchiveScreen(
     onFavorite: (List<MediaItem>) -> Unit = {},
     onCopy: (List<MediaItem>) -> Unit = {},
     onMove: (List<MediaItem>) -> Unit = {},
-    onRename: (MediaItem, String) -> Uri? = { _, _ -> null },
+    onRename: suspend (MediaItem, String) -> Uri? = { _, _ -> null },
     onShare: (List<MediaItem>) -> Unit = {},
     onDelete: (List<MediaItem>) -> Unit = {}
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val selectedUris by session.selectedUris
     val records by session.records
     val selectableUris by session.selectableUris
@@ -492,10 +494,12 @@ fun PixivArchiveScreen(
             onConfirm = {
                 val newName = renameText.trim()
                 if (newName.isNotEmpty() && newName != item.name) {
-                    val renamedUri = onRename(item, newName)
-                    if (renamedUri != null) {
-                        session.records.value = session.records.value.map { record ->
-                            if (record.uri == item.uri) record.copy(uri = renamedUri, filename = newName) else record
+                    scope.launch {
+                        val renamedUri = onRename(item, newName)
+                        if (renamedUri != null) {
+                            session.records.value = session.records.value.map { record ->
+                                if (record.uri == item.uri) record.copy(uri = renamedUri, filename = newName) else record
+                            }
                         }
                     }
                 }
@@ -1179,8 +1183,8 @@ class PixivArchiveSession(context: Context) {
     private val preferences = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
     val records = mutableStateOf(loadRecords())
     val state = mutableStateOf(loadState())
-    val completed = mutableStateOf(preferences.getInt(KEY_SCAN_COMPLETED, 0))
-    val failed = mutableStateOf(preferences.getInt(KEY_SCAN_FAILED, 0))
+    val completed = mutableIntStateOf(preferences.getInt(KEY_SCAN_COMPLETED, 0))
+    val failed = mutableIntStateOf(preferences.getInt(KEY_SCAN_FAILED, 0))
     val activity = mutableStateOf(loadActivity())
     val selectedUris = mutableStateOf<Set<String>>(emptySet())
     val selectableUris = mutableStateOf<Set<String>>(emptySet())
@@ -1191,10 +1195,12 @@ class PixivArchiveSession(context: Context) {
     var scanJob: Job? = null
 
     /** Marks cancellation while retaining completed records for archive actions. */
+    @SuppressLint("ApplySharedPref") // The cancel flag must be durable before the service receives ACTION_CANCEL.
     fun cancelScan() {
         preferences.edit()
             .putBoolean(KEY_SCAN_CANCEL_REQUESTED, true)
             .putBoolean(KEY_SCAN_CANCELLED, true)
+            .putBoolean(KEY_SCAN_ACTIVE, false)
             .commit()
         scanJob?.cancel()
         scanJob = null
@@ -1206,16 +1212,18 @@ class PixivArchiveSession(context: Context) {
         preferences.edit().putString(KEY_SCAN_STATE, ArchiveUiState.Ready.name).apply()
     }
 
+    @SuppressLint("ApplySharedPref") // The service reads scan state immediately after it is started.
     fun beginScan() {
         preferences.edit()
             .putBoolean(KEY_SCAN_CANCEL_REQUESTED, false)
             .putBoolean(KEY_SCAN_CANCELLED, false)
+            .putBoolean(KEY_SCAN_ACTIVE, true)
             .putString(KEY_SCAN_STATE, ArchiveUiState.Scanning.name)
             .commit()
         scanCancelled.value = false
         state.value = ArchiveUiState.Scanning
-        completed.value = 0
-        failed.value = 0
+        completed.intValue = 0
+        failed.intValue = 0
         activity.value = ArchiveActivity(
             phase = PixivArchivePhase.Discover,
             message = "正在准备扫描"
@@ -1232,12 +1240,13 @@ class PixivArchiveSession(context: Context) {
             .remove(KEY_SCAN_COMPLETED)
             .remove(KEY_SCAN_FAILED)
             .remove(KEY_SCAN_CANCELLED)
+            .remove(KEY_SCAN_ACTIVE)
             .remove(KEY_INITIAL_SCAN)
             .apply()
         records.value = emptyList()
         state.value = ArchiveUiState.Idle
-        completed.value = 0
-        failed.value = 0
+        completed.intValue = 0
+        failed.intValue = 0
         activity.value = ArchiveActivity()
         selectedUris.value = emptySet()
         selectableUris.value = emptySet()
@@ -1280,8 +1289,15 @@ class PixivArchiveSession(context: Context) {
     }
 
     fun persistScanProgress(update: com.example.album.data.PixivArchiveProgress) {
-        completed.value = update.completed
-        failed.value = update.failed
+        val scanState = when (update.phase) {
+            com.example.album.data.PixivArchivePhase.Discover,
+            com.example.album.data.PixivArchivePhase.Metadata -> ArchiveUiState.Scanning
+            com.example.album.data.PixivArchivePhase.Ready -> ArchiveUiState.Ready
+            com.example.album.data.PixivArchivePhase.Error -> ArchiveUiState.Error
+            else -> null
+        }
+        completed.intValue = update.completed
+        failed.intValue = update.failed
         activity.value = ArchiveActivity(
             phase = update.phase,
             completed = update.completed,
@@ -1294,8 +1310,8 @@ class PixivArchiveSession(context: Context) {
             else (listOf(update.log) + activity.value.logs).take(4)
         )
         preferences.edit()
-            .putInt(KEY_SCAN_COMPLETED, completed.value)
-            .putInt(KEY_SCAN_FAILED, failed.value)
+            .putInt(KEY_SCAN_COMPLETED, completed.intValue)
+            .putInt(KEY_SCAN_FAILED, failed.intValue)
             .putString(KEY_SCAN_ACTIVITY, JSONObject().apply {
                 put("phase", activity.value.phase.name)
                 put("total", activity.value.total)
@@ -1304,20 +1320,37 @@ class PixivArchiveSession(context: Context) {
                 put("message", activity.value.message)
                 put("logs", JSONArray(activity.value.logs))
             }.toString())
+            .apply {
+                scanState?.let { putString(KEY_SCAN_STATE, it.name) }
+                scanState?.let { putBoolean(KEY_SCAN_ACTIVE, it == ArchiveUiState.Scanning) }
+            }
             .apply()
     }
 
     fun setScanState(newState: ArchiveUiState) {
         state.value = newState
-        preferences.edit().putString(KEY_SCAN_STATE, newState.name).apply()
+        preferences.edit()
+            .putString(KEY_SCAN_STATE, newState.name)
+            .putBoolean(KEY_SCAN_ACTIVE, newState == ArchiveUiState.Scanning)
+            .apply()
     }
 
     fun refreshFromPersistence() {
+        val localState = state.value
         records.value = loadRecords()
-        completed.value = preferences.getInt(KEY_SCAN_COMPLETED, completed.value)
-        failed.value = preferences.getInt(KEY_SCAN_FAILED, failed.value)
-        state.value = loadState()
-        activity.value = loadActivity()
+        completed.intValue = preferences.getInt(KEY_SCAN_COMPLETED, completed.intValue)
+        failed.intValue = preferences.getInt(KEY_SCAN_FAILED, failed.intValue)
+        val persistedState = loadState()
+        val scanActive = preferences.getBoolean(
+            KEY_SCAN_ACTIVE,
+            persistedState == ArchiveUiState.Scanning
+        )
+        // The screen can be archiving while this poll reads the scan session.
+        // Do not replace that live operation with the last scan state.
+        if (localState != ArchiveUiState.Archiving) {
+            state.value = if (scanActive) ArchiveUiState.Scanning else persistedState
+            activity.value = loadActivity()
+        }
     }
 
     fun removeRecords(uris: Set<String>) {
@@ -1398,9 +1431,10 @@ class PixivArchiveSession(context: Context) {
         records.value = emptyList()
         preferences.edit().remove(KEY_SCAN_RECORDS).remove(KEY_SCAN_STATE)
             .remove(KEY_SCAN_ACTIVITY).remove(KEY_SCAN_COMPLETED).remove(KEY_SCAN_FAILED).apply()
+        preferences.edit().remove(KEY_SCAN_ACTIVE).apply()
         state.value = ArchiveUiState.Idle
-        completed.value = 0
-        failed.value = 0
+        completed.intValue = 0
+        failed.intValue = 0
         activity.value = ArchiveActivity()
         selectedUris.value = emptySet()
         selectableUris.value = emptySet()
@@ -1413,6 +1447,7 @@ class PixivArchiveSession(context: Context) {
         const val KEY_SCAN_ACTIVITY = "scan_activity"
         const val KEY_SCAN_COMPLETED = "scan_completed"
         const val KEY_SCAN_FAILED = "scan_failed"
+        const val KEY_SCAN_ACTIVE = "scan_active"
         const val KEY_SCAN_CANCEL_REQUESTED = "scan_cancel_requested"
         const val KEY_SCAN_CANCELLED = "scan_cancelled"
         const val KEY_INITIAL_SCAN = "scan_initial_mode"
@@ -1423,12 +1458,12 @@ class PixivArchiveSession(context: Context) {
     }.getOrElse { if (records.value.isEmpty()) ArchiveUiState.Idle else ArchiveUiState.Ready }
 
     private fun loadActivity(): ArchiveActivity = runCatching {
-        val json = JSONObject(preferences.getString(KEY_SCAN_ACTIVITY, "{}"))
+        val json = JSONObject(preferences.getString(KEY_SCAN_ACTIVITY, "{}") ?: "{}")
         ArchiveActivity(
             phase = PixivArchivePhase.valueOf(json.optString("phase", PixivArchivePhase.Discover.name)),
-            completed = completed.value,
+            completed = completed.intValue,
             total = json.optInt("total", 0),
-            failed = failed.value,
+            failed = failed.intValue,
             currentFile = json.optString("currentFile"),
             currentArtist = json.optString("currentArtist"),
             message = json.optString("message", "等待开始"),

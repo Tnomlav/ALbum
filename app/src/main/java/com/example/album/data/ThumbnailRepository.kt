@@ -258,6 +258,9 @@ object ThumbnailRepository {
         }
     } catch (cancelled: CancellationException) {
         throw cancelled
+    } catch (_: OutOfMemoryError) {
+        trimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL)
+        null
     } catch (_: Exception) {
         null
     }

@@ -15,6 +15,7 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.provider.Settings
 import android.os.Environment
+import android.webkit.MimeTypeMap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.IntentSenderRequest
@@ -76,6 +77,7 @@ import android.widget.Toast
 import org.json.JSONArray
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
@@ -119,6 +121,8 @@ import com.example.album.data.MediaItem
 import com.example.album.data.transferFolderPath
 import com.example.album.data.displayAddress
 import com.example.album.data.PixivArchiveRepository
+import com.example.album.data.WallpaperQueueState
+import com.example.album.data.WallpaperQueueStore
 import com.example.album.data.TransferMode
 import com.example.album.data.TransferRequest
 import com.example.album.playback.PlaybackResumeRequest
@@ -349,7 +353,11 @@ fun AlbumApp(
     var showPixivArchiveInfo by remember { mutableStateOf(false) }
     var createFolderName by rememberSaveable { mutableStateOf("") }
     var favoriteUris by remember { mutableStateOf(preferences.getStringSet("favorites", emptySet()).orEmpty().toSet()) }
-    var wallpaperQueueUris by remember { mutableStateOf(preferences.getStringSet("wallpaper_queue_uris", emptySet()).orEmpty().toSet()) }
+    var wallpaperQueueLoaded by remember { mutableStateOf(false) }
+    var wallpaperQueueUris by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var wallpaperQueueSaveJob by remember { mutableStateOf<Job?>(null) }
+    val wallpaperImportState by WallpaperImportCoordinator.state.collectAsState()
+    val wallpaperImportRunning = wallpaperImportState is WallpaperImportState.Running
     var showFavoriteBadge by remember { mutableStateOf(albumSettings.getBoolean("show_favorite_badge", true)) }
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var selectingFolders by rememberSaveable { mutableStateOf(false) }
@@ -364,14 +372,20 @@ fun AlbumApp(
 
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedFolders by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var wallpaperQueueOrder by remember {
-        mutableStateOf(
-            runCatching {
-                val json = preferences.getString("wallpaper_queue_order", null) ?: return@runCatching emptyList()
-                (0 until JSONArray(json).length()).map { JSONArray(json).getString(it) }
-            }.getOrElse { emptyList() }
-                .ifEmpty { wallpaperQueueUris.toList() }
-        )
+    var wallpaperQueueOrder by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(context) {
+        val loaded = withContext(Dispatchers.IO) { WallpaperQueueStore.load(context) }
+        if (!wallpaperQueueLoaded) {
+            wallpaperQueueUris = loaded.uris
+            wallpaperQueueOrder = loaded.order
+            wallpaperQueueLoaded = true
+        }
+    }
+    fun persistWallpaperQueue(uris: Set<String>, order: List<String>) {
+        wallpaperQueueSaveJob?.cancel()
+        wallpaperQueueSaveJob = scope.launch(Dispatchers.IO) {
+            WallpaperQueueStore.save(context, WallpaperQueueState(uris, order))
+        }
     }
     var suspendedSearchQuery by rememberSaveable { mutableStateOf<String?>(null) }
     var searchOpen by rememberSaveable { mutableStateOf(true) }
@@ -435,12 +449,12 @@ fun AlbumApp(
     }
 
     fun addToWallpaperQueue(items: List<com.example.album.data.MediaItem>) {
+        wallpaperQueueLoaded = true
         val updated = wallpaperQueueUris + items.map { it.uri.toString() }
         val updatedOrder = wallpaperQueueOrder + items.map { it.uri.toString() }.filterNot { it in wallpaperQueueOrder }
         wallpaperQueueUris = updated
         wallpaperQueueOrder = updatedOrder
-        preferences.edit().putStringSet("wallpaper_queue_uris", updated).apply()
-        preferences.edit().putString("wallpaper_queue_order", JSONArray(updatedOrder).toString()).apply()
+        persistWallpaperQueue(updated, updatedOrder)
         Toast.makeText(
             context,
             if (english) "Added ${items.size} item(s) to wallpaper queue" else "已加入壁纸队列 ${items.size} 项",
@@ -449,12 +463,12 @@ fun AlbumApp(
     }
 
     fun removeFromWallpaperQueue(item: com.example.album.data.MediaItem) {
+        wallpaperQueueLoaded = true
         val updated = wallpaperQueueUris - item.uri.toString()
         val updatedOrder = wallpaperQueueOrder - item.uri.toString()
         wallpaperQueueUris = updated
         wallpaperQueueOrder = updatedOrder
-        preferences.edit().putStringSet("wallpaper_queue_uris", updated).apply()
-        preferences.edit().putString("wallpaper_queue_order", JSONArray(updatedOrder).toString()).apply()
+        persistWallpaperQueue(updated, updatedOrder)
     }
     fun requestWallpaper(item: MediaItem) {
         launchWallpaperAppChooser(context, item, english)
@@ -616,13 +630,23 @@ fun AlbumApp(
     } }
 
     fun freezeSelectionSort() {
-        selectionMediaSort = mediaSort
-        selectionMediaSortDirection = sortDirection
+        if (selectedTab == MainTab.Timeline) {
+            selectionMediaSort = MediaSort.Time
+            selectionMediaSortDirection = SortDirection.Descending
+        } else {
+            selectionMediaSort = mediaSort
+            selectionMediaSortDirection = sortDirection
+        }
         // selectionMedia is already the exact list shown by the current
         // folder, search, timeline, or Pixiv view. Re-sorting it here makes
         // entering selection visibly reorder the grid when that view has a
         // more specific display order than the global sort setting.
-        selectionMediaOrderUris = selectionMedia.map { it.uri.toString() }
+        val ordered = if (selectedTab == MainTab.Timeline) {
+            sortMediaItems(selectionMedia, MediaSort.Time, SortDirection.Descending)
+        } else {
+            selectionMedia
+        }
+        selectionMediaOrderUris = ordered.map { it.uri.toString() }
     }
     // Search is a view over the source; it must never become the source of
     // truth for a selection. Actions resolve selected keys from the complete
@@ -690,7 +714,9 @@ fun AlbumApp(
     } else tab.label
 
     fun mediaInDisplayOrder(items: List<MediaItem>): List<MediaItem> {
-        return sortMediaItems(items, mediaSort, sortDirection)
+        return if (selectedTab == MainTab.Timeline) {
+            sortMediaItems(items, MediaSort.Time, SortDirection.Descending)
+        } else sortMediaItems(items, mediaSort, sortDirection)
     }
 
     fun openMedia(item: MediaItem) {
@@ -701,9 +727,19 @@ fun AlbumApp(
         // using that scope while opening from a folder; the global search list
         // is only appropriate on the root/search views.
         val visibleSource = if (openedFolder != null) currentSelectionMedia else selectionMedia
-        viewerScope = mediaInDisplayOrder(visibleSource
-            .filter { it.isVideo == item.isVideo })
-            .takeIf { scope -> scope.any { it.uri == item.uri } }
+        val visibleItems = visibleSource.filter { it.isVideo == item.isVideo }
+        // AlbumsScreen already provides the folder's exact display order. Do
+        // not sort that list a second time: reversing a stable sort twice can
+        // change the order of files that share the same timestamp or name.
+        val hasExactFolderOrder = openedFolder != null && folderScope?.let { scope ->
+            scope.isNotEmpty() && scope.all { it.folder == openedFolder } &&
+                scope.any { it.uri == item.uri }
+        } == true
+        val candidateScope = if (hasExactFolderOrder) {
+            visibleItems
+        } else {
+            mediaInDisplayOrder(visibleItems)
+        }
             ?: if (item.isVideo) {
                 mediaInDisplayOrder((library.videos + library.localVideos).distinctBy { it.uri.toString() })
             } else if (selectedTab == MainTab.Pixiv) {
@@ -711,6 +747,10 @@ fun AlbumApp(
             } else {
                 mediaInDisplayOrder((library.images + library.localImages).distinctBy { it.uri.toString() })
             }
+        // ACTION_VIEW can provide a URI that is not in Album's library yet.
+        // Keep that exact item in the playlist instead of handing the player
+        // an empty list or a list for another video.
+        viewerScope = candidateScope.takeIf { scope -> scope.any { it.uri == item.uri } } ?: listOf(item)
         viewerMedia = item
         selectedMedia = item
     }
@@ -736,8 +776,20 @@ fun AlbumApp(
 
     LaunchedEffect(externalWallpaperUri) {
         val uri = externalWallpaperUri ?: return@LaunchedEffect
-        val mime = context.contentResolver.getType(uri).orEmpty()
+        val filename = Uri.decode(uri.lastPathSegment.orEmpty()).substringAfterLast('/')
+        val mime = runCatching { context.contentResolver.getType(uri).orEmpty() }.getOrDefault("").ifBlank {
+            MimeTypeMap.getSingleton().getMimeTypeFromExtension(filename.substringAfterLast('.', "").lowercase()).orEmpty()
+        }
         if (!mime.startsWith("image/") && !mime.startsWith("video/")) return@LaunchedEffect
+        val readable = withContext(Dispatchers.IO) {
+            runCatching {
+                com.example.album.data.openMediaInputStream(context, uri)?.use { input -> input.read() >= 0 } == true
+            }.getOrDefault(false)
+        }
+        if (!readable) {
+            Toast.makeText(context, if (english) "Unable to read this media" else "无法读取此媒体文件", Toast.LENGTH_LONG).show()
+            return@LaunchedEffect
+        }
         val name = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null } ?: "外部壁纸"
         val externalItem = MediaItem(
             id = uri.toString().hashCode().toLong() and 0xffffffffL,
@@ -1008,16 +1060,18 @@ fun AlbumApp(
     val writeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         val rename = pendingRename
         if (result.resultCode == Activity.RESULT_OK && rename != null) {
-            val renamed = library.rename(rename.first, rename.second)
-            if (renamed != null) {
-                openMedia(renamed)
-                val oldKey = rename.first.uri.toString()
-                if (oldKey in favoriteUris) {
-                    favoriteUris = favoriteUris - oldKey + renamed.uri.toString()
-                    preferences.edit().putStringSet("favorites", favoriteUris).apply()
+            scope.launch {
+                val renamed = library.rename(rename.first, rename.second)
+                if (renamed != null) {
+                    openMedia(renamed)
+                    val oldKey = rename.first.uri.toString()
+                    if (oldKey in favoriteUris) {
+                        favoriteUris = favoriteUris - oldKey + renamed.uri.toString()
+                        preferences.edit().putStringSet("favorites", favoriteUris).apply()
+                    }
+                } else {
+                    Toast.makeText(context, appText("重命名失败", english), Toast.LENGTH_SHORT).show()
                 }
-            } else {
-                Toast.makeText(context, appText("重命名失败", english), Toast.LENGTH_SHORT).show()
             }
         }
         pendingRename = null
@@ -1074,15 +1128,15 @@ fun AlbumApp(
         }
     }
     suspend fun performDelete(deleting: List<MediaItem>) {
-        if (deleting.isEmpty() || externalDeleteRequestInFlight) return
+        if (deleting.isEmpty() || externalDeleteRequestInFlight) {
+            return
+        }
             val recycleEnabled = albumSettings.getBoolean("recycle_bin", true)
             // Keep the app's recycle bin authoritative. Using MediaStore's
             // system Trash here makes the persisted recycle records depend on
             // OEM-specific Trash URI and permission behavior, which can make
             // items disappear from this screen or fail to restore.
-            val useSystemTrash = false
             val staged = when {
-                useSystemTrash -> library.stageForSystemRecycle(deleting)
                 recycleEnabled -> library.stageForRecycle(deleting)
                 else -> emptyList()
             }
@@ -1097,50 +1151,7 @@ fun AlbumApp(
                 pixivArchivePendingDeleteUris = emptySet()
                 return
             }
-            if (useSystemTrash) {
-                val directlyTrashed = withContext(Dispatchers.IO) {
-                    deletable.filter { media ->
-                        runCatching {
-                            context.contentResolver.update(
-                                media.uri,
-                                ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) },
-                                null,
-                                null
-                            ) > 0
-                        }.getOrDefault(false)
-                    }
-                }
-                library.remove(directlyTrashed)
-                val directlyDeletedUris = directlyTrashed.mapTo(hashSetOf()) { it.uri.toString() }
-                pixivArchiveSession.records.value = pixivArchiveSession.records.value.filterNot {
-                    it.uri.toString() in directlyDeletedUris && it.uri.toString() in pixivArchivePendingDeleteUris
-                }
-                pixivArchivePendingDeleteUris -= directlyDeletedUris
-                val remaining = deletable.filterNot { media -> directlyTrashed.any { it.uri == media.uri } }
-                if (remaining.isNotEmpty()) {
-                    pendingDeletes = remaining
-                    val remainingUris = remaining.mapTo(mutableSetOf()) { it.uri.toString() }
-                    pendingRecycleIds = staged.filter { it.sourceUri in remainingUris }.mapTo(mutableSetOf()) { it.id }
-                runCatching {
-                    val request = MediaStore.createTrashRequest(context.contentResolver, remaining.map { it.uri }, true)
-                    externalDeleteRequestInFlight = true
-                    trashLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
-                }.onFailure {
-                    externalDeleteRequestInFlight = false
-                    library.discardRecycle(pendingRecycleIds)
-                    pendingDeletes = emptyList()
-                    pendingRecycleIds = emptySet()
-                    pixivArchivePendingDeleteUris = emptySet()
-                    Toast.makeText(context, if (english) "Unable to open system Trash" else "无法打开系统回收站", Toast.LENGTH_SHORT).show()
-                }
-                } else {
-                    pendingDeletes = emptyList()
-                    pendingRecycleIds = emptySet()
-                    pixivArchivePendingDeleteUris = emptySet()
-                    selectedUris = emptySet()
-                    selectionMode = false
-                }
-            } else if (
+            if (
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
                 deletable.none { it.isDocument } &&
                 !canModifyMediaDirectly(context)
@@ -1165,10 +1176,10 @@ fun AlbumApp(
                 }
             } else {
                 val failedUris = mutableSetOf<String>()
-                val deletedMedia = deletable.filter { media ->
-                    if (library.deleteLegacy(media)) true else {
+                val deletedMedia = deletable.mapNotNull { media ->
+                    if (library.deleteLegacy(media)) media else {
                         failedUris += media.uri.toString()
-                        false
+                        null
                     }
                 }
                 library.remove(deletedMedia)
@@ -1332,6 +1343,7 @@ fun AlbumApp(
             folderChildren = library.searchableFolderChildren,
             searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
             recentFolders = recentFolders,
+            validateFolder = library::isTransferFolderAvailable,
             defaultConflictPolicy = when (albumSettings.getString("conflict", "保留两者")) {
                 "覆盖" -> com.example.album.data.ConflictPolicy.Overwrite
                 "跳过" -> com.example.album.data.ConflictPolicy.Skip
@@ -1402,7 +1414,7 @@ fun AlbumApp(
                     if (request.mode == TransferMode.Move && completedItems.isNotEmpty()) {
                         val documents = completed.filter { !it.movedDirectly && it.item.isDocument }.map { it.item }
                         val deletedDocuments = withContext(Dispatchers.IO) {
-                            documents.filter { media -> library.deleteLegacy(media) }
+                            documents.mapNotNull { media -> media.takeIf { library.deleteLegacy(it) } }
                         }
                         library.remove(deletedDocuments)
                         if (archiveMoveUris.isNotEmpty()) {
@@ -1412,7 +1424,7 @@ fun AlbumApp(
                         }
                         val systemMedia = completed.filter { !it.movedDirectly && !it.item.isDocument }.map { it.item }
                         val deletedSystemMedia = withContext(Dispatchers.IO) {
-                            systemMedia.filter { media -> library.deleteLegacy(media) }
+                            systemMedia.mapNotNull { media -> media.takeIf { library.deleteLegacy(it) } }
                         }
                         library.remove(deletedSystemMedia)
                         if (archiveMoveUris.isNotEmpty()) {
@@ -1574,7 +1586,10 @@ fun AlbumApp(
 
     if (cleanupOpen) {
         CleanupScreen(
-            media = (library.images + library.videos).distinctBy { it.uri },
+            // Duplicate scanning must include authorized local-folder media;
+            // moved or archived images can be represented there instead of in
+            // the MediaStore image collection.
+            media = (library.images + library.localImages).distinctBy { it.uri },
             recycleEntries = library.recycleEntries,
             excludedMedia = library.excludedMedia,
             onBack = {
@@ -1720,10 +1735,7 @@ fun AlbumApp(
                             val updatedOrder = wallpaperQueueOrder.filterNot { it in currentTypeUris }
                             wallpaperQueueUris = updatedUris
                             wallpaperQueueOrder = updatedOrder
-                            preferences.edit()
-                                .putStringSet("wallpaper_queue_uris", updatedUris)
-                                .putString("wallpaper_queue_order", JSONArray(updatedOrder).toString())
-                                .apply()
+                            persistWallpaperQueue(updatedUris, updatedOrder)
                         }
                     }
                 },
@@ -1745,18 +1757,24 @@ fun AlbumApp(
                     wallpaperSelectedUris = emptySet()
                     wallpaperSelectionOrder = emptyList()
                 },
-                actionLabel = when {
+                actionLabel = if (wallpaperImportRunning) {
+                    val progress = wallpaperImportState as? WallpaperImportState.Running
+                    if (progress == null) appText("中止", english)
+                    else if (english) "Cancel ${progress.completed}/${progress.total}" else "中止 ${progress.completed}/${progress.total}"
+                } else when {
                     wallpaperQuery.isNotBlank() -> appText("确认", english)
                     wallpaperSelectionMode -> appText("清除", english)
                     else -> appText("应用", english)
                 },
-                actionEnabled = if (wallpaperSelectionMode || wallpaperQuery.isNotBlank()) {
+                actionEnabled = if (wallpaperImportRunning) true else if (wallpaperSelectionMode || wallpaperQuery.isNotBlank()) {
                     wallpaperSelectedUris.isNotEmpty()
                 } else true,
                 actionCapsule = wallpaperQuery.isBlank(),
                 actionStartPadding = 10.dp,
                 onActionClick = {
-                    if (wallpaperQuery.isNotBlank()) {
+                    if (wallpaperImportRunning) {
+                        WallpaperImportCoordinator.cancel()
+                    } else if (wallpaperQuery.isNotBlank()) {
                         addToWallpaperQueue(wallpaperSearchMedia.filter { it.uri.toString() in wallpaperSelectedUris })
                         wallpaperQuery = ""
                         wallpaperSelectionMode = false
@@ -2121,7 +2139,7 @@ fun AlbumApp(
                     ) {
                         if (tab == MainTab.Pixiv) {
                             Box(
-                                modifier = Modifier.height(24.dp).width(24.dp).offset(y = iconOffset).background(Color.White),
+                                modifier = Modifier.height(24.dp).width(24.dp).offset { IntOffset(0, iconOffset.roundToPx()) }.background(Color.White),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -2139,7 +2157,7 @@ fun AlbumApp(
                                 tab.icon,
                                 contentDescription = tabLabel(tab),
                                 tint = navTint,
-                                modifier = Modifier.height(24.dp).offset(y = iconOffset)
+                                modifier = Modifier.height(24.dp).offset { IntOffset(0, iconOffset.roundToPx()) }
                             )
                         }
                         Text(
@@ -2614,7 +2632,10 @@ fun AlbumApp(
                     showFavoriteBadge = showFavoriteBadge,
                     onShowFavoriteBadgeChange = { showFavoriteBadge = it },
                     onShowHiddenMediaChange = { enabled ->
-                        scope.launch { library.setShowHiddenMedia(enabled) }
+                        scope.launch {
+                            library.setShowHiddenMedia(enabled)
+                            pixivRefreshKey++
+                        }
                     },
                     onRenameExtensionChange = { showRenameExtension = it },
                     onLanguageChange = onAppLanguageChange
@@ -2644,6 +2665,13 @@ fun AlbumApp(
                         .windowInsetsPadding(WindowInsets.statusBars)
                         .padding(top = VaultDimens.HeaderContentHeight)
                         .background(MaterialTheme.colorScheme.surface)
+                        // The empty manager still needs a full-size hit target;
+                        // drawing a background alone does not stop clicks from
+                        // reaching the page underneath it.
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { }
                 ) {
                     WallpaperManagerScreen(
                         queuedMedia = wallpaperQueueMedia.filter { it.isVideo == wallpaperShowVideos },
@@ -2686,11 +2714,11 @@ fun AlbumApp(
                         LocalMediaAnimatedVisibilityScope provides this@AnimatedVisibility
                     ) {
                         val fallbackViewerItems = if (viewerItem.isVideo) {
-                            (library.videos + library.localVideos).distinctBy { it.uri.toString() }
+                            mediaInDisplayOrder((library.videos + library.localVideos).distinctBy { it.uri.toString() })
                         } else if (selectedTab == MainTab.Pixiv) {
-                            pixivImages
+                            mediaInDisplayOrder(pixivImages)
                         } else {
-                            (library.images + library.localImages).distinctBy { it.uri.toString() }
+                            mediaInDisplayOrder((library.images + library.localImages).distinctBy { it.uri.toString() })
                         }
                         val viewerItems = viewerScope.takeIf { scope ->
                             scope.any { it.uri == viewerItem.uri } &&
@@ -2723,21 +2751,21 @@ fun AlbumApp(
                             onCopy = { copying -> transferRequest = TransferRequest(listOf(copying), TransferMode.Copy) },
                             onMove = { moving -> transferRequest = TransferRequest(listOf(moving), TransferMode.Move) },
                             onRename = { renaming, newName ->
-                                val renamed = library.rename(renaming, newName)
-                                if (renamed != null) {
-                                    openMedia(renamed)
-                } else if (
-                    !renaming.isDocument &&
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                    !canModifyMediaDirectly(context)
-                ) {
-                                    pendingRename = renaming to newName
-                            if (!canModifyMediaDirectly(context)) {
-                                val request = MediaStore.createWriteRequest(context.contentResolver, listOf(renaming.uri))
-                                writeLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
-                            }
-                                } else {
-                                    Toast.makeText(context, appText("重命名失败", english), Toast.LENGTH_SHORT).show()
+                                scope.launch {
+                                    val renamed = library.rename(renaming, newName)
+                                    if (renamed != null) {
+                                        openMedia(renamed)
+                                    } else if (
+                                        !renaming.isDocument &&
+                                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                                        !canModifyMediaDirectly(context)
+                                    ) {
+                                        pendingRename = renaming to newName
+                                        val request = MediaStore.createWriteRequest(context.contentResolver, listOf(renaming.uri))
+                                        writeLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                                    } else {
+                                        Toast.makeText(context, appText("重命名失败", english), Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             },
                             favorite = { favoriteItem -> favoriteItem.uri.toString() in favoriteUris },
@@ -3015,17 +3043,19 @@ fun AlbumApp(
                         "$enteredName.$extension"
                     } else enteredName
                     if (newName.isNotEmpty() && newName != item.name) {
-                        val renamed = library.rename(item, newName)
-                        if (
-                            renamed == null &&
-                            !item.isDocument &&
-                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                            !canModifyMediaDirectly(context)
-                        ) {
-                            pendingRename = item to newName
-                            val request = MediaStore.createWriteRequest(context.contentResolver, listOf(item.uri))
-                            writeLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
-                        }
+                                scope.launch {
+                                    val renamed = library.rename(item, newName)
+                                    if (
+                                        renamed == null &&
+                                        !item.isDocument &&
+                                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                                        !canModifyMediaDirectly(context)
+                                    ) {
+                                        pendingRename = item to newName
+                                        val request = MediaStore.createWriteRequest(context.contentResolver, listOf(item.uri))
+                                        writeLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+                                    }
+                                }
                     }
                     selectionRenameItem = null
                     selectionMode = false

@@ -109,7 +109,11 @@ class ImageWallpaperService : WallpaperService() {
             val queue = readQueue(prefs.getString("static_wallpaper_queue", "[]"))
             if (queue.isEmpty()) return null
             val index = prefs.getInt("static_wallpaper_index", 0).coerceIn(0, queue.lastIndex)
-            return File(filesDir, "static_wallpaper_queue/${queue[index]}").takeIf { it.isFile }
+            val directoryName = prefs.getString("static_wallpaper_queue_dir", "static_wallpaper_queue") ?: "static_wallpaper_queue"
+            if (directoryName.isBlank() || directoryName == "." || directoryName == ".." || directoryName.contains('/') || directoryName.contains('\\')) return null
+            return File(filesDir, directoryName).let { directory ->
+                File(directory, queue[index]).takeIf { it.isFile && it.canRead() }
+            }
         }
 
         private fun advanceQueue() {
@@ -137,6 +141,7 @@ class ImageWallpaperService : WallpaperService() {
         private fun readQueue(value: String?): List<String> = runCatching {
             val json = JSONArray(value ?: "[]")
             (0 until json.length()).map { json.getString(it) }
+                .filter { it.isNotBlank() && it != "." && it != ".." && !it.contains('/') && !it.contains('\\') }
         }.getOrDefault(emptyList())
 
         private fun readIndexes(value: String?, size: Int): List<Int> = runCatching {

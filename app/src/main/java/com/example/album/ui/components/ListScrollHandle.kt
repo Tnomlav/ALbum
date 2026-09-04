@@ -13,6 +13,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -44,7 +45,7 @@ fun ListScrollHandle(
     val preferences = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE) }
     var persistent by remember { mutableStateOf(preferences.getBoolean("persistent_scrollbar", false)) }
     var touchWidthDp by remember { mutableIntStateOf(scrollTouchWidthDp(preferences.getString("scroll_width", "24px"))) }
-    var duration by remember { mutableStateOf(scrollVisibleDurationMillis(preferences.getString("scroll_duration", "1秒"))) }
+    var duration by remember { mutableLongStateOf(scrollVisibleDurationMillis(preferences.getString("scroll_duration", "1秒"))) }
     DisposableEffect(preferences) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { shared, key ->
             when (key) {
