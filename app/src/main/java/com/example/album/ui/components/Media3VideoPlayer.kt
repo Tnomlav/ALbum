@@ -1,8 +1,11 @@
+@file:Suppress("UnsafeOptInUsageError")
+
 package com.example.album.ui.components
 
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.res.Configuration
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ActivityInfo
@@ -22,6 +25,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -34,6 +38,7 @@ import androidx.compose.material.icons.outlined.FastForward
 import androidx.compose.material.icons.outlined.FastRewind
 import androidx.compose.material.icons.outlined.FormatListNumbered
 import androidx.compose.material.icons.outlined.Fullscreen
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Pause
@@ -216,10 +221,12 @@ internal fun Media3VideoPlayer(
     onFavorite: () -> Unit,
     onShare: () -> Unit,
     onWallpaper: () -> Unit = {},
+    onInfo: () -> Unit = {},
     onSettings: () -> Unit = {},
     settingsVersion: Int = 0
 ) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
     val hapticFeedback = LocalHapticFeedback.current
     val english = LocalAppEnglish.current
     val preferences = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE) }
@@ -262,8 +269,11 @@ internal fun Media3VideoPlayer(
     var orientationMode by remember {
         mutableIntStateOf(preferences.getInt("video_orientation_mode", 0).coerceIn(0, 2))
     }
+    var lockedOrientation by remember { mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) }
     var displayedOrientationMode by remember { mutableIntStateOf(0) }
-    var sensorLandscape by remember { mutableStateOf(false) }
+    var sensorOrientation by remember { mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) }
+    val sensorLandscape = sensorOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE ||
+        sensorOrientation == ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     val hostActivity = context as? Activity
     val initialOrientation = remember(hostActivity) { hostActivity?.requestedOrientation }
@@ -288,7 +298,20 @@ internal fun Media3VideoPlayer(
     DisposableEffect(context) {
         val listener = object : OrientationEventListener(context) {
             override fun onOrientationChanged(angle: Int) {
-                if (angle != ORIENTATION_UNKNOWN) sensorLandscape = angle in 60..120 || angle in 240..300
+                if (angle == ORIENTATION_UNKNOWN) return
+
+                // OrientationEventListener reports clockwise rotation from the
+                // device's natural position. Keep both landscape directions so
+                // adaptive playback can follow a 180-degree turn while the
+                // Activity is already open in landscape.
+                val normalized = angle.mod(360)
+                val resolved = when (normalized) {
+                    in 45..134 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                    in 135..224 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+                    in 225..314 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                    else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                }
+                if (resolved != sensorOrientation) sensorOrientation = resolved
             }
         }
         if (listener.canDetectOrientation()) listener.enable()
@@ -319,19 +342,60 @@ internal fun Media3VideoPlayer(
         lifecycle?.addObserver(observer)
         onDispose { lifecycle?.removeObserver(observer) }
     }
+    fun currentWindowOrientation(): Int {
+        val isLandscape = if (viewportSize != IntSize.Zero) {
+            viewportSize.width > viewportSize.height
+        } else {
+            sensorOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE ||
+                sensorOrientation == ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE ||
+                configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        }
+        return if (isLandscape) {
+            sensorOrientation.takeIf {
+                it == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE ||
+                    it == ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+            } ?: ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else {
+            sensorOrientation.takeIf {
+                it == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT ||
+                    it == ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+            } ?: ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+    }
+
+    fun orientationRequest(mode: Int): Int = when (mode) {
+        1 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        2 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        else -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+    }
+
     // Let the player own the window orientation while it is open. This gives
     // the landscape layout the real physical window width instead of rotating
     // a portrait-sized canvas inside a portrait Activity.
-    LaunchedEffect(orientationMode) {
-        hostActivity?.requestedOrientation = when (orientationMode) {
-            1 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-            2 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            else -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+    LaunchedEffect(orientationMode, controlsLocked, lockedOrientation, sensorOrientation) {
+        val requested = if (controlsLocked) {
+            lockedOrientation
+        } else if (orientationMode == 0) {
+            // FULL_SENSOR enables the first rotation. After the sensor gives
+            // us the exact side, request that side explicitly; this is needed
+            // on devices that do not re-evaluate reverse landscape while an
+            // Activity remains alive under configChanges.
+            sensorOrientation.takeIf { it != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+                ?: ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        } else {
+            orientationRequest(orientationMode)
+        }
+        if (requested != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED &&
+            hostActivity?.requestedOrientation != requested
+        ) {
+            hostActivity?.requestedOrientation = requested
         }
     }
-    LaunchedEffect(orientationMode, viewportSize, sensorLandscape) {
+    LaunchedEffect(orientationMode, viewportSize, sensorOrientation) {
         if (viewportSize == IntSize.Zero) return@LaunchedEffect
         val viewportLandscape = viewportSize.width > viewportSize.height
+        val sensorLandscape = sensorOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE ||
+            sensorOrientation == ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
         val targetReached = when (orientationMode) {
             1 -> viewportLandscape
             2 -> !viewportLandscape
@@ -859,9 +923,17 @@ internal fun Media3VideoPlayer(
                 }
             }
             IconButton(
-                onClick = { controlsLocked = true; controlsVisible = false },
+                onClick = {
+                    lockedOrientation = if (orientationMode == 0) {
+                        currentWindowOrientation()
+                    } else {
+                        orientationRequest(orientationMode)
+                    }
+                    controlsLocked = true
+                    controlsVisible = false
+                },
                 modifier = Modifier.align(Alignment.CenterEnd).padding(end = 10.dp).zIndex(3f)
-            ) { Icon(HtmlLockIcon, appText("锁定控件", english), tint = Color.White, modifier = Modifier.size(25.dp)) }
+            ) { Icon(Icons.Outlined.LockOpen, appText("锁定控件", english), tint = Color.White, modifier = Modifier.size(25.dp)) }
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth().zIndex(3f)
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(.84f))))
@@ -949,7 +1021,10 @@ internal fun Media3VideoPlayer(
         if (playerMenuOpen) {
             Dialog(
                 onDismissRequest = { playerMenuOpen = false; resumeAfterPopup() },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
+                properties = DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = false
+                )
             ) {
                 Box(
                     Modifier.fillMaxSize().padding(horizontal = 24.dp),
@@ -991,6 +1066,15 @@ internal fun Media3VideoPlayer(
                                     playerMenuOpen = false
                                     resumeAfterPopup()
                                 }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(appText("信息", english), color = Color.White) },
+                                leadingIcon = { Icon(Icons.Outlined.Info, null, tint = Color.White) },
+                                colors = MenuDefaults.itemColors(
+                                    textColor = Color.White,
+                                    leadingIconColor = Color.White
+                                ),
+                                onClick = { playerMenuOpen = false; onInfo(); resumeAfterPopup() }
                             )
                             DropdownMenuItem(
                                 text = { Text(appText("设置", english), color = Color.White) },

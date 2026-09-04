@@ -84,11 +84,17 @@ class VideoPlayerView @JvmOverloads constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!controlsHitEnabled || activeHit == 0) return false
         if (event.actionMasked == MotionEvent.ACTION_UP) {
+            performClick()
             invokeHit(activeHit)
             activeHit = 0
         } else if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
             activeHit = 0
         }
+        return true
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
         return true
     }
 }

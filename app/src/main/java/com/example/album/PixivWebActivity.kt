@@ -92,6 +92,7 @@ class PixivWebActivity : ComponentActivity() {
             settings.userAgentString = browserCompatibleUserAgent(settings.userAgentString)
             setOnTouchListener { view, event ->
                 if (event.action == MotionEvent.ACTION_DOWN) view.requestFocusFromTouch()
+                if (event.action == MotionEvent.ACTION_UP) view.performClick()
                 false
             }
             val currentWebView = this
@@ -162,7 +163,8 @@ class PixivWebActivity : ComponentActivity() {
                     view: WebView,
                     detail: android.webkit.RenderProcessGoneDetail
                 ): Boolean {
-                    android.util.Log.e("PixivWeb", "renderer gone crashed=${detail.didCrash()}")
+                    val crashed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) detail.didCrash() else false
+                    android.util.Log.e("PixivWeb", "renderer gone crashed=$crashed")
                     if (!rendererRecoveryAttempted) {
                         rendererRecoveryAttempted = true
                         intent.putExtra(EXTRA_RENDERER_RECOVERED, true)

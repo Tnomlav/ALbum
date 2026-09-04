@@ -1,7 +1,6 @@
 package com.example.album.data
 
 import android.content.Context
-import android.media.ExifInterface
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -12,6 +11,7 @@ import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.documentfile.provider.DocumentFile
+import androidx.exifinterface.media.ExifInterface
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayInputStream
@@ -103,6 +103,7 @@ data class PixivLibrarySnapshot(
 )
 
 class PixivArchiveRepository(private val context: Context) {
+    private val mediaRepository = MediaRepository(context)
     private val metadataCache = mutableMapOf<String, PixivMetadata>()
     private val metadataCacheLock = Mutex()
     private val tagCache = mutableMapOf<String, List<String>>()
@@ -250,6 +251,8 @@ class PixivArchiveRepository(private val context: Context) {
 
     suspend fun loadLibrary(fallbackDefaultItems: List<MediaItem>): PixivLibrarySnapshot = withContext(Dispatchers.IO) {
         val preferences = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
+        val showHiddenMedia = context.getSharedPreferences("album_settings", Context.MODE_PRIVATE)
+            .getBoolean("show_hidden_media", false)
         val sourceUri = preferences.getString("source_uri", null)?.let(Uri::parse)
         val targetUri = preferences.getString("target_uri", null)?.let(Uri::parse)
         val tagsByUri = mutableMapOf<String, List<String>>()
@@ -258,7 +261,16 @@ class PixivArchiveRepository(private val context: Context) {
             ?: "Pixiv"
         val defaultItems = sourceUri?.let { uri ->
                 treeDocumentFile(uri)?.let { root ->
-                buildList { collectLibraryImages(root, sourceFolderName, this, tagsByUri, loadTags = false) }
+                buildList {
+                    collectLibraryImages(
+                        root,
+                        sourceFolderName,
+                        this,
+                        tagsByUri,
+                        loadTags = false,
+                        showHiddenMedia = showHiddenMedia
+                    )
+                }
             }
         } ?: fallbackDefaultItems.map { item ->
             item.copy(folder = sourceFolderName)
@@ -270,7 +282,14 @@ class PixivArchiveRepository(private val context: Context) {
                         .filter { it.isDirectory }
                         .forEach { artistFolder ->
                             val artistName = artistFolder.name?.takeIf { it.isNotBlank() } ?: return@forEach
-                            collectLibraryImages(artistFolder, artistName, this, tagsByUri, loadTags = false)
+                            collectLibraryImages(
+                                artistFolder,
+                                artistName,
+                                this,
+                                tagsByUri,
+                                loadTags = false,
+                                showHiddenMedia = showHiddenMedia
+                            )
                         }
                 }
             }
@@ -471,50 +490,82 @@ class PixivArchiveRepository(private val context: Context) {
             } else {
                 canonicalName(record)
             }
-            val target = folder?.let {
-                createUniqueFile(it, archiveMimeType(targetName, record.mimeType), targetName)
+            var failureReason: String? = null
+            var target: DocumentFile? = null
+            var moved = false
+            var tagsWriteFailed = false
+
+            if (folder == null) {
+                failureReason = "无法创建画师目录或目标文件"
+            } else if (!copyInsteadOfMove) {
+                // Move the original first. Creating a destination file before
+                // this call would force the operation back into copy mode.
+                val uniqueName = uniqueFileName(folder, targetName)
+                val direct = mediaRepository.moveUriToDirectory(record.uri, folder, uniqueName)
+                if (direct != null) {
+                    target = documentFileForUri(direct.uri)
+                    try {
+                        if (writeTags) {
+                            onProgress(PixivArchiveProgress(PixivArchivePhase.Tags, completed, total, failed, record.filename, metadata.artist, "正在写入 Pixiv tags", itemProgress = 0.85f))
+                            writeMetadata(requireNotNull(target), folder, metadata)
+                        }
+                        moved = true
+                    } catch (error: Exception) {
+                        // The file has already been moved. Do not delete it
+                        // just because metadata writing failed.
+                        moved = true
+                        tagsWriteFailed = true
+                        failureReason = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+                    }
+                } else {
+                    failureReason = "无法直接移动文件，正在尝试备用方式"
+                }
             }
-            val copied = target != null && copy(record.uri, target.uri) { copyProgress ->
-                onProgress(PixivArchiveProgress(
-                    PixivArchivePhase.Move,
-                    completed,
-                    total,
-                    failed,
-                    record.filename,
-                    metadata.artist,
-                    if (copyInsteadOfMove) "正在复制到画师目录" else "正在移动到画师目录",
-                    itemProgress = (0.1f + copyProgress * 0.65f).coerceIn(0.1f, 0.75f)
-                ))
+
+            if (!moved && folder != null) {
+                target = createUniqueFile(folder, archiveMimeType(targetName, record.mimeType), targetName)
+                val copied = target != null && copy(record.uri, target.uri, onError = { error ->
+                    failureReason = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+                }) { copyProgress ->
+                    onProgress(PixivArchiveProgress(
+                        PixivArchivePhase.Move,
+                        completed,
+                        total,
+                        failed,
+                        record.filename,
+                        metadata.artist,
+                        if (copyInsteadOfMove) "正在复制到画师目录" else "正在备用移动到画师目录",
+                        itemProgress = (0.1f + copyProgress * 0.65f).coerceIn(0.1f, 0.75f)
+                    ))
+                }
+                if (copied && writeTags) onProgress(PixivArchiveProgress(PixivArchivePhase.Tags, completed, total, failed, record.filename, metadata.artist, "正在写入 Pixiv tags", itemProgress = 0.85f))
+                if (copied) {
+                    try {
+                        if (writeTags) writeMetadata(requireNotNull(target), folder, metadata)
+                        if (copyInsteadOfMove || mediaRepository.deleteUriPermanently(record.uri)) {
+                            moved = true
+                        } else {
+                            failureReason = "来源文件无法永久删除"
+                        }
+                    } catch (error: Exception) {
+                        failureReason = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+                    }
+                }
             }
-            if (copied && writeTags) onProgress(PixivArchiveProgress(PixivArchivePhase.Tags, completed, total, failed, record.filename, metadata.artist, "正在写入 Pixiv tags", itemProgress = 0.85f))
-            if (copied) onProgress(
-                PixivArchiveProgress(
-                    PixivArchivePhase.Move,
-                    completed,
-                    total,
-                    failed,
-                    record.filename,
-                    metadata.artist,
-                    if (copyInsteadOfMove) "正在复制到画师目录" else "正在移动到画师目录",
-                    itemProgress = 0.9f
-                )
-            )
-            var sidecar: DocumentFile? = null
-            val moved = copied && runCatching {
-                if (writeTags) sidecar = writeMetadata(target, folder, metadata)
-                copyInsteadOfMove || deleteSource(record.uri)
-            }.getOrDefault(false)
             val next = if (moved) {
                 completed++
                 clearMetadataCache(record.pid)
-                record.copy(status = PixivArchiveStatus.Archived, message = "已归档至 $folderName")
+                record.copy(
+                    status = PixivArchiveStatus.Archived,
+                    message = if (tagsWriteFailed) "已归档至 $folderName，但 Tag 写入失败" else "已归档至 $folderName"
+                )
             } else {
-                if (copied) {
-                    target?.delete()
-                    sidecar?.delete()
-                }
+                target?.let { mediaRepository.deleteUriPermanently(it.uri) }
                 failed++
-                record.copy(status = PixivArchiveStatus.Failed, message = "归档失败，来源文件已保留")
+                record.copy(
+                    status = PixivArchiveStatus.Failed,
+                    message = "归档失败：${failureReason ?: "文件移动失败"}，来源文件已保留"
+                )
             }
             onProgress(PixivArchiveProgress(
                 phase = PixivArchivePhase.Move,
@@ -524,9 +575,9 @@ class PixivArchiveRepository(private val context: Context) {
                 currentFile = record.filename,
                 currentArtist = metadata.artist,
                 message = if (moved) {
-                    if (copyInsteadOfMove) "文件复制完成" else "文件移动完成"
-                } else "归档失败，来源文件已保留",
-                log = "${record.filename} · ${if (moved) "完成" else "失败，可重试"}",
+                    if (tagsWriteFailed) "文件移动完成，Tag 写入失败" else if (copyInsteadOfMove) "文件复制完成" else "文件移动完成"
+                } else "归档失败：${failureReason ?: "文件移动失败"}，来源文件已保留",
+                log = "${record.filename} · ${if (moved) "完成" else "失败：${failureReason ?: "文件移动失败"}"}",
                 itemProgress = 1f
             ))
             next
@@ -544,7 +595,7 @@ class PixivArchiveRepository(private val context: Context) {
     private fun collectImages(file: DocumentFile, output: MutableList<DocumentFile>) {
         // Android's media provider can expose trashed entries in a tree. They
         // are not user-visible source files and may retain another image's name.
-        if (file.name.orEmpty().startsWith(".trashed", ignoreCase = true)) return
+        if (isSystemTrashedName(file.name)) return
         if (file.isDirectory) {
             runCatching { file.listFiles() }.getOrDefault(emptyArray()).forEach { collectImages(it, output) }
             return
@@ -563,14 +614,22 @@ class PixivArchiveRepository(private val context: Context) {
         output: MutableList<MediaItem>,
         tagsByUri: MutableMap<String, List<String>>,
         siblingSidecars: Map<String, DocumentFile> = emptyMap(),
-        loadTags: Boolean = true
+        loadTags: Boolean = true,
+        showHiddenMedia: Boolean = false
     ) {
+        // SAF can expose MediaStore trashed files with their physical
+        // ".trashed-*" name. Pixiv's library is loaded separately from the
+        // main MediaLibraryState, so it must apply the same exclusion here.
+        if (isSystemTrashedName(file.name)) return
+        if (!showHiddenMedia && file.name.orEmpty().trimStart().startsWith('.')) return
         if (file.isDirectory) {
             val children = runCatching { file.listFiles() }.getOrDefault(emptyArray())
             val sidecars = children.filter { it.isFile && it.name.orEmpty().endsWith(".pixiv.json", ignoreCase = true) }
                 .associateBy { it.name.orEmpty() }
             children.filterNot { it.name.orEmpty().endsWith(".pixiv.json", ignoreCase = true) }
-                .forEach { child -> collectLibraryImages(child, folderName, output, tagsByUri, sidecars, loadTags) }
+                .forEach { child ->
+                    collectLibraryImages(child, folderName, output, tagsByUri, sidecars, loadTags, showHiddenMedia)
+                }
             return
         }
         val mime = file.type ?: context.contentResolver.getType(file.uri).orEmpty()
@@ -653,11 +712,6 @@ class PixivArchiveRepository(private val context: Context) {
             }
         }
         return DocumentFile.fromTreeUri(context, uri)
-    }
-
-    private fun deleteSource(uri: Uri): Boolean = when (uri.scheme) {
-        "file" -> uri.path?.let(::File)?.delete() == true
-        else -> DocumentFile.fromSingleUri(context, uri)?.delete() == true
     }
 
     private suspend fun resolveMetadata(pid: String): PixivMetadata? {
@@ -846,7 +900,12 @@ class PixivArchiveRepository(private val context: Context) {
         }
     }
 
-    private suspend fun copy(source: Uri, target: Uri, onProgress: suspend (Float) -> Unit): Boolean {
+    private suspend fun copy(
+        source: Uri,
+        target: Uri,
+        onError: (Throwable) -> Unit = {},
+        onProgress: suspend (Float) -> Unit
+    ): Boolean {
         return try {
             val totalBytes = contentResolverSize(source)
             openMediaInputStream(context, source).use { input ->
@@ -873,7 +932,8 @@ class PixivArchiveRepository(private val context: Context) {
                 }
             }
             true
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            onError(error)
             false
         }
     }
@@ -966,11 +1026,54 @@ class PixivArchiveRepository(private val context: Context) {
         }
     }
 
-    private fun createUniqueFile(folder: DocumentFile, mimeType: String, requestedName: String): DocumentFile? {
+    private fun documentFileForUri(uri: Uri): DocumentFile? {
+        if (uri.scheme.equals("file", ignoreCase = true)) {
+            return uri.path?.let(::File)?.let(DocumentFile::fromFile)
+        }
+        return DocumentFile.fromSingleUri(context, uri)
+    }
+
+    private fun uniqueFileName(folder: DocumentFile, requestedName: String): String {
         val dot = requestedName.lastIndexOf('.')
         val base = if (dot > 0) requestedName.substring(0, dot) else requestedName
         val extension = if (dot > 0) requestedName.substring(dot) else ""
+
         var candidate = requestedName
+        var index = 1
+        while (runCatching { folder.findFile(candidate) }.getOrNull() != null) {
+            candidate = "$base ($index)$extension"
+            index++
+        }
+        return candidate
+    }
+
+    private fun createUniqueFile(folder: DocumentFile, mimeType: String, requestedName: String): DocumentFile? {
+        val uniqueName = uniqueFileName(folder, requestedName)
+        val dot = uniqueName.lastIndexOf('.')
+        val base = if (dot > 0) uniqueName.substring(0, dot) else uniqueName
+        val extension = if (dot > 0) uniqueName.substring(dot) else ""
+
+        // RawDocumentFile appends the MIME extension to displayName. Passing
+        // an already suffixed name therefore creates "file.png.png" and the
+        // old rename-through-DocumentsContract path cannot handle file://
+        // URIs. Create the exact name directly when the storage manager path
+        // is available.
+        if (folder.uri.scheme == "file") {
+            val parent = folder.uri.path?.let(::File) ?: return null
+            var candidate = uniqueName
+            var index = 1
+            while (File(parent, candidate).exists()) {
+                candidate = "$base ($index)$extension"
+                index++
+            }
+            val file = File(parent, candidate)
+            return runCatching {
+                if (!file.createNewFile()) return@runCatching null
+                DocumentFile.fromFile(file)
+            }.getOrNull()
+        }
+
+        var candidate = uniqueName
         var index = 1
         while (folder.findFile(candidate) != null) {
             candidate = "$base ($index)$extension"

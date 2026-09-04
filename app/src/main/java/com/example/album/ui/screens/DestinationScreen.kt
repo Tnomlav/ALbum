@@ -105,6 +105,7 @@ fun DestinationScreen(
     defaultPreserveDate: Boolean,
     onBack: () -> Unit,
     onConfirm: (String, ConflictPolicy, Boolean) -> Unit,
+    validateFolder: suspend (String) -> Boolean = { true },
     onCreateFolder: suspend (String, String) -> Boolean = { _, _ -> false }
 ) {
     val english = LocalAppEnglish.current
@@ -117,8 +118,11 @@ fun DestinationScreen(
     var createdFolders by remember { mutableStateOf<Set<String>>(emptySet()) }
     val scope = rememberCoroutineScope()
     fun coverFor(path: String): MediaItem? = folderCovers[path]
-    val allFolders = remember(folders, createdFolders, selectedFolder) {
-        (folders + createdFolders + listOfNotNull(selectedFolder))
+    val indexedFolderPaths = remember(folders, folderChildren) {
+        expandIndexedFolderPaths(folders.toSet(), folderChildren)
+    }
+    val allFolders = remember(folders, createdFolders, selectedFolder, indexedFolderPaths) {
+        (folders + indexedFolderPaths + createdFolders + listOfNotNull(selectedFolder))
             .filter { it.isNotBlank() }.distinct()
     }
     val folderEntries = remember(allFolders, folderChildren, currentFolder, query) {
@@ -133,14 +137,23 @@ fun DestinationScreen(
                 .toList()
             names.distinct().map { name -> name to "$current/$name" }
         } ?: if (query.isNotBlank()) {
-            // Searching may address a nested folder directly, but the value
-            // kept in the entry remains its complete path.
-            allFolders.map { path -> path.substringAfterLast('/') to path }
+            // Searching may address a nested folder directly. If the folder
+            // index also contains its leaf-name alias, prefer the complete
+            // path so "AI生成1" resolves to AI生成/AI生成1 rather than a
+            // new root-level directory.
+            val completePathLeaves = allFolders
+                .filter { '/' in it }
+                .mapTo(hashSetOf()) { it.substringAfterLast('/') }
+            allFolders.asSequence()
+                .filter { path -> '/' in path || path !in completePathLeaves }
+                .map { path -> path.substringAfterLast('/') to path }
+                .distinctBy { it.second }
+                .toList()
         } else run {
             // A destination picker must expose only root folders here. A
-            // nested path such as Pictures/AI生成/AI生成1 is opened one level
+            // nested path such as AI生成/AI生成1 is opened one level
             // at a time, so its leaf name cannot accidentally be selected as
-            // Pictures/AI生成1.
+            // AI生成1.
             val pathRoots = allFolders.map { it.substringBefore('/') }.toSet()
             val knownPathSegments = allFolders
                 .filter { it.contains('/') }
@@ -162,16 +175,33 @@ fun DestinationScreen(
     val visibleFolders = remember(folderEntries, query) {
         folderEntries.filter { (name, _) -> searchTextMatches(query, name) }
     }
-    val recentEntries = remember(recentFolders, allFolders, query) {
+    val indexedChildNames = remember(folderChildren) {
+        folderChildren.values.flatten().toSet()
+    }
+    val canonicalRecentFolders = remember(recentFolders, allFolders, indexedChildNames) {
         recentFolders
             .mapNotNull { recent ->
-                if (recent in allFolders) recent
-                else allFolders
-                    .filter { it.substringAfterLast('/') == recent }
-                    .singleOrNull()
+                if ('/' in recent) {
+                    recent.takeIf { it in allFolders }
+                } else {
+                    allFolders
+                        .filter { '/' in it && it.substringAfterLast('/') == recent }
+                        .singleOrNull()
+                        ?: recent.takeIf { it in allFolders && it !in indexedChildNames }
+                }
             }
-            .filter { searchTextMatches(query, it.substringAfterLast('/')) }
             .distinct()
+    }
+    val recentFolderExists by produceState(
+        initialValue = emptyMap<String, Boolean>(),
+        canonicalRecentFolders
+    ) {
+        value = canonicalRecentFolders.associateWith { path -> validateFolder(path) }
+    }
+    val recentEntries = remember(canonicalRecentFolders, recentFolderExists, query) {
+        canonicalRecentFolders
+            .filter { recentFolderExists[it] == true }
+            .filter { searchTextMatches(query, it.substringAfterLast('/')) }
             .map { it.substringAfterLast('/') to it }
     }
     val currentFolderItems = currentFolder?.let { folder ->
@@ -431,6 +461,38 @@ fun DestinationScreen(
             }
         )
     }
+}
+
+/**
+ * Folder indexes produced from storage walks historically kept child names
+ * separately from their parents. Reconstruct the full path before a transfer
+ * destination is selected, otherwise an empty nested folder such as
+ * AI生成/AI生成1 is mistaken for a root-level AI生成1 folder.
+ */
+private fun expandIndexedFolderPaths(
+    folderNames: Set<String>,
+    folderChildren: Map<String, Set<String>>
+): Set<String> {
+    val paths = linkedSetOf<String>()
+    val childNames = folderChildren.values.flatten().toSet()
+    val roots = folderNames.filter { '/' !in it && it !in childNames }
+
+    fun visit(path: String, ancestry: Set<String>) {
+        if (!paths.add(path)) return
+        val leaf = path.substringAfterLast('/')
+        if (leaf in ancestry) return
+        folderChildren[leaf].orEmpty().forEach { child ->
+            if (child.isNotBlank()) visit("$path/$child", ancestry + leaf)
+        }
+    }
+
+    roots.forEach { visit(it, emptySet()) }
+    // Preserve names that cannot be connected because the provider returned an
+    // incomplete index; they remain selectable instead of disappearing.
+    folderNames.filter { '/' !in it }.forEach { name ->
+        if (name !in childNames) paths += name
+    }
+    return paths
 }
 
 @Composable

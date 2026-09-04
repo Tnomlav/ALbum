@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.content.ComponentCallbacks2
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.util.Rational
 import androidx.activity.ComponentActivity
@@ -60,6 +61,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Keep every non-video surface portrait. The video player temporarily
+        // overrides this policy with the sensor when adaptive orientation is
+        // selected, then restores portrait when it is closed.
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         application.registerComponentCallbacks(memoryCallbacks)
         playbackResumeRequest = intent.toPlaybackResumeRequest()
         externalMediaUri = intent.toExternalMediaUri()
@@ -139,7 +144,9 @@ class MainActivity : ComponentActivity() {
         if (action != Intent.ACTION_VIEW) return null
         val uri = data ?: return null
         val type = type.orEmpty()
-        return uri.takeIf { type.startsWith("image/") || type.startsWith("video/") }
+        // Some file managers omit the MIME type or send */*. AlbumApp can
+        // resolve those from the provider or filename.
+        return uri.takeIf { type.isBlank() || type == "*/*" || type.startsWith("image/") || type.startsWith("video/") }
     }
 
     private fun Intent.toExternalWallpaperUri(): Uri? {

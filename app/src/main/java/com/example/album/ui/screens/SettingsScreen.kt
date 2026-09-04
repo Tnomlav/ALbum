@@ -40,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -108,7 +109,7 @@ fun SettingsScreen(
     val appVersion = packageInfo.versionName ?: "1.0"
     @Suppress("DEPRECATION")
     val appVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) packageInfo.longVersionCode else packageInfo.versionCode.toLong()
-    var cacheBytes by remember { mutableLongStateOf(ThumbnailRepository.cacheBytes(context)) }
+    var cacheBytes by remember { mutableLongStateOf(0L) }
     var checkingUpdate by remember { mutableStateOf(false) }
     var updateChecked by remember { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<AppRelease?>(null) }
@@ -142,6 +143,9 @@ fun SettingsScreen(
     var persistentScrollbar by remember { mutableStateOf(preferences.getBoolean("persistent_scrollbar", false)) }
     var randomSlideshow by remember { mutableStateOf(preferences.getBoolean("random_slideshow", false)) }
     var backgroundOptimization by remember { mutableStateOf(preferences.getBoolean("background_optimization", true)) }
+    LaunchedEffect(Unit) {
+        cacheBytes = withContext(Dispatchers.IO) { ThumbnailRepository.cacheBytes(context) }
+    }
     var collapsedSections by remember { mutableStateOf(setOf("滚动条", "幻灯片", "缓存", "关于")) }
     fun toggleSection(title: String) {
         collapsedSections = if (title in collapsedSections) collapsedSections - title else collapsedSections + title

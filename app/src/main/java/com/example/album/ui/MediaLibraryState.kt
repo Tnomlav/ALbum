@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Environment
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -485,10 +486,12 @@ class MediaLibraryState(context: Context) {
         applyExclusions()
     }
 
-    fun deleteLegacy(item: MediaItem): Boolean = runCatching { repository.delete(item) > 0 }.getOrDefault(false)
+    suspend fun deleteLegacy(item: MediaItem): Boolean = withContext(Dispatchers.IO) {
+        runCatching { repository.delete(item) > 0 }.getOrDefault(false)
+    }
 
-    fun rename(item: MediaItem, newName: String): MediaItem? {
-        val renamed = repository.rename(item, newName) ?: return null
+    suspend fun rename(item: MediaItem, newName: String): MediaItem? = withContext(Dispatchers.IO) {
+        val renamed = repository.rename(item, newName) ?: return@withContext null
         if (item.isDocument) {
             if (item.isVideo) localVideos = localVideos.map { if (it.uri == item.uri) renamed else it }
             else localImages = localImages.map { if (it.uri == item.uri) renamed else it }
@@ -498,7 +501,7 @@ class MediaLibraryState(context: Context) {
             if (item.isVideo) allVideos = allVideos.map { if (it.uri == item.uri) renamed else it }
             else allImages = allImages.map { if (it.uri == item.uri) renamed else it }
         }
-        return renamed
+        renamed
     }
 
     fun renameFolder(folder: String, newName: String): Int {
@@ -525,6 +528,18 @@ class MediaLibraryState(context: Context) {
 
         val mediaKinds = items.map { it.isVideo }.distinct()
         return mediaKinds.any { isVideo -> repository.createFolderAtPath(path, name, isVideo) }
+    }
+
+    /** Checks the exact relative path before showing it as a recent target. */
+    suspend fun isTransferFolderAvailable(path: String): Boolean = withContext(Dispatchers.IO) {
+        val normalized = path.trim('/').replace('\\', '/')
+        if (normalized.isBlank() || normalized.split('/').any { it.isBlank() || it == "." || it == ".." }) {
+            return@withContext false
+        }
+        localFolders.findAuthorizedDirectory(normalized)?.let { directory ->
+            if (directory.isDirectory && directory.exists()) return@withContext true
+        }
+        File(Environment.getExternalStorageDirectory(), normalized).isDirectory
     }
 
     suspend fun transfer(
@@ -568,7 +583,9 @@ class MediaLibraryState(context: Context) {
         applyExclusions()
     }
 
-    suspend fun findDuplicates(): List<DuplicateGroup> = cleanup.findExactDuplicates(allImages)
+    suspend fun findDuplicates(): List<DuplicateGroup> = cleanup.findExactDuplicates(
+        (allImages + localImages).distinctBy { it.uri.toString() }
+    )
 
     suspend fun stageForRecycle(items: List<MediaItem>): List<RecycleEntry> {
         val staged = cleanup.stageForRecycle(items)

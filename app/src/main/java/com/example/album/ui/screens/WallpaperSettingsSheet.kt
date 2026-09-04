@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
@@ -99,7 +100,7 @@ fun WallpaperSettingsSheet(
                 .getOrDefault(WallpaperSound.Disabled)
         )
     }
-    var wallpaperVolume by remember { mutableStateOf(preferences.getFloat("wallpaper_volume", 1f).coerceIn(0f, 1f)) }
+    var wallpaperVolume by remember { mutableFloatStateOf(preferences.getFloat("wallpaper_volume", 1f).coerceIn(0f, 1f)) }
     var dialog by remember { mutableStateOf<WallpaperSettingDialog?>(null) }
 
     fun save() {

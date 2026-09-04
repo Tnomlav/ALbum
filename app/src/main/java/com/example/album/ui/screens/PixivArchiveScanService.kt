@@ -101,9 +101,9 @@ class PixivArchiveScanService : Service() {
                 session.setScanState(ArchiveUiState.Error)
                 session.persistScanProgress(PixivArchiveProgress(
                     phase = com.example.album.data.PixivArchivePhase.Error,
-                    completed = session.completed.value,
+                    completed = session.completed.intValue,
                     total = session.activity.value.total,
-                    failed = session.failed.value,
+                    failed = session.failed.intValue,
                     message = error.message ?: "无法读取来源目录",
                     log = error.message ?: "扫描失败"
                 ))

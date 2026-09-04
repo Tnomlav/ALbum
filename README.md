@@ -25,12 +25,13 @@ Album 主要服务于希望直接管理本机媒体文件的用户：不上传�
 ## 下载
 
 - [GitHub Releases](https://github.com/Tnomlav/ALbum/releases)
-- 当前版本：[v1.1.44 APK](https://github.com/Tnomlav/ALbum/releases/download/v1.1.44/Album-v1.1.44.apk)
+- 最新已发布版本：[v1.1.50 APK](https://github.com/Tnomlav/ALbum/releases/download/v1.1.50/Album-v1.1.50.apk)
+- 当前工作树版本：`1.1.57`（未发布）
 
-当前 APK SHA-256：
+仓库内本地签名构建 `app/release/app-release.apk` 为 `1.1.56`，仅用于交付前验证，不代表已创建 GitHub Release。其 SHA-256 为：
 
 ```text
-2AC6E9AA1FA39AFA4E8989149779615C0F0F196B6CBE85152535176B23B39B1B
+92346A37696359C3B281D047594D2D381646CA65D5AB4763872DA7D31F2AD2D6
 ```
 
 安装前请确认文件来自本仓库，并通过 SHA-256 校验下载完整性。正式发布版本和发布说明会优先放在 GitHub Releases。
@@ -48,13 +49,13 @@ Album 主要服务于希望直接管理本机媒体文件的用户：不上传�
 ```bash
 git clone https://github.com/Tnomlav/ALbum.git
 cd ALbum
-./gradlew testDebugUnitTest assembleDebug
+./gradlew lintDebug testDebugUnitTest assembleDebug
 ```
 
 Windows PowerShell：
 
 ```powershell
-.\gradlew.bat testDebugUnitTest assembleDebug
+.\gradlew.bat lintDebug testDebugUnitTest assembleDebug
 ```
 
 生成的 Debug APK 位于 `app/build/outputs/apk/debug/`。Release 签名配置通过 Gradle 属性提供，不应把 keystore 或密码提交到仓库：
@@ -84,7 +85,7 @@ Album 不提供云端媒体同步。Pixiv 归档是可选功能，会连接 Pixi
 
 ## 贡献
 
-欢迎提交 Issue 和 Pull Request。提交前请先运行 `./gradlew testDebugUnitTest`，并在行为或界面变化时附上复现步骤、设备版本和截图。
+欢迎提交 Issue 和 Pull Request。提交前请先运行 `./gradlew lintDebug testDebugUnitTest assembleDebug`，并在行为或界面变化时附上复现步骤、设备版本和截图。
 
 ## License
 
