@@ -159,7 +159,7 @@ fun setStaticWallpaper(context: Context, items: List<MediaItem>, english: Boolea
 }
 
 fun setStaticWallpaperBitmap(context: Context, bitmap: Bitmap, english: Boolean) {
-    WallpaperImportCoordinator.start(
+    val accepted = WallpaperImportCoordinator.start(
         context = context,
         kind = WallpaperImportState.Kind.STATIC,
         total = 1,
@@ -193,6 +193,9 @@ fun setStaticWallpaperBitmap(context: Context, bitmap: Bitmap, english: Boolean)
         },
         onSuccess = { openStaticWallpaperSettings(context, english) }
     )
+    // The coordinator owns the bitmap only after accepting the job. If an
+    // import is already running, release this rejected request immediately.
+    if (!accepted && !bitmap.isRecycled) bitmap.recycle()
 }
 
 fun setDynamicWallpaper(context: Context, items: List<MediaItem>, english: Boolean) {
