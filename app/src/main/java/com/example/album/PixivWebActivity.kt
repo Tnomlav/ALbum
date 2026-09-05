@@ -102,7 +102,9 @@ class PixivWebActivity : ComponentActivity() {
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onConsoleMessage(message: ConsoleMessage): Boolean {
-                    android.util.Log.w("PixivWeb", "${message.message()} @ ${message.sourceId()}:${message.lineNumber()}")
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.w("PixivWeb", "${message.message()} @ ${message.sourceId()}:${message.lineNumber()}")
+                    }
                     return true
                 }
                 override fun onCreateWindow(
@@ -130,7 +132,9 @@ class PixivWebActivity : ComponentActivity() {
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     val uri = request.url
-                    if (uri.scheme == "http" || uri.scheme == "https") return false
+                    if (uri.scheme == "https" && isAllowedPixivWebHost(uri.host)) return false
+                    // Never follow a cleartext downgrade, even outside the app.
+                    if (uri.scheme == "http") return true
                     runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
                     return true
                 }
@@ -140,10 +144,10 @@ class PixivWebActivity : ComponentActivity() {
                     request: WebResourceRequest,
                     error: android.webkit.WebResourceError
                 ) {
-                    android.util.Log.e(
-                        "PixivWeb",
-                        "load error main=${request.isForMainFrame} code=${error.errorCode} description=${error.description} url=${request.url}"
-                    )
+                    if (BuildConfig.DEBUG) android.util.Log.e(
+                            "PixivWeb",
+                            "load error main=${request.isForMainFrame} code=${error.errorCode} description=${error.description} url=${request.url}"
+                        )
                     if (request.isForMainFrame) pageLoadFailed = true
                 }
 
@@ -152,10 +156,10 @@ class PixivWebActivity : ComponentActivity() {
                     request: WebResourceRequest,
                     errorResponse: android.webkit.WebResourceResponse
                 ) {
-                    android.util.Log.e(
-                        "PixivWeb",
-                        "http error main=${request.isForMainFrame} status=${errorResponse.statusCode} reason=${errorResponse.reasonPhrase} url=${request.url}"
-                    )
+                    if (BuildConfig.DEBUG) android.util.Log.e(
+                            "PixivWeb",
+                            "http error main=${request.isForMainFrame} status=${errorResponse.statusCode} reason=${errorResponse.reasonPhrase} url=${request.url}"
+                        )
                     if (request.isForMainFrame) pageLoadFailed = true
                 }
 
@@ -164,7 +168,7 @@ class PixivWebActivity : ComponentActivity() {
                     detail: android.webkit.RenderProcessGoneDetail
                 ): Boolean {
                     val crashed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) detail.didCrash() else false
-                    android.util.Log.e("PixivWeb", "renderer gone crashed=$crashed")
+                    if (BuildConfig.DEBUG) android.util.Log.e("PixivWeb", "renderer gone crashed=$crashed")
                     if (!rendererRecoveryAttempted) {
                         rendererRecoveryAttempted = true
                         intent.putExtra(EXTRA_RENDERER_RECOVERED, true)
@@ -216,7 +220,7 @@ class PixivWebActivity : ComponentActivity() {
         })
         val requested = intent.getStringExtra(EXTRA_URL)?.let(Uri::parse)
         val url = requested?.takeIf {
-            it.scheme == "https" && it.host.orEmpty().let { host -> host == "pixiv.net" || host.endsWith(".pixiv.net") }
+            it.scheme == "https" && isAllowedPixivWebHost(it.host)
         }?.toString() ?: "https://www.pixiv.net/"
         webView.loadUrl(url)
     }
@@ -320,6 +324,14 @@ internal fun browserCompatibleUserAgent(defaultUserAgent: String): String = defa
     .replace(Regex("\\s*Version/4\\.0\\s*"), " ")
     .replace(Regex("\\s{2,}"), " ")
     .trim()
+
+internal fun isAllowedPixivWebHost(host: String?): Boolean {
+    val normalized = host?.trim()?.lowercase() ?: return false
+    return normalized == "pixiv.net" ||
+        normalized == "www.pixiv.net" ||
+        normalized == "accounts.pixiv.net" ||
+        normalized == "oauth.secure.pixiv.net"
+}
 
 internal fun pixivSelfResponseAuthenticated(json: String): Boolean = runCatching {
     val root = JSONObject(json)

@@ -173,6 +173,8 @@ import com.example.album.data.displayAddress
 import com.example.album.data.ThumbnailRepository
 import com.example.album.data.openMediaInputStream
 import com.example.album.ui.LocalAppEnglish
+import com.example.album.ui.appSeekDeltaText
+import com.example.album.ui.appSeekText
 import com.example.album.ui.appText
 import com.example.album.playback.MediaPlaybackService
 import com.example.album.playback.PlaybackResumeRequest
@@ -1333,7 +1335,7 @@ private fun NativeVideoPlayer(
             putExtra(MediaPlaybackService.EXTRA_POSITION, player.currentPosition)
         }
         runCatching { ContextCompat.startForegroundService(context, service) }.onFailure {
-            Toast.makeText(context, "无法启动后台播放", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, appText("无法启动后台播放", english), Toast.LENGTH_SHORT).show()
             return
         }
         backgroundServiceStarted = true
@@ -1509,19 +1511,19 @@ private fun NativeVideoPlayer(
                                 )
                                 val offset = ((targetTime - startTime) / 1000L)
                                 gestureTarget = targetTime
-                                gestureHud = "${if (offset >= 0) "+" else ""}${offset}秒  ${formatPlayerTime(targetTime)}"
+                                gestureHud = "${appSeekDeltaText(offset, english)}  ${formatPlayerTime(targetTime)}"
                             }
                             "brightness" -> {
                                 change.consume()
                                 val next = (startBrightness - deltaY / gestureViewportHeight.coerceAtLeast(1) * 0.5f).coerceIn(0f, 1f)
                                 updateGestureBrightness(next)
-                                gestureHud = "亮度 ${roundToInt(next * 100f)}%"
+                                gestureHud = "${appText("亮度", english)} ${roundToInt(next * 100f)}%"
                             }
                             "volume" -> {
                                 change.consume()
                                 val next = (startVolume - deltaY / gestureViewportHeight.coerceAtLeast(1) * 0.5f).coerceIn(0f, 1f)
                                 updateGestureVolume(next)
-                                gestureHud = "音量 ${roundToInt(next * 100f)}%"
+                                gestureHud = "${appText("音量", english)} ${roundToInt(next * 100f)}%"
                             }
                         }
                         if (!change.pressed) finished = true
@@ -1539,7 +1541,7 @@ private fun NativeVideoPlayer(
                                 lastPosition.x <= edge || lastPosition.x >= gestureViewportWidth - edge
                             if (edgeProtection && touchesEdge) {
                                 if (wasPlaying) player.play()
-                                gestureHud = "已取消跳转"
+                                gestureHud = appText("已取消跳转", english)
                             } else {
                                 seekToVideoFrame(player, targetTime)
                                 if (wasPlaying) player.play() else player.pause()
@@ -1559,20 +1561,20 @@ private fun NativeVideoPlayer(
                                 if (zone in (1f / 3f)..(2f / 3f) && player.playbackState == Player.STATE_ENDED) {
                                     player.seekTo(0L)
                                     player.play()
-                                    gestureHud = "从头播放"
+                                    gestureHud = appText("从头播放", english)
                                 } else if (player.isPlaying && zone in (1f / 3f)..(2f / 3f)) {
                                     restartOrTogglePlayback()
-                                    gestureHud = "暂停"
+                                    gestureHud = appText("暂停", english)
                                 } else if (!player.isPlaying && zone in (1f / 3f)..(2f / 3f)) {
                                     restartOrTogglePlayback()
-                                    gestureHud = "播放"
+                                    gestureHud = appText("播放", english)
                                 } else if (zone < 1f / 3f) {
                                     seekToVideoFrame(player, player.currentPosition - seekIncrement)
-                                    gestureHud = "快退 ${seekIncrement / 1000L}秒"
+                                    gestureHud = appSeekText("快退", seekIncrement, english)
                                 } else {
                                     val duration = player.duration.takeIf { it > 0L } ?: Long.MAX_VALUE
                                     seekToVideoFrame(player, player.currentPosition + seekIncrement)
-                                    gestureHud = "快进 ${seekIncrement / 1000L}秒"
+                                    gestureHud = appSeekText("快进", seekIncrement, english)
                                 }
                             } else {
                                 lastTapAt = now
@@ -1676,7 +1678,9 @@ private fun NativeVideoPlayer(
             AnimatedVisibility(videoControlsVisible && !pictureInPictureMode, modifier = Modifier.align(Alignment.CenterEnd).zIndex(controlSurfaceZ), enter = fadeIn(tween(180)), exit = fadeOut(tween(180))) {
                 VideoTool(Icons.Outlined.LockOpen, appText("锁定控制", english), Modifier.padding(end = 12.dp)) { refreshControls(); controlsLocked = true }
             }
-            AnimatedVisibility(videoControlsVisible && !pictureInPictureMode, modifier = Modifier.align(Alignment.BottomCenter).zIndex(controlSurfaceZ), enter = fadeIn(tween(180)), exit = fadeOut(tween(180))) {
+            // Keep the bottom control bar above the full-screen native hit
+            // router so the seek slider receives the complete gesture.
+            AnimatedVisibility(videoControlsVisible && !pictureInPictureMode, modifier = Modifier.align(Alignment.BottomCenter).zIndex(controlSurfaceZ + 2f), enter = fadeIn(tween(180)), exit = fadeOut(tween(180))) {
                 Column(
                     Modifier.fillMaxWidth()
                         .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .82f))))
@@ -1684,13 +1688,13 @@ private fun NativeVideoPlayer(
                 ) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(formatPlayerTime(playerPosition), color = Color.White, fontSize = 12.sp, modifier = Modifier.width(48.dp))
-                        Slider(
-                            value = playerPosition.toFloat().coerceIn(0f, playerDuration.coerceAtLeast(1L).toFloat()),
-                            onValueChange = {
-                                playerPosition = frameAlignedPosition(player, it.toLong())
+                        DeferredVideoSeekSlider(
+                            valueMs = playerPosition,
+                            durationMs = playerDuration,
+                            onSeek = {
+                                playerPosition = frameAlignedPosition(player, it)
                                 seekToVideoFrame(player, playerPosition)
                             },
-                            valueRange = 0f..playerDuration.coerceAtLeast(1L).toFloat(),
                             modifier = Modifier.weight(1f).height(18.dp),
                             colors = SliderDefaults.colors(
                                 thumbColor = Color.White,

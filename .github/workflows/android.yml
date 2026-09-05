@@ -26,11 +26,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Run lint, unit tests, and build Debug APK
-        run: ./gradlew lintDebug testDebugUnitTest assembleDebug --stacktrace
+      - name: Run lint, unit tests, and Debug/Release builds
+        run: ./gradlew lintDebug testDebugUnitTest assembleDebug assembleRelease --stacktrace
 
-      - name: Upload Debug APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: album-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: album-apks
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
+          if-no-files-found: error

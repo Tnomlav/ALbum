@@ -102,6 +102,7 @@ import androidx.media3.ui.PlayerView
 import com.example.album.data.MediaItem
 import com.example.album.playback.MediaPlaybackService
 import com.example.album.ui.LocalAppEnglish
+import com.example.album.ui.appSeekText
 import com.example.album.ui.appText
 import kotlinx.coroutines.delay
 
@@ -420,6 +421,7 @@ internal fun HtmlVideoPlayer(
             player = player,
             playing = playing,
             seek = normalSkip,
+            english = english,
             onBackground = ::startBackground,
             onRestore = { onMiniModeChange(false) },
             onClose = onBack
@@ -468,12 +470,12 @@ internal fun HtmlVideoPlayer(
                         if (controlsLocked || pictureInPictureMode) return@detectTapGestures
                         val fraction = offset.x / size.width.coerceAtLeast(1)
                         if (player.playbackState == Player.STATE_ENDED) {
-                            player.seekTo(0L); player.play(); gestureHud = "从头播放"
+                            player.seekTo(0L); player.play(); gestureHud = appText("从头播放", english)
                         } else if (fraction < 1f / 3f) {
-                            player.seekTo((player.currentPosition - normalSkip).coerceAtLeast(0L)); gestureHud = "快退 ${normalSkip / 1000L}秒"
+                            player.seekTo((player.currentPosition - normalSkip).coerceAtLeast(0L)); gestureHud = appSeekText("快退", normalSkip, english)
                         } else if (fraction > 2f / 3f) {
-                            player.seekTo((player.currentPosition + normalSkip).coerceAtMost(player.duration.coerceAtLeast(0L))); gestureHud = "快进 ${normalSkip / 1000L}秒"
-                        } else { togglePlay(); gestureHud = if (player.isPlaying) "播放" else "暂停" }
+                            player.seekTo((player.currentPosition + normalSkip).coerceAtMost(player.duration.coerceAtLeast(0L))); gestureHud = appSeekText("快进", normalSkip, english)
+                        } else { togglePlay(); gestureHud = if (player.isPlaying) appText("播放", english) else appText("暂停", english) }
                         refresh()
                     }
                 )
@@ -579,10 +581,10 @@ private fun SpacerBottomControls(
     Column(modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(.82f)))).padding(start = 14.dp, end = 14.dp, top = 26.dp, bottom = 18.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(htmlTime(position), color = Color.White, fontSize = 12.sp, modifier = Modifier.width(48.dp))
-            Slider(
-                value = position.toFloat().coerceIn(0f, duration.coerceAtLeast(1L).toFloat()),
-                onValueChange = { onSeek(it.toLong()) },
-                valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
+            DeferredVideoSeekSlider(
+                valueMs = position,
+                durationMs = duration,
+                onSeek = onSeek,
                 modifier = Modifier.weight(1f).height(24.dp).graphicsLayer { scaleY = .65f },
                 colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(.28f))
             )
@@ -615,6 +617,7 @@ private fun HtmlMiniVideoPlayer(
     player: ExoPlayer,
     playing: Boolean,
     seek: Long,
+    english: Boolean,
     onBackground: () -> Unit,
     onRestore: () -> Unit,
     onClose: () -> Unit
@@ -636,17 +639,17 @@ private fun HtmlMiniVideoPlayer(
                 Modifier.align(Alignment.TopEnd).background(Color.Black.copy(.55f), RoundedCornerShape(bottomStart = 8.dp)).padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                HtmlVideoButton(Icons.Outlined.Headphones, "后台播放", onBackground, Modifier.size(38.dp), iconSize = 21.dp)
-                HtmlVideoButton(Icons.Outlined.Fullscreen, "恢复全屏", onRestore, Modifier.size(38.dp), iconSize = 21.dp)
-                HtmlVideoButton(Icons.Outlined.StopCircle, "关闭", onClose, Modifier.size(38.dp), iconSize = 21.dp)
+                HtmlVideoButton(Icons.Outlined.Headphones, appText("后台播放", english), onBackground, Modifier.size(38.dp), iconSize = 21.dp)
+                HtmlVideoButton(Icons.Outlined.Fullscreen, appText("恢复全屏", english), onRestore, Modifier.size(38.dp), iconSize = 21.dp)
+                HtmlVideoButton(Icons.Outlined.StopCircle, appText("关闭", english), onClose, Modifier.size(38.dp), iconSize = 21.dp)
             }
             Row(
                 Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp).background(Color.Black.copy(.55f), CircleShape),
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                HtmlVideoButton(Icons.Outlined.FastRewind, "快退", { player.seekTo((player.currentPosition - seek).coerceAtLeast(0L)) }, Modifier.size(36.dp), iconSize = 20.dp)
-                HtmlVideoButton(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, "播放", { if (player.isPlaying) player.pause() else player.play() }, Modifier.size(36.dp), iconSize = 20.dp)
-                HtmlVideoButton(Icons.Outlined.FastForward, "快进", { player.seekTo((player.currentPosition + seek).coerceAtMost(player.duration.coerceAtLeast(0L))) }, Modifier.size(36.dp), iconSize = 20.dp)
+                HtmlVideoButton(Icons.Outlined.FastRewind, appText("快退", english), { player.seekTo((player.currentPosition - seek).coerceAtLeast(0L)) }, Modifier.size(36.dp), iconSize = 20.dp)
+                HtmlVideoButton(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, appText("播放", english), { if (player.isPlaying) player.pause() else player.play() }, Modifier.size(36.dp), iconSize = 20.dp)
+                HtmlVideoButton(Icons.Outlined.FastForward, appText("快进", english), { player.seekTo((player.currentPosition + seek).coerceAtMost(player.duration.coerceAtLeast(0L))) }, Modifier.size(36.dp), iconSize = 20.dp)
             }
         }
     }

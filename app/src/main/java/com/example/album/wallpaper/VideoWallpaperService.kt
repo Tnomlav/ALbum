@@ -7,6 +7,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.service.wallpaper.WallpaperService
 import android.util.Log
+import com.example.album.BuildConfig
 import android.view.SurfaceHolder
 import org.json.JSONArray
 import java.io.File
@@ -70,7 +71,7 @@ class VideoWallpaperService : WallpaperService() {
                     it.setSurface(holder.surface)
                 }
             }
-                .onFailure { Log.w(TAG, "surface rebind failed", it) }
+                .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "surface rebind failed", it) }
             if (player == null) startPlayback(holder)
         }
 
@@ -105,7 +106,7 @@ class VideoWallpaperService : WallpaperService() {
             }
             val source = currentSource() ?: return
             if (!source.isFile || !source.canRead() || source.length() == 0L) {
-                Log.e(TAG, "video source unavailable: ${source.absolutePath} exists=${source.exists()} length=${source.length()}")
+                if (BuildConfig.DEBUG) Log.e(TAG, "video source unavailable: ${source.absolutePath} exists=${source.exists()} length=${source.length()}")
                 return
             }
             playerReady = false
@@ -137,7 +138,7 @@ class VideoWallpaperService : WallpaperService() {
                         if (shouldPlay()) prepared.start()
                     }
                     setOnErrorListener { failedPlayer, what, extra ->
-                        Log.e(TAG, "video playback error: ${source.absolutePath} what=$what extra=$extra")
+                        if (BuildConfig.DEBUG) Log.e(TAG, "video playback error: ${source.absolutePath} what=$what extra=$extra")
                         playerReady = false
                         if (player === failedPlayer) player = null
                         failedPlayer.release()
@@ -154,7 +155,7 @@ class VideoWallpaperService : WallpaperService() {
                                     prepareRetryCount = 0
                                     startPlayback()
                                 } else {
-                                    Log.e(TAG, "all videos in the wallpaper queue failed")
+                                    if (BuildConfig.DEBUG) Log.e(TAG, "all videos in the wallpaper queue failed")
                                 }
                             } else if (prepareRetryCount++ < 1) {
                                 startPlayback()
@@ -165,7 +166,7 @@ class VideoWallpaperService : WallpaperService() {
                     prepareAsync()
                 }
             }.getOrElse {
-                Log.e(TAG, "video player setup failed: ${source.absolutePath}", it)
+                if (BuildConfig.DEBUG) Log.e(TAG, "video player setup failed: ${source.absolutePath}", it)
                 playerReady = false
                 player?.release()
                 null

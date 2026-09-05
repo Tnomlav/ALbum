@@ -132,7 +132,8 @@ fun WallpaperManagerScreen(
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Text(
-                if (query.isBlank()) visibleMedia.size.toString() else appText("搜索结果 ${visibleMedia.size} 项", english),
+                if (query.isBlank()) visibleMedia.size.toString()
+                else if (english) "Search results: ${visibleMedia.size}" else "搜索结果 ${visibleMedia.size} 项",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall,

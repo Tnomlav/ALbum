@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
+   Keep device-specific media state and Pixiv credentials out of Auto Backup.
    See https://developer.android.com/guide/topics/data/autobackup
    for details.
    Note: This file is ignored for devices older than API 31
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
-    <!-- Do not back up credentials, cleanup records, or device-specific media state. -->
     <exclude domain="root" path="." />
 </full-backup-content>

@@ -6,6 +6,17 @@ val LocalAppEnglish = compositionLocalOf { false }
 
 fun appText(chinese: String, english: Boolean): String = if (english) APP_ENGLISH[chinese] ?: chinese else chinese
 
+fun appSeekText(actionChinese: String, milliseconds: Long, english: Boolean): String {
+    val seconds = milliseconds.coerceAtLeast(0L) / 1000L
+    val unit = if (english) "s" else "秒"
+    return "${appText(actionChinese, english)} $seconds$unit"
+}
+
+fun appSeekDeltaText(seconds: Long, english: Boolean): String {
+    val sign = if (seconds >= 0L) "+" else ""
+    return "$sign$seconds${if (english) "s" else "秒"}"
+}
+
 private val APP_ENGLISH = mapOf(
     "请输入文本" to "Enter text",
     "相册" to "Albums", "视频" to "Videos", "时间轴" to "Timeline", "设置" to "Settings",
@@ -17,21 +28,22 @@ private val APP_ENGLISH = mapOf(
     "排除" to "Exclude", "更多操作" to "More actions", "全选" to "Select all", "取消全选" to "Deselect all",
     "收藏所选" to "Favorite selected", "删除所选" to "Delete selected", "复制所选" to "Copy selected",
     "移动所选" to "Move selected", "退出多选" to "Exit selection", "需要照片和视频访问权限" to "Photos and videos permission required",
-    "需要照片访问权限" to "Photos permission required", "授权访问" to "Allow access",
+    "需要照片访问权限" to "Photos permission required", "需要视频访问权限" to "Videos permission required", "授权访问" to "Allow access",
     "授权后才能读取设备上的相册内容。" to "Allow access to read photos and videos on this device.",
+    "授权后才能读取设备上的相册内容" to "Allow access to read photos and videos on this device.",
     "没有找到相关内容" to "No matching items", "这里还没有图片" to "No photos yet", "这里还没有视频" to "No videos yet", "此文件夹没有内容" to "This folder is empty",
     "排序方式" to "Sort", "列数" to "Columns", "排布方式" to "Layout", "网格" to "Grid", "自适应" to "Adaptive",
     "时间" to "Date", "名称" to "Name", "大小" to "Size", "数量" to "Count", "时长" to "Duration",
     "升序" to "Ascending", "降序" to "Descending", "覆盖" to "Replace", "跳过" to "Skip", "保留两者" to "Keep both",
-    "跳转日期" to "Jump to date", "排除文件夹" to "Exclude folder", "文件名" to "File name", "地址" to "Location",
-    "打开方式选择" to "Choose app", "编辑图片" to "Edit photo", "返回相册" to "Back to albums",
+    "跳转日期" to "Jump to date", "跳转" to "Jump", "排除文件夹" to "Exclude folder", "文件名" to "File name", "地址" to "Location",
+    "打开方式选择" to "Choose app", "编辑图片" to "Edit photo", "返回相册" to "Back to albums", "确认" to "Confirm", "搜索" to "Search", "切换搜索方式" to "Switch search mode", "清除搜索" to "Clear search", "切换为单屏宽度" to "Switch to single-screen width", "切换为多屏宽度" to "Switch to multi-screen width", "使用裁剪区域" to "Use crop area",
     "收藏" to "Favorite", "取消收藏所选" to "Unfavorite selected", "移到回收站" to "Move to Trash", "菜单" to "Menu", "壁纸" to "Wallpaper",
     "播放速度" to "Playback speed", "倍速" to "Speed", "画中画" to "Picture-in-picture",
     "后台播放" to "Background playback", "锁定控制" to "Lock controls", "解锁控制" to "Unlock controls",
     "旋转方向" to "Orientation", "自适应" to "Adaptive", "横屏" to "Landscape", "竖屏" to "Portrait",
     "顺序播放" to "Play in order", "循环播放" to "Repeat one", "随机播放" to "Shuffle", "播完暂停" to "Stop after current",
-    "关闭幻灯片" to "Close slideshow", "上一张" to "Previous", "下一张" to "Next",
-    "保存编辑" to "Save edits", "保留二者" to "Keep both", "替换原图" to "Replace original",
+    "关闭幻灯片" to "Close slideshow", "上一张" to "Previous", "下一张" to "Next", "恢复全屏播放" to "Resume full-screen playback", "恢复全屏" to "Restore full screen", "幻灯片播放动画" to "Slideshow animation", "幻灯片播放间隔" to "Slideshow interval", "幻灯片设置" to "Slideshow settings", "幻灯片随机播放" to "Shuffle slideshow", "已取消跳转" to "Seek cancelled", "从头播放" to "Play from start", "暂停" to "Pause", "播放" to "Play",
+    "保存编辑" to "Save edits", "保留二者" to "Keep both", "替换原图" to "Replace original", "撤回" to "Undo", "点击复原" to "Tap to reset", "点击恢复" to "Tap to restore", "重置构图" to "Reset crop", "重置调整" to "Reset adjustments", "重置涂鸦" to "Reset drawing", "重置文字" to "Reset text",
     "保留原图并创建编辑副本，或直接替换当前图片。" to "Keep the original and create an edited copy, or replace the current photo.",
     "添加文字" to "Add text", "文字内容" to "Text", "保存中" to "Saving", "分辨率" to "Resolution",
     "输出分辨率" to "Output resolution", "图片质量" to "Image quality", "重置当前工具" to "Reset current tool", "重置修改" to "Reset changes",
@@ -40,7 +52,7 @@ private val APP_ENGLISH = mapOf(
     "涂鸦" to "Draw", "文字" to "Text", "左转" to "Rotate left", "右转" to "Rotate right",
     "水平翻转" to "Flip horizontally", "垂直翻转" to "Flip vertically", "校正" to "Straighten",
     "自定义裁剪比例" to "Custom crop ratio", "宽" to "Width", "高" to "Height",
-    "曝光" to "Exposure", "亮度" to "Brightness", "对比度" to "Contrast", "色调" to "Tint",
+    "曝光" to "Exposure", "亮度" to "Brightness", "音量" to "Volume", "对比度" to "Contrast", "色调" to "Tint",
     "色温" to "Temperature", "高光" to "Highlights", "阴影" to "Shadows", "饱和度" to "Saturation",
     "自然饱和度" to "Vibrance", "褪色" to "Fade", "锐度" to "Sharpness", "增强" to "Enhance",
     "设置工具顺序" to "Arrange tools", "设置" to "Settings", "设置构图比例顺序" to "Arrange crop ratios",
@@ -70,19 +82,19 @@ private val APP_ENGLISH = mapOf(
     "归档失败，来源文件已保留" to "Archive failed; source file was kept",
     "归档目标目录" to "Archive destination", "将 Pixiv tags 写入图片信息" to "Write Pixiv tags to photo metadata",
     "保留原始文件名" to "Keep original filenames", "扫描 Pixiv 图片" to "Scan Pixiv photos", "开始归档" to "Start archive",
-    "正在查询 Pixiv..." to "Querying Pixiv...", "正在归档..." to "Archiving...", "尚未扫描" to "Not scanned",
+    "正在查询 Pixiv..." to "Querying Pixiv...", "正在归档..." to "Archiving...", "尚未扫描" to "Not scanned", "Pixiv 归档注意事项" to "Pixiv archive notes", "正在确认 Pixiv 登录" to "Checking Pixiv login", "未检测到登录" to "Pixiv login not detected", "文件信息" to "File information", "正在整理媒体库，请稍候" to "Organizing media library, please wait",
     "按 PID 归档" to "Archive by PID", "打开 Pixiv 作品" to "Open Pixiv artwork",
     "复制到" to "Copy to", "移动到" to "Move to", "近期使用" to "Recent", "选择文件夹" to "Choose folder",
-    "新建文件夹" to "New folder", "文件重名时" to "If a file exists", "保留原文件的修改日期" to "Preserve original modified date",
+    "新建文件夹" to "New folder", "文件夹创建失败" to "Unable to create folder", "没有找到相关文件夹" to "No matching folders", "文件重名时" to "If a file exists", "保留原文件的修改日期" to "Preserve original modified date",
     "文件夹名称" to "Folder name", "创建" to "Create", "扫描刷新" to "Scan", "添加本地文件夹" to "Add local folder",
     "进入多选" to "Select", "扫描中..." to "Scanning...", "重命名失败" to "Rename failed",
-    "分享媒体" to "Share media", "当前系统不支持画中画" to "Picture-in-picture is not supported on this device",
+    "分享媒体" to "Share media", "当前系统不支持画中画" to "Picture-in-picture is not supported on this device", "加入壁纸队列" to "Add to wallpaper queue", "移出壁纸队列" to "Remove from wallpaper queue", "清空壁纸队列" to "Clear wallpaper queue", "壁纸队列为空" to "Wallpaper queue is empty", "中止" to "Cancel", "播放顺序" to "Playback order", "播放完停止" to "Stop after current", "上一个视频" to "Previous video", "下一个视频" to "Next video", "快退" to "Rewind", "快进" to "Fast-forward", "长快退" to "Long rewind", "锁定控件" to "Lock controls", "解锁控件" to "Unlock controls", "镜像翻转" to "Mirror", "取消镜像" to "Stop mirroring", "无法读取图片" to "Unable to read image", "无法启动后台播放" to "Unable to start background playback",
     "清除" to "Clear", "已开启" to "On", "已关闭" to "Off", "查看/编辑 Tags" to "View/Edit tags",
-    "视频设置" to "Video settings", "打开视频时自动播放" to "Autoplay videos", "记住最后一次播放进度" to "Remember playback position",
+    "视频设置" to "Video settings", "打开视频时自动播放" to "Autoplay videos", "进入后台时自动暂停" to "Pause in background", "记住最后一次播放进度" to "Remember playback position",
     "自动隐藏播放器界面" to "Auto-hide player controls", "长快进" to "Long skip", "快进长度" to "Skip length",
     "长快进长度" to "Long skip length", "满屏滑动跳过时间" to "Full-screen swipe seek time", "边缘误触保护" to "Edge gesture protection",
     "单击暂停" to "Pause on single tap", "只在竖屏下单击暂停" to "Pause on single tap in portrait only",
-    "切换图片和视频" to "Switch photos and videos", "显示全部" to "Show all", "仅显示收藏" to "Favorites only",
+    "切换图片和视频" to "Switch photos and videos", "显示全部" to "Show all", "仅显示收藏" to "Favorites only", "网格显示" to "Grid view", "列表显示" to "List view", "清除选中" to "Clear selection", "清空扫描结果" to "Clear scan results", "取消等待" to "Cancel pending", "已归档" to "Archived", "如何处理新图" to "How to handle new images", "重新登录" to "Log in again", "重命名文件夹" to "Rename folder", "自选画笔颜色" to "Custom brush color", "最低" to "Minimum", "最高" to "Maximum", "居左" to "Align left", "居中" to "Center", "居右" to "Align right", "开启" to "On", "图片大小" to "Image size", "行间距" to "Line spacing", "字间距" to "Letter spacing", "视频正在后台播放" to "Video is playing in the background",
     "搜索文件夹、视频名称" to "Search folders and video names", "搜索文件夹、图片名称" to "Search folders and photo names",
     "未选择" to "Not selected"
 )
