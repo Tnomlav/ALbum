@@ -103,6 +103,7 @@ import com.example.album.data.MediaItem
 import com.example.album.data.displayAddress
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
+import com.example.album.ui.theme.VaultDimens
 import com.example.album.data.PixivArchiveRecord
 import com.example.album.data.PixivMetadata
 import com.example.album.data.PixivArchivePhase
@@ -397,7 +398,7 @@ fun PixivArchiveScreen(
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (!selectionMode) {
             Row(
-                modifier = Modifier.fillMaxWidth().statusBarsPadding().height(58.dp),
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().height(VaultDimens.HeaderContentHeight),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 androidx.compose.material3.IconButton(onClick = onBack) {
@@ -406,7 +407,7 @@ fun PixivArchiveScreen(
                 Text(
                     appText("Pixiv 文件归档", english),
                     modifier = Modifier.padding(start = 4.dp),
-                    fontSize = 19.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
@@ -535,8 +536,8 @@ private fun CleanupToolbar(
         Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .height(56.dp)
-            .padding(horizontal = 7.dp, vertical = 4.dp),
+            .height(VaultDimens.HeaderContentHeight)
+            .padding(horizontal = 7.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {

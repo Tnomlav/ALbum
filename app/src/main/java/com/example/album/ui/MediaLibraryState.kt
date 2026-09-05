@@ -115,6 +115,10 @@ class MediaLibraryState(context: Context) {
         private set
     var permissionGranted by mutableStateOf(false)
         private set
+    var imagePermissionGranted by mutableStateOf(false)
+        private set
+    var videoPermissionGranted by mutableStateOf(false)
+        private set
     var hasLocalFolders by mutableStateOf(false)
         private set
     var localFolderCount by mutableIntStateOf(0)
@@ -151,6 +155,8 @@ class MediaLibraryState(context: Context) {
         try {
             val canReadImages = granted && hasImageReadAccess(appContext)
             val canReadVideos = granted && hasVideoReadAccess(appContext)
+            imagePermissionGranted = canReadImages
+            videoPermissionGranted = canReadVideos
             val refreshResult = coroutineScope {
                 val errors = ConcurrentLinkedQueue<String>()
                 val imagesTask = async {

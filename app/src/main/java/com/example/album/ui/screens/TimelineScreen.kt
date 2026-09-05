@@ -92,9 +92,23 @@ fun TimelineScreen(
     val refreshing = loading || scanning
     val english = LocalAppEnglish.current
     if (!permissionGranted && media.isEmpty()) {
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(appText("需要照片访问权限", english))
-            TextButton(onClick = onRequestPermission) { Text(appText("授权访问", english)) }
+        Column(
+            Modifier.fillMaxSize().padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                appText(if (isVideo) "需要视频访问权限" else "需要照片访问权限", english),
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                appText("授权后才能读取设备上的相册内容。", english),
+                modifier = Modifier.padding(top = 8.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(onClick = onRequestPermission, modifier = Modifier.padding(top = 8.dp)) {
+                Text(appText("授权访问", english))
+            }
         }
         return
     }

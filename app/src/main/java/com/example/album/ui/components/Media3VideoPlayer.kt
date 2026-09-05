@@ -110,6 +110,7 @@ import androidx.media3.ui.PlayerView
 import com.example.album.data.MediaItem
 import com.example.album.playback.MediaPlaybackService
 import com.example.album.ui.LocalAppEnglish
+import com.example.album.ui.appSeekText
 import com.example.album.ui.appText
 import com.example.album.ui.theme.VaultDimens
 import com.example.album.ui.editor.EditorPrototypeIcons
@@ -673,12 +674,12 @@ internal fun Media3VideoPlayer(
         player.repeatMode = if (mode == 1) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         player.shuffleModeEnabled = mode == 2
         refreshControls()
-        gestureHud = when (mode) {
+        gestureHud = appText(when (mode) {
             0 -> "顺序播放"
             1 -> "循环播放"
             2 -> "随机播放"
             else -> "播放完停止"
-        }
+        }, english)
     }
 
     fun timeText(value: Long): String {
@@ -738,7 +739,7 @@ internal fun Media3VideoPlayer(
                                         temporaryFastPlayback = true
                                         player.setPlaybackSpeed(2f)
                                         player.play()
-                                        gestureHud = "2x 播放"
+                                        gestureHud = "2x ${appText("播放", english)}"
                                         hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                                         try {
                                             tryAwaitRelease()
@@ -774,15 +775,15 @@ internal fun Media3VideoPlayer(
                                 when {
                                     fraction < 1f / 3f -> {
                                         seekToVideoFrame(player, player.currentPosition - normalSkip)
-                                        gestureHud = "快退 ${normalSkip / 1000L}秒"
+                                        gestureHud = appSeekText("快退", normalSkip, english)
                                     }
                                     fraction > 2f / 3f -> {
                                         seekToVideoFrame(player, player.currentPosition + normalSkip)
-                                        gestureHud = "快进 ${normalSkip / 1000L}秒"
+                                        gestureHud = appSeekText("快进", normalSkip, english)
                                     }
                                     else -> {
                                         togglePlayback()
-                                        gestureHud = if (player.isPlaying) "播放" else "暂停"
+                                        gestureHud = if (player.isPlaying) appText("播放", english) else appText("暂停", english)
                                     }
                                     
                                 }
@@ -830,11 +831,11 @@ internal fun Media3VideoPlayer(
                                     }
                                     2 -> {
                                         setBrightness(brightness - dragAmount.y / gestureHeight.coerceAtLeast(1) * 0.5f)
-                                        gestureHud = "亮度 ${(brightness * 100).roundToInt()}%"
+                                        gestureHud = "${appText("亮度", english)} ${(brightness * 100).roundToInt()}%"
                                     }
                                     3 -> {
                                         setVolume(volume - dragAmount.y / gestureHeight.coerceAtLeast(1) * 0.5f)
-                                        gestureHud = "音量 ${(volume * 100).roundToInt()}%"
+                                        gestureHud = "${appText("音量", english)} ${(volume * 100).roundToInt()}%"
                                     }
                                 }
                                 refreshControls()
@@ -946,10 +947,10 @@ internal fun Media3VideoPlayer(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(timeText(position), color = Color.White, fontSize = 12.sp, modifier = Modifier.size(width = 48.dp, height = 24.dp))
-                    Slider(
-                        value = position.toFloat().coerceIn(0f, duration.coerceAtLeast(1L).toFloat()),
-                        onValueChange = { seekToVideoFrame(player, it.toLong()); refreshControls() },
-                        valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
+                    DeferredVideoSeekSlider(
+                        valueMs = position,
+                        durationMs = duration,
+                        onSeek = { seekToVideoFrame(player, it); refreshControls() },
                         modifier = Modifier.weight(1f).height(24.dp).graphicsLayer { scaleY = .65f },
                         colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(.3f))
                     )

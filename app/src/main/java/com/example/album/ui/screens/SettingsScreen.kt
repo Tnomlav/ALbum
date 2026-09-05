@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
@@ -501,11 +502,16 @@ fun SettingsScreen(
                 confirmLabel = if (isEnglish) "Download" else "下载",
                 onDismiss = { availableUpdate = null },
                 onConfirm = {
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.downloadUrl))) }
-                        .onFailure {
-                            Toast.makeText(context, if (isEnglish) "Unable to open download link" else "无法打开下载地址", Toast.LENGTH_SHORT).show()
-                        }
-                    availableUpdate = null
+                    if (!AppUpdateChecker.isSecureHttpsUrl(release.downloadUrl)) {
+                        Toast.makeText(context, if (isEnglish) "Download link is not secure" else "下载地址不安全", Toast.LENGTH_SHORT).show()
+                        availableUpdate = null
+                    } else {
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.downloadUrl))) }
+                            .onFailure {
+                                Toast.makeText(context, if (isEnglish) "Unable to open download link" else "无法打开下载地址", Toast.LENGTH_SHORT).show()
+                            }
+                        availableUpdate = null
+                    }
                 }
             )
         } else {
@@ -706,7 +712,7 @@ private fun ToggleRow(label: String, note: String?, checked: Boolean, onCheckedC
     val english = LocalSettingsEnglish.current
     Row(
         Modifier.fillMaxWidth().heightIn(min = VaultDimens.SettingsRowMinHeight)
-            .clickable(role = Role.Switch) { onCheckedChange(!checked) }
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
             .semantics { stateDescription = if (checked) settingsText("已开启", english) else settingsText("已关闭", english) }
             .padding(horizontal = 15.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -715,18 +721,20 @@ private fun ToggleRow(label: String, note: String?, checked: Boolean, onCheckedC
             Text(settingsText(label, english), style = MaterialTheme.typography.bodyMedium)
             note?.let { Text(settingsText(it, english), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        VaultSwitch(checked) { onCheckedChange(!checked) }
+        // The row owns the switch semantics and click target. Keeping the
+        // visual switch non-interactive avoids exposing two switches to
+        // accessibility services and prevents duplicate toggle events.
+        VaultSwitch(checked)
     }
 }
 
 @Composable
-private fun VaultSwitch(checked: Boolean, onClick: () -> Unit) {
+private fun VaultSwitch(checked: Boolean) {
     val fraction by animateFloatAsState(if (checked) 1f else 0f, label = "switch")
     val primary = MaterialTheme.colorScheme.primary
     val off = MaterialTheme.colorScheme.outline
     Canvas(
-        Modifier.size(48.dp).clickable(role = Role.Switch, onClick = onClick)
-            .semantics { stateDescription = if (checked) "On" else "Off" }
+        Modifier.size(48.dp)
     ) {
         val trackTop = 10.dp.toPx()
         val trackHeight = 28.dp.toPx()

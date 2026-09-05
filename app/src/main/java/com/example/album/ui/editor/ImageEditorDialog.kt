@@ -381,7 +381,7 @@ fun ImageEditorDialog(
                     redoEnabled = redoStack.isNotEmpty(),
                     resetEnabled = resetEnabled,
                     saveEnabled = saveEnabled,
-                    resetLabel = appText("重置${panel.label}", english),
+                    resetLabel = if (english) "Reset ${appText(panel.label, true)}" else "重置${panel.label}",
                     resolutionOpen = resolutionOpen,
                     saving = saving,
                     onClose = { leaveEditor(onDismiss) },

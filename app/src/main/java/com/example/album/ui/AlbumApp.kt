@@ -681,7 +681,7 @@ fun AlbumApp(
                 Lifecycle.Event.ON_START -> {
                     // Re-check permissions after returning from Settings; users
                     // can revoke image/video access while this activity is stopped.
-                    scope.launch { library.refresh(library.permissionGranted) }
+                    scope.launch { library.refresh(hasMediaPermission(context)) }
                 }
                 Lifecycle.Event.ON_STOP -> {
                     // Do not keep decoding thumbnails while the app is in the
@@ -2378,7 +2378,7 @@ fun AlbumApp(
                     searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                     loading = library.loading,
                     scanning = library.scanning,
-                    permissionGranted = library.permissionGranted,
+                    permissionGranted = library.imagePermissionGranted,
                     sort = mediaSort,
                     sortDirection = sortDirection,
                     albumColumns = albumColumns,
@@ -2446,7 +2446,7 @@ fun AlbumApp(
                     searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                     loading = library.loading,
                     scanning = library.scanning,
-                    permissionGranted = library.permissionGranted,
+                    permissionGranted = library.videoPermissionGranted,
                     sort = mediaSort,
                     sortDirection = sortDirection,
                     albumColumns = albumColumns,
@@ -2509,7 +2509,7 @@ fun AlbumApp(
                     query = appliedQuery,
                     loading = library.loading,
                     scanning = library.scanning,
-                    permissionGranted = library.permissionGranted,
+                    permissionGranted = if (timelineShowsVideos) library.videoPermissionGranted else library.imagePermissionGranted,
                     isVideo = timelineShowsVideos,
                     columns = timelineColumns,
                     layout = timelineLayout,

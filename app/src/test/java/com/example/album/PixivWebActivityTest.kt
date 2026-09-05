@@ -2,6 +2,7 @@ package com.example.album
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PixivWebActivityTest {
@@ -19,5 +20,15 @@ class PixivWebActivityTest {
                 "AppleWebKit/537.36 Chrome/138.0.0.0 Mobile Safari/537.36",
             result
         )
+    }
+
+    @Test
+    fun pixivWebHost_allowlist_rejects_untrusted_hosts() {
+        assertTrue(isAllowedPixivWebHost("www.pixiv.net"))
+        assertTrue(isAllowedPixivWebHost("accounts.pixiv.net"))
+        assertTrue(isAllowedPixivWebHost("OAUTH.SECURE.PIXIV.NET"))
+        assertFalse(isAllowedPixivWebHost("example.com"))
+        assertFalse(isAllowedPixivWebHost("pixiv.net.evil.example"))
+        assertFalse(isAllowedPixivWebHost(null))
     }
 }

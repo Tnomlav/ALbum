@@ -116,7 +116,7 @@ fun SelectionTopBar(
             if (searchExpanded) {
                 Row(
                     modifier = Modifier.weight(1f).height(40.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
                         .padding(horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -157,7 +157,7 @@ fun SelectionTopBar(
                     Icon(
                         if (favoriteSelected) Icons.Filled.Star else Icons.Outlined.StarBorder,
                         if (favoriteSelected) appText("取消收藏所选", english) else appText("收藏所选", english),
-                        tint = if (favoriteSelected) androidx.compose.ui.graphics.Color(0xFFFFD60A) else androidx.compose.ui.graphics.Color(0xFF1A1A1A)
+                        tint = if (favoriteSelected) androidx.compose.ui.graphics.Color(0xFFFFD60A) else MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
