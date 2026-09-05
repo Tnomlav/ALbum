@@ -433,41 +433,53 @@ class MediaRepository(private val context: Context) {
     ): DirectMoveResult? = withContext(Dispatchers.IO) {
         if (!destination.isDirectory || !destination.canWrite()) return@withContext null
 
-        val physicalSource = physicalFileForUri(sourceUri)
-        val physicalDestination = physicalFileForUri(destination.uri)
-        if (physicalSource != null && physicalDestination?.isDirectory == true) {
-            val target = File(physicalDestination, targetName)
-            if (physicalSource.canonicalFile == target.canonicalFile) {
-                return@withContext DirectMoveResult(Uri.fromFile(target), target.name)
+        // Keep provider-backed documents inside their provider. Renaming the
+        // physical path directly can leave a stale MediaStore/SAF row and an
+        // unusable source URI.
+        if (!sourceUri.scheme.equals("file", ignoreCase = true) &&
+            sourceUri.authority == destination.uri.authority
+        ) {
+            val parent = findPersistedDocumentParent(sourceUri) ?: return@withContext null
+            val moved = runCatching {
+                DocumentsContract.moveDocument(context.contentResolver, sourceUri, parent.uri, destination.uri)
+            }.getOrNull() ?: return@withContext null
+            val movedFile = DocumentFile.fromSingleUri(context, moved)
+            val movedName = movedFile?.name
+            if (!movedName.isNullOrBlank() && movedName != targetName) {
+                val renamed = runCatching {
+                    DocumentsContract.renameDocument(context.contentResolver, moved, targetName)
+                }.getOrNull()
+                if (renamed != null) return@withContext DirectMoveResult(renamed, targetName)
             }
-            if (target.exists()) return@withContext null
-            if (physicalSource.renameTo(target)) {
-                MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null)
-                return@withContext DirectMoveResult(Uri.fromFile(target), target.name)
-            }
+            return@withContext DirectMoveResult(moved, movedName?.takeIf { it.isNotBlank() } ?: targetName)
         }
 
-        // DocumentsContract.moveDocument is only valid within one provider.
-        if (sourceUri.authority != destination.uri.authority) return@withContext null
-        val parent = findPersistedDocumentParent(sourceUri) ?: return@withContext null
-        val moved = runCatching {
-            DocumentsContract.moveDocument(context.contentResolver, sourceUri, parent.uri, destination.uri)
-        }.getOrNull() ?: return@withContext null
-        val movedFile = DocumentFile.fromSingleUri(context, moved)
-        val movedName = movedFile?.name
-        if (!movedName.isNullOrBlank() && movedName != targetName) {
-            val renamed = runCatching {
-                DocumentsContract.renameDocument(context.contentResolver, moved, targetName)
-            }.getOrNull()
-            if (renamed != null) return@withContext DirectMoveResult(renamed, targetName)
+        // A file:// source has no provider row to invalidate, so a physical
+        // rename is safe for that legacy/local-folder representation.
+        if (!sourceUri.scheme.equals("file", ignoreCase = true)) return@withContext null
+        val physicalSource = physicalFileForUri(sourceUri) ?: return@withContext null
+        val physicalDestination = physicalFileForUri(destination.uri) ?: return@withContext null
+        if (!physicalDestination.isDirectory) return@withContext null
+        val target = File(physicalDestination, targetName)
+        if (physicalSource.canonicalFile == target.canonicalFile) {
+            return@withContext DirectMoveResult(Uri.fromFile(target), target.name)
         }
-        DirectMoveResult(moved, movedName?.takeIf { it.isNotBlank() } ?: targetName)
+        if (target.exists()) return@withContext null
+        if (!physicalSource.renameTo(target)) return@withContext null
+        MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), null, null)
+        DirectMoveResult(Uri.fromFile(target), target.name)
     }
 
     /** Deletes a source without using DocumentFile.delete(), which may trash it. */
     fun deleteUriPermanently(uri: Uri): Boolean {
-        physicalFileForUri(uri)?.let { file ->
+        if (uri.scheme.equals("file", ignoreCase = true)) {
+            val file = uri.path?.let(::File) ?: return false
             return !file.exists() || file.delete()
+        }
+        // Delete through the provider first so MediaStore and SAF metadata do
+        // not retain a row whose physical file was removed behind its back.
+        if (runCatching { context.contentResolver.delete(uri, null, null) > 0 }.getOrDefault(false)) {
+            return true
         }
         return runCatching {
             DocumentsContract.deleteDocument(context.contentResolver, uri)
@@ -805,7 +817,9 @@ class MediaRepository(private val context: Context) {
             }
             if (!target.exists()) throw IOException("Target file was not created")
             if (!deleteUriPermanently(item.uri)) throw IOException("Unable to permanently remove original")
-            TransferResult(item, success = true, targetName = targetChoice.name)
+            // The source has already been removed here. Tell the caller not to
+            // issue a second MediaStore/SAF delete request.
+            TransferResult(item, success = true, targetName = targetChoice.name, movedDirectly = true)
         }.getOrElse {
             deleteUriPermanently(target.uri)
             TransferResult(item, success = false)

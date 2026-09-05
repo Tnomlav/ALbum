@@ -153,7 +153,9 @@ class MainActivity : ComponentActivity() {
         if (action != Intent.ACTION_ATTACH_DATA) return null
         val uri = data ?: return null
         val type = type.orEmpty()
-        return uri.takeIf { type.startsWith("image/") || type.startsWith("video/") }
+        return uri.takeIf {
+            type.isBlank() || type == "*/*" || type.startsWith("image/") || type.startsWith("video/")
+        }
     }
 
     private fun Intent.toPlaybackResumeRequest(): PlaybackResumeRequest? {

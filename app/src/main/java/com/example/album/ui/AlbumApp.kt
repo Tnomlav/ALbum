@@ -757,9 +757,23 @@ fun AlbumApp(
 
     LaunchedEffect(externalMediaUri) {
         val uri = externalMediaUri ?: return@LaunchedEffect
-        val mime = context.contentResolver.getType(uri).orEmpty()
+        val filename = Uri.decode(uri.lastPathSegment.orEmpty()).substringAfterLast('/')
+        val mime = runCatching { context.contentResolver.getType(uri).orEmpty() }.getOrDefault("").ifBlank {
+            MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(filename.substringAfterLast('.', "").lowercase())
+                .orEmpty()
+        }
         if (!mime.startsWith("image/") && !mime.startsWith("video/")) return@LaunchedEffect
-        val name = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { null } ?: "外部媒体"
+        val readable = withContext(Dispatchers.IO) {
+            runCatching {
+                com.example.album.data.openMediaInputStream(context, uri)?.use { input -> input.read() >= 0 } == true
+            }.getOrDefault(false)
+        }
+        if (!readable) {
+            Toast.makeText(context, if (english) "Unable to read this media" else "无法读取此媒体文件", Toast.LENGTH_LONG).show()
+            return@LaunchedEffect
+        }
+        val name = filename.ifBlank { "外部媒体" }
         val externalItem = MediaItem(
             id = uri.toString().hashCode().toLong() and 0xffffffffL,
             uri = uri,
