@@ -182,6 +182,12 @@ class PixivWebActivity : ComponentActivity() {
 
                 override fun onPageFinished(view: WebView, url: String) {
                     CookieManager.getInstance().flush()
+                    // Pixiv opens on a "pick a third-party login" screen. Move
+                    // the page to the pixiv ID / email + password form so the
+                    // user can sign in directly.
+                    if (isAllowedPixivWebHost(Uri.parse(url).host)) {
+                        view.evaluateJavascript(PIXIV_DIRECT_LOGIN_SCRIPT, null)
+                    }
                 }
             }
         }
@@ -316,6 +322,31 @@ class PixivWebActivity : ComponentActivity() {
         private const val EXTRA_RENDERER_RECOVERED = "pixiv_renderer_recovered"
         const val LOGIN_URL = "https://accounts.pixiv.net/login?lang=zh&source=pc&view_type=page"
         @Volatile private var webViewDataDirectoryConfigured = false
+
+        /**
+         * Pixiv's login page leads with third-party providers. This script
+         * selects the pixiv ID / email tab when it exists and brings the
+         * password field into view, without hiding anything the user may
+         * still want.
+         */
+        private const val PIXIV_DIRECT_LOGIN_SCRIPT = """
+            (function () {
+              try {
+                var wanted = ['使用pixiv ID或邮箱地址', '使用邮箱地址', '邮箱地址', 'メールアドレス', 'pixiv ID / メールアドレス'];
+                var nodes = document.querySelectorAll('a,button,div[role=button],li,span,label');
+                for (var i = 0; i < nodes.length; i++) {
+                  var text = (nodes[i].textContent || '').replace(/\s+/g, '');
+                  if (wanted.indexOf(text) >= 0) { nodes[i].click(); break; }
+                }
+                var password = document.querySelector('input[type=password]');
+                if (password) {
+                  password.scrollIntoView({ block: 'center' });
+                  var field = document.querySelector('input[name="pixiv_id"], input[type=text], input[type=email]');
+                  if (field) field.focus();
+                }
+              } catch (error) { }
+            })();
+        """
     }
 }
 

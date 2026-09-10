@@ -63,18 +63,59 @@ import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
 
 /**
+ * True when the platform has no decoder for the video track (or cannot even
+ * parse the container). Such files are played with LibVLC instead.
+ */
+internal suspend fun platformLacksVideoDecoder(context: Context, item: MediaItem): Boolean =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val extractor = android.media.MediaExtractor()
+            try {
+                val descriptor = context.contentResolver.openFileDescriptor(item.uri, "r")
+                if (descriptor != null) {
+                    descriptor.use { extractor.setDataSource(it.fileDescriptor) }
+                } else {
+                    extractor.setDataSource(context, item.uri, null)
+                }
+                var hasVideoTrack = false
+                for (index in 0 until extractor.trackCount) {
+                    val format = extractor.getTrackFormat(index)
+                    val mime = format.getString(android.media.MediaFormat.KEY_MIME) ?: continue
+                    if (!mime.startsWith("video/")) continue
+                    hasVideoTrack = true
+                    val decoder = android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS)
+                        .findDecoderForFormat(format)
+                    if (decoder == null) return@runCatching true
+                }
+                !hasVideoTrack
+            } finally {
+                runCatching { extractor.release() }
+            }
+        }.getOrDefault(true)
+    }
+
+/**
  * Containers that the Android platform extractors (and therefore Media3)
  * cannot demux. They are routed to the bundled LibVLC player instead.
  */
 internal fun requiresVlcPlayback(item: MediaItem): Boolean {
     val mime = item.mimeType.lowercase()
     val name = item.name.lowercase()
-    val extensions = listOf(".avi", ".divx", ".xvid", ".wmv", ".rmvb", ".rm")
+    if (mime.startsWith("audio/")) return false
+    val extensions = listOf(
+        ".avi", ".divx", ".xvid", ".wmv", ".asf", ".rmvb", ".rm",
+        ".mpg", ".mpeg", ".mpe", ".m1v", ".m2v", ".mpv", ".vob", ".ogm"
+    )
     return mime.contains("avi") ||
         mime.contains("x-msvideo") ||
         mime.contains("msvideo") ||
         mime.contains("divx") ||
         mime.contains("x-ms-wmv") ||
+        mime.contains("x-ms-asf") ||
+        mime.contains("mpeg") ||
+        mime.contains("mp2p") ||
+        mime.contains("mp2t") ||
+        mime.contains("vnd.rn-realmedia") ||
         extensions.any { name.endsWith(it) }
 }
 

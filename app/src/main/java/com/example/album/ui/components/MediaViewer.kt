@@ -274,9 +274,25 @@ fun MediaViewer(
     var imageViewport by remember { mutableStateOf(IntSize.Zero) }
     var imageControlsVisible by remember { mutableStateOf(true) }
     var videoMiniMode by remember { mutableStateOf(false) }
+    // null = still probing which player can handle the current video.
+    var useVlcPlayer by remember(current.uri) {
+        mutableStateOf<Boolean?>(if (current.isVideo && requiresVlcPlayback(current)) true else null)
+    }
+    LaunchedEffect(current.uri) {
+        if (!current.isVideo) return@LaunchedEffect
+        if (requiresVlcPlayback(current)) {
+            useVlcPlayer = true
+        } else {
+            useVlcPlayer = platformLacksVideoDecoder(context, current)
+        }
+    }
+    // Formats/codecs the platform player cannot handle are replayed with the
+    // bundled LibVLC player.
+    var vlcFallbackForCurrent by remember { mutableStateOf(false) }
     // The custom mini window belongs to the Media3 player; clear it when the
     // current video is routed to the LibVLC fallback (AVI and friends).
     LaunchedEffect(current.uri) {
+        vlcFallbackForCurrent = false
         if (requiresVlcPlayback(current)) videoMiniMode = false
     }
     var viewerDirection by remember { mutableIntStateOf(1) }
@@ -396,7 +412,8 @@ fun MediaViewer(
             }
         ) {
             if (current.isVideo) {
-                if (requiresVlcPlayback(current)) {
+                if (useVlcPlayer == true || vlcFallbackForCurrent) {
+                    android.util.Log.i("AlbumVlcFallback", "rendering LibVLC player for ${current.name}")
                     VlcVideoPlayer(
                         current = current,
                         onBack = ::closeViewer,
@@ -404,7 +421,7 @@ fun MediaViewer(
                         onEnterPictureInPicture = onEnterPictureInPicture,
                         onAutoEnterPictureInPictureChange = onAutoEnterPictureInPictureChange
                     )
-                } else {
+                } else if (useVlcPlayer == false) {
                 Media3VideoPlayer(
                     current = current,
                     videos = viewerItems,
@@ -423,9 +440,21 @@ fun MediaViewer(
                      onWallpaper = onWallpaper?.let { action -> { action(current) } } ?: {},
                      onInfo = { showInfo = true },
                      onSettings = { showVideoSettings = true },
-                    settingsVersion = videoSettingsVersion,
-                    onAutoEnterPictureInPictureChange = onAutoEnterPictureInPictureChange
+                     settingsVersion = videoSettingsVersion,
+                    onAutoEnterPictureInPictureChange = onAutoEnterPictureInPictureChange,
+                     onPlaybackError = {
+                        if (!vlcFallbackForCurrent) {
+                            vlcFallbackForCurrent = true
+                            Toast.makeText(
+                                context,
+                                if (english) "Switched to the compatible player" else "已切换为兼容播放器",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
                 )
+                } else {
+                    Box(Modifier.fillMaxSize().background(Color.Black))
                 }
             } else {
                 val transformState = rememberTransformableState { zoomChange, panChange, _ ->
@@ -829,8 +858,8 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
                 VideoSettingSwitch(appText("自动小窗", english), autoMini) {
                     autoMini = it; putBoolean("video_auto_mini", it)
                 }
-                VideoSettingChoice(appText("亮度音量触控占比", english), brightnessVolumeRatio) { openChoice = "brightnessVolume" }
-                VideoSettingChoice(appText("快进暂停触控占比", english), seekPauseRatio) { openChoice = "seekPause" }
+                VideoSettingChoice(appText("亮度：空白：音量 触控占比", english), brightnessVolumeRatio) { openChoice = "brightnessVolume" }
+                VideoSettingChoice(appText("快退：暂停：快进 触控占比", english), seekPauseRatio) { openChoice = "seekPause" }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(appText("完成", english)) } }
@@ -848,8 +877,8 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
                         "normal" -> appText("快进长度", english)
                         "long" -> appText("长快进长度", english)
                         "gesture" -> appText("满屏滑动跳过时间", english)
-                        "brightnessVolume" -> appText("亮度音量触控占比", english)
-                        else -> appText("快进暂停触控占比", english)
+                        "brightnessVolume" -> appText("亮度：空白：音量 触控占比", english)
+                        else -> appText("快退：暂停：快进 触控占比", english)
                     }
                 )
             },

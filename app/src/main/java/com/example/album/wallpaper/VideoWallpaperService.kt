@@ -61,7 +61,9 @@ class VideoWallpaperService : WallpaperService() {
 
         override fun onVisibilityChanged(isVisible: Boolean) {
             applyPowerSaverPolicy()
-            if (isVisible && hasBeenVisible && !visible) advanceQueue()
+            // Advancing the queue when the user returns to the home screen is
+            // opt-in, exactly like the static wallpaper service.
+            if (isVisible && hasBeenVisible && !visible && returnSwitchEnabled()) advanceQueue()
             visible = isVisible
             if (isVisible) hasBeenVisible = true
             if (isVisible) startPlayback()
@@ -228,6 +230,10 @@ class VideoWallpaperService : WallpaperService() {
         private fun keepPlayingInBackground(): Boolean =
             getSharedPreferences("album_preferences", MODE_PRIVATE)
                 .getBoolean("wallpaper_dynamic_background", false)
+
+        private fun returnSwitchEnabled(): Boolean =
+            getSharedPreferences("album_preferences", MODE_PRIVATE)
+                .getBoolean("wallpaper_video_switch_on_home", false)
 
         private fun shouldPlay(): Boolean = visible || (surfaceReady && keepPlayingInBackground())
 

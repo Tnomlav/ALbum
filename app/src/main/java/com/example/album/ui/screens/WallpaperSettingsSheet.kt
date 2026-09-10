@@ -154,7 +154,7 @@ fun WallpaperSettingsSheet(
                     }
                 ) { dialog = WallpaperSettingDialog.Order }
                 if (!isVideo) {
-                    SettingSwitch(text("自动适配图片占用", "Automatically fit image usage"), autoAdjustImage) { autoAdjustImage = it }
+                    SettingSwitch(text("低功耗模式", "Low-power mode"), autoAdjustImage) { autoAdjustImage = it }
                     SettingChoiceRow(
                         text("轮播频率", "Rotation frequency"),
                         if (returnSwitch) text("回桌即切换", "On return home")

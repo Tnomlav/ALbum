@@ -358,11 +358,11 @@ fun SettingsScreen(
         item { ToggleRow("自动小窗", "播放中切到后台时自动进入小窗并保持播放", autoMini) {
             setBoolean("video_auto_mini", it) { autoMini = it }
         } }
-        item { ValueRow("亮度音量触控占比", value("video_brightness_volume_ratio", "1:1")) {
-            choose("亮度音量触控占比", "video_brightness_volume_ratio", listOf("1:1", "1:1:1", "1:2:1"), value("video_brightness_volume_ratio", "1:1"))
+        item { ValueRow("亮度：空白：音量 触控占比", value("video_brightness_volume_ratio", "1:1")) {
+            choose("亮度：空白：音量 触控占比", "video_brightness_volume_ratio", listOf("1:1", "1:1:1", "1:2:1"), value("video_brightness_volume_ratio", "1:1"))
         } }
-        item { ValueRow("快进暂停触控占比", value("video_seek_pause_ratio", "1:1:1")) {
-            choose("快进暂停触控占比", "video_seek_pause_ratio", listOf("1:1:1", "1:2:1", "1:0:1"), value("video_seek_pause_ratio", "1:1:1"))
+        item { ValueRow("快退：暂停：快进 触控占比", value("video_seek_pause_ratio", "1:1:1")) {
+            choose("快退：暂停：快进 触控占比", "video_seek_pause_ratio", listOf("1:1:1", "1:2:1", "1:0:1"), value("video_seek_pause_ratio", "1:1:1"))
         } }
 
         item { SettingsHeader("滚动条", "滚动条" !in collapsedSections) { toggleSection("滚动条") } }

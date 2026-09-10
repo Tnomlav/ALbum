@@ -17,6 +17,11 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -53,7 +58,9 @@ import com.example.album.data.MediaItem
 import com.example.album.data.MediaAlbum
 import com.example.album.ui.components.MediaThumbnail
 import com.example.album.ui.components.LazyGridMediaPrefetch
+import com.example.album.ui.components.LazyStaggeredGridMediaPrefetch
 import com.example.album.ui.components.batchSelectionGesture
+import com.example.album.ui.components.batchSelectionStaggeredGesture
 import com.example.album.ui.theme.VaultDimens
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.MediaSort
@@ -61,9 +68,13 @@ import com.example.album.ui.SortDirection
 import com.example.album.ui.searchAlbums
 import com.example.album.ui.filterAlbums
 import com.example.album.ui.appText
+import com.example.album.ui.MediaLayout
+import com.example.album.data.displayAspectRatio
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 
 @Composable
 fun SelectionScreen(
@@ -78,6 +89,9 @@ fun SelectionScreen(
     sort: MediaSort = MediaSort.Time,
     sortDirection: SortDirection = SortDirection.Descending,
     showDateHeaders: Boolean = false,
+    layout: MediaLayout = MediaLayout.Grid,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    itemSpacing: Dp = 3.dp,
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
@@ -114,27 +128,58 @@ fun SelectionScreen(
         }
         return
     }
-    val gridState = rememberLazyGridState()
+    val dateFormatter = remember { SimpleDateFormat("yyyy年M月d日", Locale.CHINA) }
+    val dateSections = remember(orderedMedia, dateFormatter) {
+        orderedMedia.groupBy { dateFormatter.format(Date(it.dateTaken)) }.entries.toList()
+    }
+    // Start the grid at the same position the page showed before selection
+    // started: restoring it after the first frame caused a visible jump.
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
+    )
+    val staggeredState = androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState(
+        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
+    )
+    if (layout == MediaLayout.Adaptive) {
+        LaunchedEffect(staggeredState) {
+            snapshotFlow { staggeredState.firstVisibleItemIndex to staggeredState.firstVisibleItemScrollOffset }
+                .sample(80L)
+                .collectLatest { (index, offset) -> onScrollPositionChanged(index, offset) }
+        }
+        LazyStaggeredGridMediaPrefetch(staggeredState, orderedMedia)
+        LazyVerticalStaggeredGrid(
+            columns = StaggeredGridCells.Fixed(columns.coerceIn(1, 6)),
+            state = staggeredState,
+            modifier = Modifier.fillMaxSize().batchSelectionStaggeredGesture(
+                state = staggeredState,
+                items = orderedMedia,
+                keyOf = { it.uri.toString() },
+                onStart = { item -> if (item.uri.toString() !in selectedUris) onToggle(item) },
+                onSelectRange = { range -> range.forEach { if (it.uri.toString() !in selectedUris) onToggle(it) } }
+            ),
+            contentPadding = contentPadding,
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(itemSpacing),
+            verticalItemSpacing = itemSpacing
+        ) {
+            selectionStaggeredItems(
+                orderedMedia = orderedMedia,
+                dateSections = dateSections,
+                showDateHeaders = showDateHeaders,
+                topTrailingCount = topTrailingCount,
+                selectedUris = selectedUris,
+                onToggle = onToggle
+            )
+        }
+        return
+    }
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
             .sample(80L)
             .collectLatest { (index, offset) -> onScrollPositionChanged(index, offset) }
     }
-    var restored by remember { mutableStateOf(false) }
-    LaunchedEffect(orderedMedia) {
-        if (!restored && orderedMedia.isNotEmpty()) {
-                gridState.scrollToItem(
-                    initialFirstVisibleItem.coerceIn(0, orderedMedia.lastIndex),
-                    initialFirstVisibleOffset.coerceAtLeast(0)
-                )
-            restored = true
-        }
-    }
     LazyGridMediaPrefetch(gridState, orderedMedia)
-    val dateFormatter = remember { SimpleDateFormat("yyyy年M月d日", Locale.CHINA) }
-    val dateSections = remember(orderedMedia, dateFormatter) {
-        orderedMedia.groupBy { dateFormatter.format(Date(it.dateTaken)) }.entries.toList()
-    }
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns.coerceIn(1, 6)),
         state = gridState,
@@ -145,14 +190,15 @@ fun SelectionScreen(
             onStart = { item -> if (item.uri.toString() !in selectedUris) onToggle(item) },
             onSelectRange = { range -> range.forEach { if (it.uri.toString() !in selectedUris) onToggle(it) } }
         ),
-        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(3.dp),
-        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(3.dp)
+        contentPadding = contentPadding,
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(itemSpacing),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(itemSpacing)
     ) {
         topTrailingCount?.let { count ->
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                 Text(
                     count.toString(),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 2.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                     textAlign = androidx.compose.ui.text.style.TextAlign.End
@@ -179,10 +225,53 @@ fun SelectionScreen(
                 }
             }
             items(sectionItems, key = { it.uri.toString() }) { item ->
-                SelectionMediaCell(item, selectedUris, onToggle)
+                SelectionMediaCell(item, selectedUris, onToggle, item.displayAspectRatio)
             }
         } else items(orderedMedia, key = { it.uri.toString() }) { item ->
-            SelectionMediaCell(item, selectedUris, onToggle)
+            SelectionMediaCell(item, selectedUris, onToggle, 1f)
+        }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridScope.selectionStaggeredItems(
+    orderedMedia: List<MediaItem>,
+    dateSections: List<Map.Entry<String, List<MediaItem>>>,
+    showDateHeaders: Boolean,
+    topTrailingCount: Int?,
+    selectedUris: Set<String>,
+    onToggle: (MediaItem) -> Unit
+) {
+    topTrailingCount?.let { count ->
+        item(span = StaggeredGridItemSpan.FullLine) {
+            Text(
+                count.toString(),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End
+            )
+        }
+    }
+    if (showDateHeaders) {
+        dateSections.forEach { (date, sectionItems) ->
+            item(key = "selection-date:$date", span = StaggeredGridItemSpan.FullLine) {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 38.dp)
+                        .padding(start = 2.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Text(timelineDateLabel(sectionItems.first().dateTaken, LocalAppEnglish.current), style = MaterialTheme.typography.bodyMedium)
+                    Text(sectionItems.size.toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            items(sectionItems, key = { it.uri.toString() }) { item ->
+                SelectionMediaCell(item, selectedUris, onToggle, item.displayAspectRatio)
+            }
+        }
+    } else {
+        items(orderedMedia, key = { it.uri.toString() }) { item ->
+            SelectionMediaCell(item, selectedUris, onToggle, item.displayAspectRatio)
         }
     }
 }
@@ -191,7 +280,8 @@ fun SelectionScreen(
 private fun SelectionMediaCell(
     item: MediaItem,
     selectedUris: Set<String>,
-    onToggle: (MediaItem) -> Unit
+    onToggle: (MediaItem) -> Unit,
+    aspectRatio: Float = 1f
 ) {
     val selected = item.uri.toString() in selectedUris
     val markScale by animateFloatAsState(if (selected) 1f else .82f, tween(120), label = "selection-scale")
@@ -200,7 +290,7 @@ private fun SelectionMediaCell(
         tween(120),
         label = "selection-color"
     )
-    Box(Modifier.fillMaxWidth().aspectRatio(1f).clickable { onToggle(item) }) {
+    Box(Modifier.fillMaxWidth().aspectRatio(aspectRatio.coerceIn(.45f, 2.4f)).clickable { onToggle(item) }) {
         MediaThumbnail(item, Modifier.fillMaxSize())
         Surface(
             modifier = Modifier.align(Alignment.TopEnd).padding(5.dp).graphicsLayer { scaleX = markScale; scaleY = markScale },
@@ -254,21 +344,17 @@ fun AlbumSelectionScreen(
         filterAlbums(allAlbums, query, additionalFileNames, pinnedFolderName)
     }
     val covers = remember(albums) { albums.mapNotNull(MediaAlbum::coverItem) }
-    val gridState = rememberLazyGridState()
+    // Match the album page exactly (outer 7 dp padding, 8/20 vertical content
+    // padding) and start at the same scroll position, so entering selection
+    // does not resize the tiles or jump the list.
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
+    )
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
             .sample(80L)
             .collectLatest { (index, offset) -> onScrollPositionChanged(index, offset) }
-    }
-    var restored by remember { mutableStateOf(false) }
-    LaunchedEffect(albums) {
-        if (!restored && albums.isNotEmpty()) {
-                gridState.scrollToItem(
-                    initialFirstVisibleItem.coerceIn(0, albums.lastIndex),
-                    initialFirstVisibleOffset.coerceAtLeast(0)
-                )
-            restored = true
-        }
     }
     if (searchingFolders && query.isNotBlank() && albums.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -284,14 +370,14 @@ fun AlbumSelectionScreen(
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns.coerceIn(1, 6)),
         state = gridState,
-        modifier = Modifier.fillMaxSize().batchSelectionGesture(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 7.dp).batchSelectionGesture(
             state = gridState,
             items = albums,
             keyOf = { it.name },
             onStart = { album -> if (album.name !in selectedFolders) onToggle(album.name) },
             onSelectRange = { range -> range.forEach { if (it.name !in selectedFolders) onToggle(it.name) } }
         ),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 7.dp, vertical = 8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.dp, bottom = 20.dp),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(VaultDimens.AlbumGap),
         verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(VaultDimens.AlbumGap)
     ) {

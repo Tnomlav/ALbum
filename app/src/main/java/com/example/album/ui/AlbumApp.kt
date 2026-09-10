@@ -334,6 +334,8 @@ fun AlbumApp(
     var wallpaperColumns by rememberSaveable { mutableIntStateOf(4) }
     var wallpaperMediaLayout by rememberSaveable { mutableStateOf(MediaLayout.Grid) }
     var wallpaperFolderLayout by rememberSaveable { mutableStateOf(MediaLayout.Grid) }
+    var wallpaperFolderMode by rememberSaveable { mutableStateOf(false) }
+    var wallpaperOpenedFolder by rememberSaveable { mutableStateOf<String?>(null) }
     var wallpaperSort by rememberSaveable { mutableStateOf(WallpaperSort.Time) }
     var wallpaperSortDirection by rememberSaveable { mutableStateOf(SortDirection.Descending) }
     var pixivArchiveOpen by rememberSaveable { mutableStateOf(false) }
@@ -2385,6 +2387,14 @@ fun AlbumApp(
                     media = selectionMedia,
                     orderUris = selectionMediaOrderUris,
                     selectedUris = selectedUris,
+                    // Mirror the page the user came from so entering selection
+                    // does not resize the thumbnails.
+                    layout = if (tab == MainTab.Timeline) timelineLayout else folderLayout,
+                    contentPadding = if (tab == MainTab.Timeline) {
+                        androidx.compose.foundation.layout.PaddingValues(horizontal = 7.dp, vertical = 2.dp)
+                    } else {
+                        androidx.compose.foundation.layout.PaddingValues(0.dp)
+                    },
                     columns = when {
                         tab == MainTab.Timeline -> timelineColumns
                         tab == MainTab.Pixiv -> folderColumns
@@ -2761,7 +2771,11 @@ fun AlbumApp(
                             wallpaperSelectedUris = wallpaperSelectedUris + item.uri.toString()
                             wallpaperSelectionOrder = orderedItems.map { it.uri.toString() }
                         },
-                        onRemove = ::removeFromWallpaperQueue
+                        onRemove = ::removeFromWallpaperQueue,
+                        folderMode = wallpaperFolderMode,
+                        openedFolder = wallpaperOpenedFolder,
+                        onOpenFolder = { folder -> wallpaperOpenedFolder = folder },
+                        onCloseFolder = { wallpaperOpenedFolder = null }
                     )
                 }
             }
@@ -2946,7 +2960,13 @@ fun AlbumApp(
             onDismiss = { showWallpaperLayoutDialog = false },
             onApply = { scope, layout ->
                 val selected = MediaLayout.entries[layouts.indexOf(layout)]
-                if (scope == scopes.first()) wallpaperMediaLayout = selected else wallpaperFolderLayout = selected
+                if (scope == scopes.first()) {
+                    wallpaperFolderMode = false
+                    wallpaperMediaLayout = selected
+                } else {
+                    wallpaperFolderMode = true
+                    wallpaperFolderLayout = selected
+                }
                 showWallpaperLayoutDialog = false
             }
         )

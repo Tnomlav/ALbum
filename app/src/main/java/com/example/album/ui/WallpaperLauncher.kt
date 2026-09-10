@@ -351,12 +351,17 @@ private fun publishDirectory(context: Context, staging: File, prefix: String): F
 
 private fun commitStaticQueue(context: Context, directory: File, names: List<String>) {
     val preferences = context.getSharedPreferences("album_preferences", Context.MODE_PRIVATE)
+    // Re-applying an unchanged queue must not jump back to the first image;
+    // only a different queue restarts the rotation position.
+    val sameQueue = readQueueNames(preferences.getString("static_wallpaper_queue", null)) == names
     val editor = preferences.edit()
         .putString("static_wallpaper_queue_dir", directory.name)
         .putString("static_wallpaper_queue", JSONArray(names).toString())
-        .putInt("static_wallpaper_index", 0)
-        .remove("static_wallpaper_shuffle")
-    if (preferences.getString("wallpaper_static_order", "InOrder") == "Shuffle") {
+    if (!sameQueue) {
+        editor.putInt("static_wallpaper_index", 0)
+            .remove("static_wallpaper_shuffle")
+    }
+    if (!sameQueue && preferences.getString("wallpaper_static_order", "InOrder") == "Shuffle") {
         val shuffle = names.indices.shuffled()
         editor.putString("static_wallpaper_shuffle", JSONArray(shuffle).toString())
             .putInt("static_wallpaper_index", shuffle.first())
@@ -370,14 +375,17 @@ private fun commitStaticQueue(context: Context, directory: File, names: List<Str
 
 private fun commitDynamicQueue(context: Context, directory: File, names: List<String>, lowPower: Boolean) {
     val preferences = context.getSharedPreferences("album_preferences", Context.MODE_PRIVATE)
+    val sameQueue = readQueueNames(preferences.getString("live_wallpaper_queue", null)) == names
     val editor = preferences.edit()
         .putBoolean("wallpaper_low_power", lowPower)
         .putString("live_wallpaper_queue_dir", directory.name)
         .putString("live_wallpaper_queue", JSONArray(names).toString())
-        .putInt("live_wallpaper_index", 0)
         .remove("live_wallpaper_single_video")
-        .remove("live_wallpaper_shuffle")
-    if (preferences.getString("wallpaper_video_order", "InOrder") == "Shuffle") {
+    if (!sameQueue) {
+        editor.putInt("live_wallpaper_index", 0)
+            .remove("live_wallpaper_shuffle")
+    }
+    if (!sameQueue && preferences.getString("wallpaper_video_order", "InOrder") == "Shuffle") {
         val shuffle = names.indices.shuffled()
         editor.putString("live_wallpaper_shuffle", JSONArray(shuffle).toString())
             .putInt("live_wallpaper_index", shuffle.first())
@@ -388,6 +396,11 @@ private fun commitDynamicQueue(context: Context, directory: File, names: List<St
     }
     cleanupUnusedWallpaperArtifacts(context)
 }
+
+private fun readQueueNames(value: String?): List<String> = runCatching {
+    val json = JSONArray(value ?: "[]")
+    (0 until json.length()).map { json.getString(it) }
+}.getOrDefault(emptyList())
 
 private fun cleanupUnusedWallpaperArtifacts(context: Context) {
     val root = context.filesDir

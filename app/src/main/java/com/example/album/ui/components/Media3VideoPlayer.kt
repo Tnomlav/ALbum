@@ -240,7 +240,8 @@ internal fun Media3VideoPlayer(
     onInfo: () -> Unit = {},
     onSettings: () -> Unit = {},
     settingsVersion: Int = 0,
-    onAutoEnterPictureInPictureChange: (Boolean, Int, Int) -> Unit = { _, _, _ -> }
+    onAutoEnterPictureInPictureChange: (Boolean, Int, Int) -> Unit = { _, _, _ -> },
+    onPlaybackError: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
@@ -452,10 +453,20 @@ internal fun Media3VideoPlayer(
             }
         }
     }
+    val playbackErrorCallback by rememberUpdatedState(onPlaybackError)
     val player = remember(videos) {
         ExoPlayer.Builder(context, DefaultRenderersFactory(context).setEnableDecoderFallback(true))
             .build().apply {
                 setSeekParameters(SeekParameters.EXACT)
+                // Register the error listener before prepare(): decoder
+                // failures can surface immediately and must still switch the
+                // viewer to the compatible player.
+                addListener(object : Player.Listener {
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        android.util.Log.i("AlbumVlcFallback", "ExoPlayer error: ${error.errorCodeName}")
+                        playbackErrorCallback()
+                    }
+                })
                 val items = videos.map { item ->
                     Builder()
                         .setUri(item.uri)
@@ -774,57 +785,57 @@ internal fun Media3VideoPlayer(
     }
 
     Box(Modifier.fillMaxSize().background(if (miniMode) Color.Transparent else Color.Black).onSizeChanged { viewportSize = it }, contentAlignment = Alignment.Center) {
-        if (miniMode) {
-            MiniVideoWindow(
-                player = player,
-                playing = playing,
-                widthPx = miniWidthPx,
-                offset = miniOffset,
-                aspectRatio = miniVideoAspect,
-                seekIncrement = normalSkip,
-                english = english,
-                onMove = { delta ->
-                    val height = miniWidthPx / miniVideoAspect
-                    miniOffset = Offset(
-                        (miniOffset.x + delta.x).coerceIn(8f, (viewportSize.width - miniWidthPx - 8f).coerceAtLeast(8f)),
-                        (miniOffset.y + delta.y).coerceIn(8f, (viewportSize.height - height - 8f).coerceAtLeast(8f))
-                    )
-                },
-                onResize = { delta, fromLeft, fromTop ->
-                    val ratio = miniVideoAspect
-                    val horizontalDelta = if (fromLeft) -delta.x else delta.x
-                    val verticalDelta = (if (fromTop) -delta.y else delta.y) * ratio
-                    val sizeDelta = if (abs(horizontalDelta) >= abs(verticalDelta)) horizontalDelta else verticalDelta
-                    val oldWidth = miniWidthPx
-                    val oldHeight = oldWidth / ratio
-                    val oldRight = miniOffset.x + oldWidth
-                    val oldBottom = miniOffset.y + oldHeight
-                    val density = miniDensity
-                    val minimum = min(with(density) { 180.dp.toPx() }, (viewportSize.width - 16f).coerceAtLeast(1f))
-                    val maximum = min(
-                        (viewportSize.width - 16f).coerceAtLeast(minimum),
-                        ((viewportSize.height - 16f) * ratio).coerceAtLeast(minimum)
-                    )
-                    val newWidth = (oldWidth + sizeDelta).coerceIn(minimum, maximum)
-                    val newHeight = newWidth / ratio
-                    miniWidthPx = newWidth
-                    miniOffset = Offset(
-                        (if (fromLeft) oldRight - newWidth else miniOffset.x)
-                            .coerceIn(8f, (viewportSize.width - newWidth - 8f).coerceAtLeast(8f)),
-                        (if (fromTop) oldBottom - newHeight else miniOffset.y)
-                            .coerceIn(8f, (viewportSize.height - newHeight - 8f).coerceAtLeast(8f))
-                    )
-                },
-                onRestore = { onMiniModeChange(false) },
-                onClose = { exitPlayer() }
-            )
-        } else {
         val density = androidx.compose.ui.platform.LocalDensity.current
         val windowIsLandscape = viewportSize.width > viewportSize.height
         val rotateCanvas = false
+        // One shared player surface: entering the mini window only changes the
+        // container size and position, so playback is never interrupted by a
+        // surface re-attach.
+        val miniOnMove: (Offset) -> Unit = { delta ->
+            val height = miniWidthPx / miniVideoAspect
+            miniOffset = Offset(
+                (miniOffset.x + delta.x).coerceIn(8f, (viewportSize.width - miniWidthPx - 8f).coerceAtLeast(8f)),
+                (miniOffset.y + delta.y).coerceIn(8f, (viewportSize.height - height - 8f).coerceAtLeast(8f))
+            )
+        }
+        val miniOnResize: (Offset, Boolean, Boolean) -> Unit = { delta, fromLeft, fromTop ->
+            val ratio = miniVideoAspect
+            val horizontalDelta = if (fromLeft) -delta.x else delta.x
+            val verticalDelta = (if (fromTop) -delta.y else delta.y) * ratio
+            val sizeDelta = if (abs(horizontalDelta) >= abs(verticalDelta)) horizontalDelta else verticalDelta
+            val oldWidth = miniWidthPx
+            val oldHeight = oldWidth / ratio
+            val oldRight = miniOffset.x + oldWidth
+            val oldBottom = miniOffset.y + oldHeight
+            val minimum = min(with(miniDensity) { 180.dp.toPx() }, (viewportSize.width - 16f).coerceAtLeast(1f))
+            val maximum = min(
+                (viewportSize.width - 16f).coerceAtLeast(minimum),
+                ((viewportSize.height - 16f) * ratio).coerceAtLeast(minimum)
+            )
+            val newWidth = (oldWidth + sizeDelta).coerceIn(minimum, maximum)
+            val newHeight = newWidth / ratio
+            miniWidthPx = newWidth
+            miniOffset = Offset(
+                (if (fromLeft) oldRight - newWidth else miniOffset.x)
+                    .coerceIn(8f, (viewportSize.width - newWidth - 8f).coerceAtLeast(8f)),
+                (if (fromTop) oldBottom - newHeight else miniOffset.y)
+                    .coerceIn(8f, (viewportSize.height - newHeight - 8f).coerceAtLeast(8f))
+            )
+        }
         Box(
             Modifier
-                .then(if (rotateCanvas) Modifier.size(with(density) { viewportSize.height.toDp() }, with(density) { viewportSize.width.toDp() }) else Modifier.fillMaxSize())
+                .then(
+                    if (miniMode) {
+                        Modifier
+                            .offset { IntOffset(miniOffset.x.roundToInt(), miniOffset.y.roundToInt()) }
+                            .width(with(density) { miniWidthPx.toDp() })
+                            .aspectRatio(miniVideoAspect)
+                            .shadow(14.dp, RoundedCornerShape(7.dp), ambientColor = Color.Black.copy(alpha = .34f), spotColor = Color.Black.copy(alpha = .34f))
+                            .clip(RoundedCornerShape(7.dp))
+                    } else {
+                        Modifier.then(if (rotateCanvas) Modifier.size(with(density) { viewportSize.height.toDp() }, with(density) { viewportSize.width.toDp() }) else Modifier.fillMaxSize())
+                    }
+                )
                 .graphicsLayer { rotationZ = if (rotateCanvas) 90f else 0f }
                 .background(Color.Black)
         ) {
@@ -842,7 +853,18 @@ internal fun Media3VideoPlayer(
                 scaleX = if (mirrorVideo) -1f else 1f
             }
         )
-        if (!pictureInPictureMode) {
+        if (miniMode) {
+            MiniWindowControls(
+                player = player,
+                playing = playing,
+                seekIncrement = normalSkip,
+                english = english,
+                onMove = miniOnMove,
+                onResize = miniOnResize,
+                onRestore = { onMiniModeChange(false) },
+                onClose = { exitPlayer() }
+            )
+        } else if (!pictureInPictureMode) {
             Box(
                 Modifier.fillMaxSize()
                     .zIndex(1f)
@@ -988,7 +1010,7 @@ internal fun Media3VideoPlayer(
                 }
             }
         }
-        if (!pictureInPictureMode && controlsVisible && !controlsLocked) {
+        if (!miniMode && !pictureInPictureMode && controlsVisible && !controlsLocked) {
             Row(
                 Modifier
                     .align(Alignment.TopCenter)
@@ -1135,7 +1157,7 @@ internal fun Media3VideoPlayer(
                     }
                 }
             }
-        } else if (!pictureInPictureMode && controlsLocked) {
+        } else if (!miniMode && !pictureInPictureMode && controlsLocked) {
             IconButton(
                 onClick = { controlsLocked = false; refreshControls() },
                 modifier = Modifier.align(Alignment.CenterEnd).padding(end = 10.dp).zIndex(10f)
@@ -1235,7 +1257,6 @@ internal fun Media3VideoPlayer(
             )
         }
         }
-        }
     }
 }
 
@@ -1245,12 +1266,9 @@ internal fun Media3VideoPlayer(
  * rewind / pause / fast-forward.
  */
 @Composable
-private fun MiniVideoWindow(
+private fun MiniWindowControls(
     player: ExoPlayer,
     playing: Boolean,
-    widthPx: Float,
-    offset: Offset,
-    aspectRatio: Float,
     seekIncrement: Long,
     english: Boolean,
     onMove: (Offset) -> Unit,
@@ -1258,35 +1276,9 @@ private fun MiniVideoWindow(
     onRestore: () -> Unit,
     onClose: () -> Unit
 ) {
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val widthDp = with(density) { widthPx.toDp() }
     val currentOnMove by rememberUpdatedState(onMove)
     val currentOnResize by rememberUpdatedState(onResize)
-    val renderPlayer = player
-    Box(
-        Modifier
-            .offset { IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }
-            .width(widthDp)
-            .aspectRatio(aspectRatio)
-            .shadow(
-                14.dp,
-                RoundedCornerShape(7.dp),
-                ambientColor = Color.Black.copy(alpha = .34f),
-                spotColor = Color.Black.copy(alpha = .34f)
-            )
-            .clip(RoundedCornerShape(7.dp))
-            .background(Color.Black)
-    ) {
-        AndroidView(
-            factory = { viewContext ->
-                (PlayerView.inflate(viewContext, com.example.album.R.layout.view_media3_video_player, null) as PlayerView).apply {
-                    this.player = renderPlayer
-                    useController = false
-                }
-            },
-            update = { view -> view.player = renderPlayer },
-            modifier = Modifier.fillMaxSize().zIndex(-100f)
-        )
+    Box(Modifier.fillMaxSize()) {
         Box(
             Modifier.fillMaxSize().zIndex(0f).pointerInput(Unit) {
                 var resizeFromLeft: Boolean? = null

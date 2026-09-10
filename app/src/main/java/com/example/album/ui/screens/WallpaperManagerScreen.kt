@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
@@ -97,7 +99,11 @@ fun WallpaperManagerScreen(
     onOpenMedia: (MediaItem) -> Unit,
     onToggleSelection: (MediaItem) -> Unit,
     onEnterSelectionMode: (MediaItem, List<MediaItem>) -> Unit,
-    onRemove: (MediaItem) -> Unit
+    onRemove: (MediaItem) -> Unit,
+    folderMode: Boolean = false,
+    openedFolder: String? = null,
+    onOpenFolder: (String) -> Unit = {},
+    onCloseFolder: () -> Unit = {}
 ) {
     val english = LocalAppEnglish.current
     val formatter = remember { SimpleDateFormat("yyyy年M月d日", Locale.CHINA) }
@@ -109,7 +115,18 @@ fun WallpaperManagerScreen(
         if (query.isBlank()) emptyList()
         else searchMedia.map { it.folder }.filter { searchTextMatches(query, it) }.distinct().sorted()
     }
-    val baseVisibleMedia = if (query.isBlank()) queuedMedia else baseMatchingMedia
+    val folderQueue = remember(queuedMedia, query) {
+        queuedMedia
+            .filter { query.isBlank() || searchTextMatches(query, it.folder, it.name) }
+            .groupBy { it.folder }
+            .toSortedMap()
+    }
+    val baseVisibleMedia = when {
+        folderMode && openedFolder != null -> queuedMedia.filter { it.folder == openedFolder }
+        folderMode -> emptyList()
+        query.isBlank() -> queuedMedia
+        else -> baseMatchingMedia
+    }
     val visibleMedia = remember(baseVisibleMedia, sort, sortDirection, queueOrder, selectionMode, selectionOrder) {
         val sorted = sortWallpaperMedia(baseVisibleMedia, sort, sortDirection, queueOrder)
         if (selectionMode && query.isBlank() && selectionOrder.isNotEmpty()) {
@@ -119,7 +136,14 @@ fun WallpaperManagerScreen(
     }
     val sections = remember(visibleMedia) { visibleMedia.groupBy { formatter.format(Date(it.dateTaken)) }.entries.toList() }
 
-    if (visibleMedia.isEmpty() && folders.isEmpty()) {
+    val showFolderTiles = folderMode && openedFolder == null
+    if (showFolderTiles && folderQueue.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(appText("壁纸队列为空", english), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+    if (!showFolderTiles && visibleMedia.isEmpty() && folders.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
                 if (query.isBlank()) appText("壁纸队列为空", english) else appText("没有找到相关内容", english),
@@ -132,6 +156,18 @@ fun WallpaperManagerScreen(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val adaptiveFolderColumns = (maxWidth / 96.dp).toInt().coerceIn(2, 6)
         val folderColumns = if (folderLayout == MediaLayout.Adaptive) adaptiveFolderColumns else columns.coerceIn(1, 6)
+        if (showFolderTiles) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 7.dp, vertical = 8.dp)) {
+                WallpaperFolderSection(
+                    folders = folderQueue.keys.toList(),
+                    counts = folderQueue.mapValues { it.value.size },
+                    columns = folderColumns,
+                    english = english,
+                    onOpenFolder = onOpenFolder
+                )
+            }
+            return@BoxWithConstraints
+        }
         if (mediaLayout == MediaLayout.Adaptive) {
             LazyVerticalStaggeredGrid(
                 columns = StaggeredGridCells.Fixed(columns.coerceIn(1, 6)),
@@ -141,6 +177,9 @@ fun WallpaperManagerScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 item(span = StaggeredGridItemSpan.FullLine) {
+                    if (openedFolder != null) {
+                        WallpaperFolderBackRow(openedFolder, english, onCloseFolder)
+                    }
                     WallpaperResultCount(visibleMedia.size, query, english)
                 }
                 if (folders.isNotEmpty()) {
@@ -177,6 +216,9 @@ fun WallpaperManagerScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
+                    if (openedFolder != null) {
+                        WallpaperFolderBackRow(openedFolder, english, onCloseFolder)
+                    }
                     WallpaperResultCount(visibleMedia.size, query, english)
                 }
                 if (folders.isNotEmpty()) {
@@ -221,7 +263,26 @@ private fun WallpaperResultCount(count: Int, query: String, english: Boolean) {
 }
 
 @Composable
-private fun WallpaperFolderSection(folders: List<String>, columns: Int, english: Boolean) {
+private fun WallpaperFolderBackRow(folder: String, english: Boolean, onClose: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClose).padding(horizontal = 2.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(Icons.Outlined.Folder, contentDescription = appText("文件夹", english), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        Text(folder.substringAfterLast('/'), color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+        Text(if (english) "Back to folders" else "返回文件夹列表", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun WallpaperFolderSection(
+    folders: List<String>,
+    columns: Int,
+    english: Boolean,
+    counts: Map<String, Int> = emptyMap(),
+    onOpenFolder: (String) -> Unit = {}
+) {
     Column(Modifier.fillMaxWidth().padding(bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
         folders.chunked(columns.coerceAtLeast(1)).forEach { rowFolders ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -229,6 +290,7 @@ private fun WallpaperFolderSection(folders: List<String>, columns: Int, english:
                     Row(
                         Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { onOpenFolder(folder) }
                             .padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -246,6 +308,9 @@ private fun WallpaperFolderSection(folders: List<String>, columns: Int, english:
                             color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 12.sp
                         )
+                        counts[folder]?.let { count ->
+                            Text(count.toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                        }
                     }
                 }
                 repeat(columns - rowFolders.size) {
