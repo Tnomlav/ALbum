@@ -67,6 +67,16 @@ ALBUM_KEY_ALIAS
 ALBUM_KEY_PASSWORD
 ```
 
+构建默认按 ABI 拆分，因为 AVI 播放使用的 LibVLC 每个架构约 60 MB 原生库。每个设备只需要安装自己架构的包：
+
+```text
+app/build/outputs/apk/debug/app-arm64-v8a-debug.apk      # 现代手机
+app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk    # 32 位 ARM 设备
+app/build/outputs/apk/debug/app-x86_64-debug.apk         # 模拟器
+```
+
+用 Android Studio 直接运行时会自动选择匹配的架构。手动 `adb install` 时请选择与设备 CPU 对应的 APK。需要单个全架构包时加上 `-PalbumUniversalApk=true`（体积约为单架构包的 3–4 倍）。压缩原生库会增加 Gradle 打包内存占用，`gradle.properties` 已把堆上限调到 4 GB。
+
 ## 发布
 
 版本号保存在 `version.properties`。发布前请更新 `CHANGELOG.md`，构建签名 APK，并为同名版本创建 Git tag 和 GitHub Release。应用的更新检查地址由 `ALBUM_UPDATE_URL` 配置，生产环境建议指向 Release 资产，而不是直接依赖 `main` 分支文件。

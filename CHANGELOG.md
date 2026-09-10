@@ -17,7 +17,7 @@ This file records release-level changes. Each exported release should have:
 - The in-player video settings mirror the Settings video section, and add the brightness/volume touch split (1:1, 1:1:1, 1:2:1) plus the seek/pause touch split (1:1:1, 1:2:1, 1:0:1).
 - Added an "auto mini window" video option (off by default): backgrounding the app during playback keeps playing in the system picture-in-picture window.
 - Rebuilt the in-app mini window: drag corners to resize, drag the middle to move, top-left restores full screen, top-right closes, and the centre row holds rewind / pause / fast-forward.
-- AVI and other containers ExoPlayer cannot demux now play through a bundled LibVLC player (`org.videolan.android:libvlc-all`), which also grows the APK by the bundled native libraries.
+- AVI and other containers ExoPlayer cannot demux now play through a bundled LibVLC player (`org.videolan.android:libvlc-all`). Builds are split per ABI and native libraries are compressed, so a Release APK is 57–62 MB per ABI instead of 230 MB+ universal; the Gradle heap limit was raised to 4 GB to package the compressed libraries.
 - App text keeps following the system font size (font scale is read from the system configuration and `fontScale` no longer restarts the activity).
 - Added defensive handling for low-memory image conversion, thumbnail decoding, and editor loading paths.
 - Moved rename, delete, cache-size, duplicate-scan, and transfer file work off the main thread.

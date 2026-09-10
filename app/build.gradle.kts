@@ -21,6 +21,12 @@ val releaseStoreFile = providers.gradleProperty("ALBUM_STORE_FILE").orElse("").g
 val releaseStorePassword = providers.gradleProperty("ALBUM_STORE_PASSWORD").orElse("").get()
 val releaseKeyAlias = providers.gradleProperty("ALBUM_KEY_ALIAS").orElse("").get()
 val releaseKeyPassword = providers.gradleProperty("ALBUM_KEY_PASSWORD").orElse("").get()
+// LibVLC ships one native library set per ABI (about 60 MB each). Shipping all
+// of them in a single APK wastes space on every device, so builds are split
+// per ABI by default. Pass -PalbumUniversalApk=true to also emit a single
+// universal APK for distribution.
+val albumUniversalApk = providers.gradleProperty("albumUniversalApk")
+    .orNull?.toBooleanStrictOrNull() ?: false
 
 android {
     namespace = "com.example.album"
@@ -37,6 +43,9 @@ android {
         versionCode = releaseVersionCode
         versionName = releaseVersionName
         buildConfigField("String", "UPDATE_URL", "\"$escapedUpdateUrl\"")
+        // The app ships Simplified Chinese and English only; drop the other
+        // locales that come with AndroidX so the APK stops carrying them.
+        resourceConfigurations += listOf("en", "zh")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -63,6 +72,37 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+    dependenciesInfo {
+        // Dependency metadata inside the APK is only used by Play; the local
+        // build does not need it and it saves a little space.
+        includeInApk = false
+        includeInBundle = false
+    }
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = albumUniversalApk
+        }
+    }
+    packaging {
+        jniLibs {
+            // Store the LibVLC native libraries compressed. The system extracts
+            // them at install time, which keeps the downloadable APK far
+            // smaller (the shared objects compress to roughly half).
+            useLegacyPackaging = true
+        }
+        resources {
+            excludes += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt"
+            )
+        }
     }
 }
 
