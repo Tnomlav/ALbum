@@ -18,6 +18,8 @@ local.properties
 /.kotlin
 /.codex-ppt-work
 /.pixiv-login-probe-profile
+# Local release keystore: never commit signing material
+/key/
 
 # Local device inspection captures
 /device-*.xml

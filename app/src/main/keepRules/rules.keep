@@ -4,6 +4,14 @@
 # For more details, see
 #   https://d.android.com/r/tools/r8/keep-rules
 
+# LibVLC looks up its Java classes from native code (for example
+# org/videolan/libvlc/interfaces/IMedia$Track). Without these rules R8 strips
+# or renames them and the library aborts in JNI_OnLoad with
+# "UnsatisfiedLinkError: JNI_ERR returned from JNI_OnLoad".
+-keep class org.videolan.** { *; }
+-keep interface org.videolan.** { *; }
+-dontwarn org.videolan.**
+
 # If your project uses WebView with JS, uncomment the following
 # and specify the fully qualified class name to the JavaScript interface
 # class:

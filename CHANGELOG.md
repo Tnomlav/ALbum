@@ -7,7 +7,7 @@ This file records release-level changes. Each exported release should have:
 3. An annotated Git tag with the same version, for example `v1.1.20`.
 4. The APK SHA-256 and verification status recorded in the entry when an APK is exported.
 
-## v1.1.57 - 2026-09-04 (unreleased)
+## v1.1.57 - 2026-09-10 (local signed build, pending release)
 
 - Wallpaper settings now re-apply immediately: the running static/live wallpaper services listen for a settings change broadcast and repaint or reload instead of waiting for the next rotation.
 - Static wallpapers fill the whole screen with the original aspect ratio (cropped, never letterboxed) and follow the launcher offset when "across screens" is selected.
@@ -18,13 +18,17 @@ This file records release-level changes. Each exported release should have:
 - Added an "auto mini window" video option (off by default): backgrounding the app during playback keeps playing in the system picture-in-picture window.
 - Rebuilt the in-app mini window: drag corners to resize, drag the middle to move, top-left restores full screen, top-right closes, and the centre row holds rewind / pause / fast-forward.
 - AVI and other containers ExoPlayer cannot demux now play through a bundled LibVLC player (`org.videolan.android:libvlc-all`). Builds are split per ABI and native libraries are compressed, so a Release APK is 57–62 MB per ABI instead of 230 MB+ universal; the Gradle heap limit was raised to 4 GB to package the compressed libraries.
+- Added R8 keep rules for `org.videolan.**` (release builds crashed in `JNI_OnLoad` without them) and route `content://` media to LibVLC through a file descriptor, because LibVLC cannot open MediaStore URIs as an MRL.
 - App text keeps following the system font size (font scale is read from the system configuration and `fontScale` no longer restarts the activity).
 - Added defensive handling for low-memory image conversion, thumbnail decoding, and editor loading paths.
 - Moved rename, delete, cache-size, duplicate-scan, and transfer file work off the main thread.
 - Added direct provider/file moves with permanent-delete fallback, conflict-safe naming, and stale Pixiv scan-state protection.
 - Hardened API compatibility for navigation bar, media metadata, WebView renderer, and Media3 integrations.
 - Added Android 11 package-visibility queries and expanded CI coverage to include `lintDebug`.
-- Verification: `:app:lintDebug`, `:app:testDebugUnitTest`, `:app:assembleDebug`, and `:app:assembleRelease` passed. Real-device/API 24/28/29 and Pixiv login verification remain outstanding.
+- APK: `app/release/app-release.apk` (arm64-v8a split)
+- SHA-256: `4F19B4E28D09D9EBABEC2C889397C6FAB5FC0A8517209EBDB3300662EC26CD5C`
+- Signature: APK Signature Scheme v2, 1 signer, certificate SHA-256 `062E93393B7BF2759E1D2B5D48FA0D1DA15F2BE0E6370F7DBAFF6DA50F36842F`. This keystore was created on 2026-09-10 and differs from the 1.1.56 certificate, so 1.1.57 cannot be installed over an existing 1.1.56 installation.
+- Verification: `:app:lintDebug`, `:app:testDebugUnitTest`, `:app:assembleDebug`, and `:app:assembleRelease` passed from a clean tree. The signed x86_64 build was installed on an API 36 emulator: the app launches, ExoPlayer plays MP4, and LibVLC plays AVI through the file-descriptor path without crashes. Real-device/API 24/28/29 and Pixiv login verification remain outstanding.
 
 ## v1.1.56 - 2026-09-04 (local signed build, pending release)
 

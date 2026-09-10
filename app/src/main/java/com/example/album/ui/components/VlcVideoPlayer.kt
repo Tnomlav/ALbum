@@ -4,6 +4,7 @@ package com.example.album.ui.components
 
 import android.app.Activity
 import android.content.Context
+import android.os.ParcelFileDescriptor
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -128,17 +129,31 @@ internal fun VlcVideoPlayer(
         }
     }
     DisposableEffect(current.uri) {
-        val media = Media(libVlc, current.uri).apply {
-            setHWDecoderEnabled(true, false)
-            addOption(":network-caching=300")
-        }
-        runCatching {
-            mediaPlayer.media = media
-            mediaPlayer.play()
+        // LibVLC cannot open MediaStore/SAF content:// URIs as an MRL, so hand
+        // it the underlying file descriptor instead.
+        var descriptor: ParcelFileDescriptor? = null
+        val media = runCatching {
+            val fromDescriptor = if (current.uri.scheme?.lowercase() == "content") {
+                descriptor = context.contentResolver.openFileDescriptor(current.uri, "r")
+                descriptor?.fileDescriptor?.let { Media(libVlc, it) }
+            } else {
+                null
+            }
+            (fromDescriptor ?: Media(libVlc, current.uri)).apply {
+                setHWDecoderEnabled(true, false)
+                addOption(":network-caching=300")
+            }
+        }.getOrNull()
+        if (media != null) {
+            runCatching {
+                mediaPlayer.media = media
+                mediaPlayer.play()
+            }
         }
         onDispose {
             runCatching { mediaPlayer.stop() }
-            runCatching { media.release() }
+            media?.let { runCatching { it.release() } }
+            descriptor?.let { runCatching { it.close() } }
         }
     }
     LaunchedEffect(mediaPlayer) {
