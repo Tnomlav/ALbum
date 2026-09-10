@@ -51,6 +51,27 @@ class MainActivity : ComponentActivity() {
         return enterPictureInPictureMode(params)
     }
 
+    /**
+     * Android 12+ can enter picture-in-picture by itself when the user swipes
+     * the app away. That keeps the activity resumed, so playback continues
+     * without the pause that a manual transition causes.
+     */
+    private fun updateAutoEnterPictureInPicture(enabled: Boolean, width: Int, height: Int) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val aspect = if (width > 0 && height > 0) width.toDouble() / height else 16.0 / 9.0
+        val ratio = if (aspect in 0.45..2.4) {
+            Rational((aspect * 1000).toInt().coerceAtLeast(1), 1000)
+        } else {
+            Rational(16, 9)
+        }
+        val params = PictureInPictureParams.Builder()
+            .setAspectRatio(ratio)
+            .setSeamlessResizeEnabled(true)
+            .setAutoEnterEnabled(enabled && !isInPictureInPictureMode)
+            .build()
+        runCatching { setPictureInPictureParams(params) }
+    }
+
     override fun onPictureInPictureModeChanged(
         isInPictureInPictureMode: Boolean,
         newConfig: Configuration
@@ -119,7 +140,8 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             pictureInPictureMode = pictureInPictureMode,
-                            onEnterPictureInPicture = ::enterVideoPictureInPicture
+                            onEnterPictureInPicture = ::enterVideoPictureInPicture,
+                            onAutoEnterPictureInPictureChange = ::updateAutoEnterPictureInPicture
                         )
                     }
                 }

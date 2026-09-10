@@ -20,6 +20,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
@@ -36,6 +43,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material.icons.outlined.FastForward
 import androidx.compose.material.icons.outlined.FastRewind
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FormatListNumbered
 import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.Info
@@ -89,6 +97,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -121,6 +131,7 @@ import kotlin.math.roundToLong
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
+import kotlin.math.min
 
 private fun frameAlignedPosition(player: ExoPlayer, requestedPositionMs: Long): Long {
     val duration = player.duration.takeIf { it > 0L }
@@ -192,6 +203,10 @@ private val HtmlLongForwardIcon = ImageVector.Builder("html-long-forward", 24.dp
 private val HtmlPlayIcon = ImageVector.Builder("html-play", 24.dp, 24.dp, 24f, 24f).apply { path(fill = androidx.compose.ui.graphics.SolidColor(Color.White), pathBuilder = { moveTo(7f, 4f); lineTo(20f, 12f); lineTo(7f, 20f); close() }) }.build()
 private val HtmlPauseIcon = ImageVector.Builder("html-pause", 24.dp, 24.dp, 24f, 24f).apply { path(fill = androidx.compose.ui.graphics.SolidColor(Color.White), pathBuilder = { moveTo(7f, 4f); lineTo(11f, 4f); lineTo(11f, 20f); lineTo(7f, 20f); close(); moveTo(14f, 4f); lineTo(18f, 4f); lineTo(18f, 20f); lineTo(14f, 20f); close() }) }.build()
 private val HtmlPipIcon = htmlLineIcon("html-pip") { moveTo(3f, 4f); lineTo(21f, 4f); lineTo(21f, 20f); lineTo(3f, 20f); close(); moveTo(12f, 11f); lineTo(19f, 11f); lineTo(19f, 17f); lineTo(12f, 17f); close() }
+private val HtmlMiniWindowIcon = htmlLineIcon("html-mini-window") {
+    moveTo(4f, 6f); lineTo(14f, 6f); lineTo(14f, 12f); lineTo(4f, 12f); close()
+    moveTo(12f, 12f); lineTo(21f, 12f); lineTo(21f, 20f); lineTo(12f, 20f); close()
+}
 private val HtmlBackgroundIcon = htmlLineIcon("html-background") {
     moveTo(4f, 13f); lineTo(4f, 10f); lineTo(5f, 7f); lineTo(7f, 5f); lineTo(10f, 4f); lineTo(14f, 4f); lineTo(17f, 5f); lineTo(19f, 7f); lineTo(20f, 10f); lineTo(20f, 13f)
     moveTo(4f, 13f); lineTo(7f, 13f); lineTo(7f, 19f); lineTo(5f, 19f); lineTo(3f, 17f); lineTo(3f, 14f); close()
@@ -224,7 +239,8 @@ internal fun Media3VideoPlayer(
     onWallpaper: () -> Unit = {},
     onInfo: () -> Unit = {},
     onSettings: () -> Unit = {},
-    settingsVersion: Int = 0
+    settingsVersion: Int = 0,
+    onAutoEnterPictureInPictureChange: (Boolean, Int, Int) -> Unit = { _, _, _ -> }
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
@@ -245,6 +261,17 @@ internal fun Media3VideoPlayer(
     val autoHideControls = preferences.getBoolean("video_auto_hide", true)
     val tapPause = preferences.getBoolean("video_tap_pause", false)
     val portraitTapPause = preferences.getBoolean("video_portrait_tap_pause", false)
+    val autoMiniWindow = preferences.getBoolean("video_auto_mini", false)
+    val brightnessVolumeRatio = preferences.getString("video_brightness_volume_ratio", "1:1") ?: "1:1"
+    val seekPauseRatio = preferences.getString("video_seek_pause_ratio", "1:1:1") ?: "1:1:1"
+    // Android 12+ auto-enters picture-in-picture when the app leaves the
+    // foreground, which keeps the player resumed instead of pausing first.
+    LaunchedEffect(autoMiniWindow, playing, current.width, current.height) {
+        onAutoEnterPictureInPictureChange(autoMiniWindow && playing, current.width, current.height)
+    }
+    DisposableEffect(Unit) {
+        onDispose { onAutoEnterPictureInPictureChange(false, 0, 0) }
+    }
     var mode by remember { mutableIntStateOf(0) }
     val latestMode by rememberUpdatedState(mode)
     var speed by remember { mutableFloatStateOf(1f) }
@@ -276,6 +303,9 @@ internal fun Media3VideoPlayer(
     val sensorLandscape = sensorOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE ||
         sensorOrientation == ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+    var miniWidthPx by remember { mutableFloatStateOf(0f) }
+    var miniOffset by remember { mutableStateOf(Offset.Zero) }
+    var miniPositionInitialized by remember { mutableStateOf(false) }
     val hostActivity = context as? Activity
     val initialOrientation = remember(hostActivity) { hostActivity?.requestedOrientation }
     val initialScreenBrightness = remember(hostActivity) {
@@ -448,7 +478,17 @@ internal fun Media3VideoPlayer(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> {
-                    if (preferences.getBoolean("video_pause_on_background", true) && player.playWhenReady) {
+                    val pauseOnBackground = preferences.getBoolean("video_pause_on_background", true)
+                    val autoMini = preferences.getBoolean("video_auto_mini", false)
+                    if (autoMini && !miniMode && !pictureInPictureMode && player.playWhenReady) {
+                        // Auto mini window: hand the still-playing instance to
+                        // the system picture-in-picture window so playback
+                        // continues without an interruption.
+                        if (!onEnterPictureInPicture() && pauseOnBackground) {
+                            pausedForBackground = true
+                            player.pause()
+                        }
+                    } else if (pauseOnBackground && player.playWhenReady) {
                         pausedForBackground = true
                         player.pause()
                     }
@@ -700,7 +740,85 @@ internal fun Media3VideoPlayer(
         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, (volume * max).roundToInt().coerceIn(0, max), 0)
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black).onSizeChanged { viewportSize = it }, contentAlignment = Alignment.Center) {
+    val miniVideoAspect = if (current.width > 0 && current.height > 0) {
+        (current.width.toFloat() / current.height.toFloat()).coerceIn(.45f, 2.4f)
+    } else {
+        16f / 9f
+    }
+    val miniDensity = androidx.compose.ui.platform.LocalDensity.current
+    LaunchedEffect(miniMode, viewportSize, miniVideoAspect, current.uri) {
+        if (!miniMode || viewportSize == IntSize.Zero) return@LaunchedEffect
+        val density = miniDensity
+        val horizontalLimit = (viewportSize.width - with(density) { 24.dp.toPx() }).coerceAtLeast(1f)
+        val verticalLimit = (viewportSize.height - with(density) { 100.dp.toPx() }).coerceAtLeast(1f)
+        val targetWidth = with(density) { 250.dp.toPx() }
+            .coerceAtMost(horizontalLimit)
+            .coerceAtMost(verticalLimit * miniVideoAspect)
+        if (!miniPositionInitialized) {
+            miniWidthPx = targetWidth
+            val margin = with(density) { 12.dp.toPx() }
+            val bottom = with(density) { 84.dp.toPx() }
+            val height = targetWidth / miniVideoAspect
+            miniOffset = Offset(
+                x = (viewportSize.width - targetWidth - margin).coerceAtLeast(margin),
+                y = (viewportSize.height - height - bottom).coerceAtLeast(margin)
+            )
+            miniPositionInitialized = true
+        } else {
+            val height = miniWidthPx / miniVideoAspect
+            miniOffset = Offset(
+                miniOffset.x.coerceIn(8f, (viewportSize.width - miniWidthPx - 8f).coerceAtLeast(8f)),
+                miniOffset.y.coerceIn(8f, (viewportSize.height - height - 8f).coerceAtLeast(8f))
+            )
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(if (miniMode) Color.Transparent else Color.Black).onSizeChanged { viewportSize = it }, contentAlignment = Alignment.Center) {
+        if (miniMode) {
+            MiniVideoWindow(
+                player = player,
+                playing = playing,
+                widthPx = miniWidthPx,
+                offset = miniOffset,
+                aspectRatio = miniVideoAspect,
+                seekIncrement = normalSkip,
+                english = english,
+                onMove = { delta ->
+                    val height = miniWidthPx / miniVideoAspect
+                    miniOffset = Offset(
+                        (miniOffset.x + delta.x).coerceIn(8f, (viewportSize.width - miniWidthPx - 8f).coerceAtLeast(8f)),
+                        (miniOffset.y + delta.y).coerceIn(8f, (viewportSize.height - height - 8f).coerceAtLeast(8f))
+                    )
+                },
+                onResize = { delta, fromLeft, fromTop ->
+                    val ratio = miniVideoAspect
+                    val horizontalDelta = if (fromLeft) -delta.x else delta.x
+                    val verticalDelta = (if (fromTop) -delta.y else delta.y) * ratio
+                    val sizeDelta = if (abs(horizontalDelta) >= abs(verticalDelta)) horizontalDelta else verticalDelta
+                    val oldWidth = miniWidthPx
+                    val oldHeight = oldWidth / ratio
+                    val oldRight = miniOffset.x + oldWidth
+                    val oldBottom = miniOffset.y + oldHeight
+                    val density = miniDensity
+                    val minimum = min(with(density) { 180.dp.toPx() }, (viewportSize.width - 16f).coerceAtLeast(1f))
+                    val maximum = min(
+                        (viewportSize.width - 16f).coerceAtLeast(minimum),
+                        ((viewportSize.height - 16f) * ratio).coerceAtLeast(minimum)
+                    )
+                    val newWidth = (oldWidth + sizeDelta).coerceIn(minimum, maximum)
+                    val newHeight = newWidth / ratio
+                    miniWidthPx = newWidth
+                    miniOffset = Offset(
+                        (if (fromLeft) oldRight - newWidth else miniOffset.x)
+                            .coerceIn(8f, (viewportSize.width - newWidth - 8f).coerceAtLeast(8f)),
+                        (if (fromTop) oldBottom - newHeight else miniOffset.y)
+                            .coerceIn(8f, (viewportSize.height - newHeight - 8f).coerceAtLeast(8f))
+                    )
+                },
+                onRestore = { onMiniModeChange(false) },
+                onClose = { exitPlayer() }
+            )
+        } else {
         val density = androidx.compose.ui.platform.LocalDensity.current
         val windowIsLandscape = viewportSize.width > viewportSize.height
         val rotateCanvas = false
@@ -729,7 +847,7 @@ internal fun Media3VideoPlayer(
                 Modifier.fillMaxSize()
                     .zIndex(1f)
                     .onSizeChanged { gestureWidth = it.width; gestureHeight = it.height }
-                    .pointerInput(controlsLocked, normalSkip, speed, duration, orientationMode, tapPause, portraitTapPause, settingsVersion) {
+                    .pointerInput(controlsLocked, normalSkip, speed, duration, orientationMode, tapPause, portraitTapPause, seekPauseRatio, settingsVersion) {
                         detectTapGestures(
                             onPress = {
                                 if (!controlsLocked) {
@@ -772,12 +890,12 @@ internal fun Media3VideoPlayer(
                                     return@detectTapGestures
                                 }
                                 val fraction = offset.x / size.width.coerceAtLeast(1)
-                                when {
-                                    fraction < 1f / 3f -> {
+                                when (doubleTapZone(fraction, seekPauseRatio)) {
+                                    -1 -> {
                                         seekToVideoFrame(player, player.currentPosition - normalSkip)
                                         gestureHud = appSeekText("快退", normalSkip, english)
                                     }
-                                    fraction > 2f / 3f -> {
+                                    1 -> {
                                         seekToVideoFrame(player, player.currentPosition + normalSkip)
                                         gestureHud = appSeekText("快进", normalSkip, english)
                                     }
@@ -791,7 +909,7 @@ internal fun Media3VideoPlayer(
                             }
                         )
                     }
-                    .pointerInput(controlsLocked, duration, gestureSkip, temporaryFastPlayback) {
+                    .pointerInput(controlsLocked, duration, gestureSkip, temporaryFastPlayback, brightnessVolumeRatio) {
                         var totalDragX = 0f
                         var totalDragY = 0f
                         var gestureStartX = 0f
@@ -815,10 +933,11 @@ internal fun Media3VideoPlayer(
                                     )
                                     gestureMode = if (angleFromHorizontal <= 60.0) {
                                         1
-                                    } else if (gestureStartX < gestureWidth / 2f) {
-                                        2
                                     } else {
-                                        3
+                                        verticalGestureZone(
+                                            gestureStartX / gestureWidth.coerceAtLeast(1),
+                                            brightnessVolumeRatio
+                                        )
                                     }
                                 }
                                 when (gestureMode) {
@@ -916,8 +1035,11 @@ internal fun Media3VideoPlayer(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                IconButton(onClick = { refreshControls(); if (!onEnterPictureInPicture()) onMiniModeChange(true) }) {
+                IconButton(onClick = { refreshControls(); onEnterPictureInPicture() }) {
                     Icon(HtmlPipIcon, appText("画中画", english), tint = Color.White)
+                }
+                IconButton(onClick = { refreshControls(); onMiniModeChange(true) }) {
+                    Icon(HtmlMiniWindowIcon, appText("小窗", english), tint = Color.White, modifier = Modifier.size(25.dp))
                 }
                 IconButton(onClick = ::startBackground) {
                     Icon(HtmlBackgroundIcon, appText("后台播放", english), tint = Color.White, modifier = Modifier.size(25.dp))
@@ -1113,5 +1235,136 @@ internal fun Media3VideoPlayer(
             )
         }
         }
+        }
+    }
+}
+
+/**
+ * Floating video window: drag the corners to resize, drag the middle to move,
+ * top-left restores full screen, top-right closes, and the centre row holds
+ * rewind / pause / fast-forward.
+ */
+@Composable
+private fun MiniVideoWindow(
+    player: ExoPlayer,
+    playing: Boolean,
+    widthPx: Float,
+    offset: Offset,
+    aspectRatio: Float,
+    seekIncrement: Long,
+    english: Boolean,
+    onMove: (Offset) -> Unit,
+    onResize: (Offset, Boolean, Boolean) -> Unit,
+    onRestore: () -> Unit,
+    onClose: () -> Unit
+) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val widthDp = with(density) { widthPx.toDp() }
+    val currentOnMove by rememberUpdatedState(onMove)
+    val currentOnResize by rememberUpdatedState(onResize)
+    val renderPlayer = player
+    Box(
+        Modifier
+            .offset { IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }
+            .width(widthDp)
+            .aspectRatio(aspectRatio)
+            .shadow(
+                14.dp,
+                RoundedCornerShape(7.dp),
+                ambientColor = Color.Black.copy(alpha = .34f),
+                spotColor = Color.Black.copy(alpha = .34f)
+            )
+            .clip(RoundedCornerShape(7.dp))
+            .background(Color.Black)
+    ) {
+        AndroidView(
+            factory = { viewContext ->
+                (PlayerView.inflate(viewContext, com.example.album.R.layout.view_media3_video_player, null) as PlayerView).apply {
+                    this.player = renderPlayer
+                    useController = false
+                }
+            },
+            update = { view -> view.player = renderPlayer },
+            modifier = Modifier.fillMaxSize().zIndex(-100f)
+        )
+        Box(
+            Modifier.fillMaxSize().zIndex(0f).pointerInput(Unit) {
+                var resizeFromLeft: Boolean? = null
+                var resizeFromTop: Boolean? = null
+                detectDragGestures(
+                    onDragStart = { start ->
+                        val edge = 28.dp.toPx()
+                        val fromLeft = start.x <= edge
+                        val fromRight = start.x >= size.width - edge
+                        val fromTop = start.y <= edge
+                        val fromBottom = start.y >= size.height - edge
+                        if ((fromLeft || fromRight) && (fromTop || fromBottom)) {
+                            resizeFromLeft = fromLeft
+                            resizeFromTop = fromTop
+                        }
+                    },
+                    onDragEnd = { resizeFromLeft = null; resizeFromTop = null },
+                    onDragCancel = { resizeFromLeft = null; resizeFromTop = null },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        val fromLeft = resizeFromLeft
+                        val fromTop = resizeFromTop
+                        if (fromLeft != null && fromTop != null) {
+                            currentOnResize(Offset(dragAmount.x, dragAmount.y), fromLeft, fromTop)
+                        } else {
+                            currentOnMove(Offset(dragAmount.x, dragAmount.y))
+                        }
+                    }
+                )
+            }
+        )
+        MiniVideoButton(
+            Icons.Outlined.Fullscreen,
+            appText("恢复全屏播放", english),
+            Modifier.align(Alignment.TopStart).zIndex(1000f),
+            onRestore
+        )
+        MiniVideoButton(
+            Icons.Outlined.Close,
+            appText("关闭", english),
+            Modifier.align(Alignment.TopEnd).zIndex(1000f),
+            onClose
+        )
+        MiniVideoButton(
+            Icons.Outlined.FastRewind,
+            appText("快退", english),
+            Modifier.align(Alignment.CenterStart).zIndex(1000f)
+        ) {
+            seekToVideoFrame(player, player.currentPosition - seekIncrement)
+        }
+        MiniVideoButton(
+            if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+            appText(if (playing) "暂停" else "播放", english),
+            Modifier.align(Alignment.Center).zIndex(1000f)
+        ) {
+            if (player.isPlaying) player.pause() else player.play()
+        }
+        MiniVideoButton(
+            Icons.Outlined.FastForward,
+            appText("快进", english),
+            Modifier.align(Alignment.CenterEnd).zIndex(1000f)
+        ) {
+            seekToVideoFrame(player, player.currentPosition + seekIncrement)
+        }
+    }
+}
+
+@Composable
+private fun MiniVideoButton(
+    icon: ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = modifier.size(40.dp).background(Color.Black.copy(alpha = .48f), CircleShape)
+    ) {
+        Icon(icon, label, tint = Color.White, modifier = Modifier.size(23.dp))
     }
 }

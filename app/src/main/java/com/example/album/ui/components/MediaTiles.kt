@@ -31,7 +31,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
@@ -80,6 +82,7 @@ fun AlbumTile(
     album: MediaAlbum,
     onLongClick: (() -> Unit)? = null,
     sharedElementEnabled: Boolean = true,
+    selected: Boolean? = null,
     onClick: () -> Unit
 ) {
     val english = LocalAppEnglish.current
@@ -104,6 +107,7 @@ fun AlbumTile(
                 showVideoMark = album.cover.isVideo,
                 showVideoDuration = false
             )
+            selected?.let { SelectionMark(selected = it, modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)) }
         }
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 2.dp, top = 7.dp, end = 2.dp),
@@ -125,6 +129,7 @@ fun PressableMediaThumbnail(
     showFavoriteBadge: Boolean = true,
     onLongClick: (() -> Unit)? = null,
     sharedElementEnabled: Boolean = true,
+    selected: Boolean? = null,
     onClick: () -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -142,6 +147,21 @@ fun PressableMediaThumbnail(
     ) {
         MediaThumbnail(item, Modifier.fillMaxSize())
         if (favorite && showFavoriteBadge) FavoriteBadge()
+        if (selected != null) SelectionMark(selected = selected, modifier = Modifier.align(Alignment.TopEnd).padding(5.dp))
+    }
+}
+
+@Composable
+private fun SelectionMark(selected: Boolean, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = CircleShape,
+        color = if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = .75f),
+        border = androidx.compose.foundation.BorderStroke(2.dp, Color.White)
+    ) {
+        Box(Modifier.size(VaultDimens.SelectionMarkSize), contentAlignment = Alignment.Center) {
+            if (selected) Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
+        }
     }
 }
 

@@ -1,5 +1,8 @@
 package com.example.album.wallpaper
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Handler
@@ -26,8 +29,21 @@ class VideoWallpaperService : WallpaperService() {
         private var prepareRetryCount = 0
         private var currentQueueIndex: Int? = null
         private var queueIdentity: String? = null
+        private var queueSnapshot: String? = null
+        private var singleSnapshot: String? = null
+        private var appliedSoundMode: String? = null
         private val failedQueueIndexes = mutableSetOf<Int>()
         private val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        private val settingsReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                reloadFromSettings()
+            }
+        }
+
+        override fun onCreate(holder: SurfaceHolder) {
+            super.onCreate(holder)
+            WallpaperRefresh.register(this@VideoWallpaperService, settingsReceiver)
+        }
         private val volumeHandler = Handler(Looper.getMainLooper())
         private val volumeUpdater = object : Runnable {
             override fun run() {
@@ -92,7 +108,45 @@ class VideoWallpaperService : WallpaperService() {
             failedQueueIndexes.clear()
             player?.release()
             player = null
+            runCatching { this@VideoWallpaperService.unregisterReceiver(settingsReceiver) }
             super.onDestroy()
+        }
+
+        /**
+         * Applies settings edits while the wallpaper keeps running. Queue or
+         * sound changes need different handling: a changed queue restarts the
+         * player, everything else is applied to the live instance.
+         */
+        private fun reloadFromSettings() {
+            val prefs = getSharedPreferences("album_preferences", MODE_PRIVATE)
+            val queueJson = prefs.getString("live_wallpaper_queue", "[]") ?: "[]"
+            val identity = prefs.getString("live_wallpaper_queue_dir", "live_wallpaper_queue")
+            val single = prefs.getString("live_wallpaper_single_video", null)
+            val structureChanged = queueJson != queueSnapshot || identity != queueIdentity || single != singleSnapshot
+            queueSnapshot = queueJson
+            singleSnapshot = single
+            queueIdentity = identity
+            if (structureChanged) {
+                failedQueueIndexes.clear()
+                playerReady = false
+                player?.release()
+                player = null
+                if (surfaceReady) startPlayback()
+                return
+            }
+            updateAudioOutput()
+            player?.let { ready ->
+                applyVideoScaling(ready)
+                if (playerReady) {
+                    if (shouldPlay()) {
+                        if (!ready.isPlaying) ready.start()
+                    } else if (ready.isPlaying) {
+                        ready.pause()
+                    }
+                }
+            }
+            volumeHandler.removeCallbacks(volumeUpdater)
+            if (player != null) volumeHandler.post(volumeUpdater)
         }
 
         private fun startPlayback(holder: SurfaceHolder? = surfaceHolder) {
@@ -122,15 +176,7 @@ class VideoWallpaperService : WallpaperService() {
                     val mode = soundMode()
                     val outputVolume = wallpaperOutputVolume(mode)
                     setVolume(outputVolume, outputVolume)
-                    if (mode == "BackgroundWithFocus") {
-                        audioManager.requestAudioFocus(
-                            audioFocusListener,
-                            AudioManager.STREAM_MUSIC,
-                            AudioManager.AUDIOFOCUS_GAIN
-                        )
-                    } else {
-                        audioManager.abandonAudioFocus(audioFocusListener)
-                    }
+                    syncAudioFocus(mode)
                     setOnPreparedListener { prepared ->
                         playerReady = true
                         prepareRetryCount = 0
@@ -190,9 +236,25 @@ class VideoWallpaperService : WallpaperService() {
                 .getString("wallpaper_sound", "Disabled") ?: "Disabled"
 
         private fun updateAudioOutput() {
+            syncAudioFocus(soundMode())
             player?.let {
                 val outputVolume = wallpaperOutputVolume(soundMode())
                 it.setVolume(outputVolume, outputVolume)
+            }
+        }
+
+        /** Only touches audio focus when the selected sound mode actually changes. */
+        private fun syncAudioFocus(mode: String) {
+            if (mode == appliedSoundMode) return
+            appliedSoundMode = mode
+            if (mode == "BackgroundWithFocus") {
+                audioManager.requestAudioFocus(
+                    audioFocusListener,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN
+                )
+            } else {
+                audioManager.abandonAudioFocus(audioFocusListener)
             }
         }
 

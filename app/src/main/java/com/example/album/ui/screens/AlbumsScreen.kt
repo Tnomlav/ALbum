@@ -128,6 +128,9 @@ fun AlbumsScreen(
     emptyMessage: String? = null,
     favoriteUris: Set<String> = emptySet()
     ,showFavoriteBadge: Boolean = true,
+    selectionPreview: Boolean = false,
+    selectedUris: Set<String> = emptySet(),
+    selectedFolders: Set<String> = emptySet(),
     additionalAlbumNames: Set<String> = emptySet()
     ,additionalFileNames: Map<String, Set<String>> = emptyMap()
     ,additionalChildFolderNames: Set<String> = emptySet()
@@ -198,7 +201,9 @@ fun AlbumsScreen(
                 onRefresh = onRefresh,
                 sharedElementEnabled = sharedElementEnabled,
                 onOpenPixivArchive = onOpenPixivArchive,
-                favoriteUris = favoriteUris
+                favoriteUris = favoriteUris,
+                selectionPreview = selectionPreview,
+                selectedUris = selectedUris
             )
         // Media matches can be shown immediately while the background folder
         // index continues. Only wait when there is no result yet; otherwise
@@ -223,7 +228,9 @@ fun AlbumsScreen(
                 onSelectionGestureStartAlbum = onSelectionGestureStartAlbum,
                 onRefresh = onRefresh,
                 sharedElementEnabled = sharedElementEnabled,
-                favoriteUris = favoriteUris
+                favoriteUris = favoriteUris,
+                selectionPreview = selectionPreview,
+                selectedFolders = selectedFolders
             )
         media.isEmpty() && pinnedAlbumName == null -> EmptyMessage(
             emptyMessage ?: if (query.isBlank()) appText(if (isVideo) "这里还没有视频" else "这里还没有图片", english) else appText("没有找到相关内容", english),
@@ -252,9 +259,9 @@ fun AlbumsScreen(
             val mediaVisibilityScope = if (LocalActiveSharedMediaKey.current == null) this else parentVisibilityScope
             CompositionLocalProvider(LocalMediaAnimatedVisibilityScope provides mediaVisibilityScope) {
                 if (shownAlbum != null) {
-                    FolderGrid(shownAlbum, folderColumns, layout, refreshing = refreshing, onOpenMedia = onOpenMedia, onLongPressMedia = onLongPressMedia, onSelectionGestureStartMedia = onSelectionGestureStartMedia, onBatchSelectMedia = onBatchSelectMedia, onSelectionGestureEnd = onSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, onOpenPixivArchive = onOpenPixivArchive, favoriteUris = favoriteUris, showFavoriteBadge = showFavoriteBadge, initialFirstVisibleItem = initialMediaFirstVisibleItem, initialFirstVisibleOffset = initialMediaFirstVisibleOffset, onScrollPositionChanged = onMediaScrollPositionChanged)
+                    FolderGrid(shownAlbum, folderColumns, layout, refreshing = refreshing, onOpenMedia = onOpenMedia, onLongPressMedia = onLongPressMedia, onSelectionGestureStartMedia = onSelectionGestureStartMedia, onBatchSelectMedia = onBatchSelectMedia, onSelectionGestureEnd = onSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, onOpenPixivArchive = onOpenPixivArchive, favoriteUris = favoriteUris, showFavoriteBadge = showFavoriteBadge, selectionPreview = selectionPreview, selectedUris = selectedUris, initialFirstVisibleItem = initialMediaFirstVisibleItem, initialFirstVisibleOffset = initialMediaFirstVisibleOffset, onScrollPositionChanged = onMediaScrollPositionChanged)
                 } else {
-                    AlbumGrid(albums, albumColumns, refreshing = refreshing, onOpenAlbum = onOpenedFolderChange, onLongPressAlbum = onLongPressAlbum, onSelectionGestureStartAlbum = onSelectionGestureStartAlbum, onBatchSelectAlbums = onBatchSelectAlbums, onSelectionGestureEnd = onAlbumSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, favoriteUris = favoriteUris, initialFirstVisibleItem = initialAlbumFirstVisibleItem, initialFirstVisibleOffset = initialAlbumFirstVisibleOffset, onScrollPositionChanged = onAlbumScrollPositionChanged)
+                    AlbumGrid(albums, albumColumns, refreshing = refreshing, onOpenAlbum = onOpenedFolderChange, onLongPressAlbum = onLongPressAlbum, onSelectionGestureStartAlbum = onSelectionGestureStartAlbum, onBatchSelectAlbums = onBatchSelectAlbums, onSelectionGestureEnd = onAlbumSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, favoriteUris = favoriteUris, selectionPreview = selectionPreview, selectedFolders = selectedFolders, initialFirstVisibleItem = initialAlbumFirstVisibleItem, initialFirstVisibleOffset = initialAlbumFirstVisibleOffset, onScrollPositionChanged = onAlbumScrollPositionChanged)
                 }
             }
         }
@@ -262,7 +269,7 @@ fun AlbumsScreen(
 }
 
 @Composable
-private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolean, onOpenAlbum: (String) -> Unit, onLongPressAlbum: (MediaAlbum, Int, Int) -> Unit, onSelectionGestureStartAlbum: ((MediaAlbum) -> Unit)?, onBatchSelectAlbums: (List<MediaAlbum>) -> Unit, onSelectionGestureEnd: () -> Unit, onRefresh: () -> Unit, sharedElementEnabled: Boolean = true, favoriteUris: Set<String> = emptySet(), initialFirstVisibleItem: Int = 0, initialFirstVisibleOffset: Int = 0, onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }) {
+private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolean, onOpenAlbum: (String) -> Unit, onLongPressAlbum: (MediaAlbum, Int, Int) -> Unit, onSelectionGestureStartAlbum: ((MediaAlbum) -> Unit)?, onBatchSelectAlbums: (List<MediaAlbum>) -> Unit, onSelectionGestureEnd: () -> Unit, onRefresh: () -> Unit, sharedElementEnabled: Boolean = true, favoriteUris: Set<String> = emptySet(), selectionPreview: Boolean = false, selectedFolders: Set<String> = emptySet(), initialFirstVisibleItem: Int = 0, initialFirstVisibleOffset: Int = 0, onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
     val gridState = rememberLazyGridState()
@@ -337,7 +344,8 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
                     AlbumTile(
                         album = album,
                         onLongClick = {},
-                        sharedElementEnabled = sharedElementEnabled
+                        sharedElementEnabled = sharedElementEnabled,
+                        selected = if (selectionPreview) album.name in selectedFolders else null
                     ) { onOpenAlbum(album.name) }
                 }
             }
@@ -391,6 +399,8 @@ private fun FolderGrid(
     onOpenPixivArchive: (() -> Unit)? = null,
     favoriteUris: Set<String> = emptySet(),
     showFavoriteBadge: Boolean = true,
+    selectionPreview: Boolean = false,
+    selectedUris: Set<String> = emptySet(),
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
@@ -442,7 +452,7 @@ private fun FolderGrid(
         }
     )
     if (layout == MediaLayout.Adaptive) {
-        AdaptiveFolderGrid(album, columns, refreshing, onOpenMedia, onLongPressMedia, onSelectionGestureStartMedia, onBatchSelectMedia, onSelectionGestureEnd, onRefresh, sharedElementEnabled, onOpenPixivArchive, favoriteUris, showFavoriteBadge, initialFirstVisibleItem, initialFirstVisibleOffset, onScrollPositionChanged)
+        AdaptiveFolderGrid(album, columns, refreshing, onOpenMedia, onLongPressMedia, onSelectionGestureStartMedia, onBatchSelectMedia, onSelectionGestureEnd, onRefresh, sharedElementEnabled, onOpenPixivArchive, favoriteUris, showFavoriteBadge, selectionPreview, selectedUris, initialFirstVisibleItem, initialFirstVisibleOffset, onScrollPositionChanged)
         return
     }
     Box(Modifier.fillMaxSize()) {
@@ -483,7 +493,7 @@ private fun FolderGrid(
             }
         }
         items(album.items, key = { it.uri.toString() }) { item ->
-            PressableMediaThumbnail(item, Modifier.fillMaxWidth().aspectRatio(1f), favorite = item.uri.toString() in favoriteUris, showFavoriteBadge = showFavoriteBadge, onLongClick = {}, sharedElementEnabled = sharedElementEnabled) { onOpenMedia(item) }
+            PressableMediaThumbnail(item, Modifier.fillMaxWidth().aspectRatio(1f), favorite = item.uri.toString() in favoriteUris, showFavoriteBadge = showFavoriteBadge, onLongClick = {}, sharedElementEnabled = sharedElementEnabled, selected = if (selectionPreview) item.uri.toString() in selectedUris else null) { onOpenMedia(item) }
         }
     }
     ListScrollHandle(
@@ -515,6 +525,8 @@ private fun AdaptiveFolderGrid(
     onOpenPixivArchive: (() -> Unit)? = null,
     favoriteUris: Set<String> = emptySet(),
     showFavoriteBadge: Boolean = true,
+    selectionPreview: Boolean = false,
+    selectedUris: Set<String> = emptySet(),
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
@@ -610,7 +622,8 @@ private fun AdaptiveFolderGrid(
                     favorite = item.uri.toString() in favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
                     onLongClick = {},
-                    sharedElementEnabled = sharedElementEnabled
+                    sharedElementEnabled = sharedElementEnabled,
+                    selected = if (selectionPreview) item.uri.toString() in selectedUris else null
                 ) { onOpenMedia(item) }
             }
         }

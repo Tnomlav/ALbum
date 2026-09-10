@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import kotlin.math.min
@@ -32,6 +33,10 @@ fun PrototypeViewport(
     content: @Composable () -> Unit
 ) {
     val deviceDensity = LocalDensity.current
+    // Read the font scale from the configuration so a system font-size change
+    // re-applies the same value Compose renders with (see the activity
+    // configChanges contract in the manifest).
+    val systemFontScale = LocalConfiguration.current.fontScale
     BoxWithConstraints(
         modifier = Modifier.fillMaxSize().background(Color.White),
         contentAlignment = Alignment.Center
@@ -46,7 +51,7 @@ fun PrototypeViewport(
         val scale = if (useFullWindow) 1f else prototypeViewportScale(maxWidth.value, maxHeight.value)
         val designDensity = Density(
             density = deviceDensity.density * scale,
-            fontScale = deviceDensity.fontScale
+            fontScale = systemFontScale
         )
         CompositionLocalProvider(LocalDensity provides designDensity) {
             Box(

@@ -1,5 +1,8 @@
 package com.example.album.wallpaper
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Matrix
@@ -10,7 +13,7 @@ import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
 import org.json.JSONArray
 import java.io.File
-import kotlin.math.min
+import kotlin.math.max
 
 /** Displays the imported static wallpaper queue and rotates it without the app UI running. */
 class ImageWallpaperService : WallpaperService() {
@@ -23,6 +26,17 @@ class ImageWallpaperService : WallpaperService() {
         private var hasBeenVisible = false
         private var surfaceWidth = 0
         private var surfaceHeight = 0
+        private var horizontalOffset = 0.5f
+        private val settingsReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                refreshFromSettings()
+            }
+        }
+
+        override fun onCreate(holder: SurfaceHolder) {
+            super.onCreate(holder)
+            WallpaperRefresh.register(this@ImageWallpaperService, settingsReceiver)
+        }
 
         private val rotateTask = object : Runnable {
             override fun run() {
@@ -62,9 +76,39 @@ class ImageWallpaperService : WallpaperService() {
             super.onSurfaceDestroyed(holder)
         }
 
+        override fun onOffsetsChanged(
+            xOffset: Float,
+            yOffset: Float,
+            xOffsetStep: Float,
+            yOffsetStep: Float,
+            xPixelOffset: Int,
+            yPixelOffset: Int
+        ) {
+            super.onOffsetsChanged(xOffset, yOffset, xOffsetStep, yOffsetStep, xPixelOffset, yPixelOffset)
+            // Only the "across screens" span keeps the image wider than the
+            // screen; following the launcher offset lets it scroll instead of
+            // jumping back to the centre.
+            if (spanAcrossScreens() && horizontalOffset != xOffset) {
+                horizontalOffset = xOffset
+                drawWallpaper()
+            }
+        }
+
         override fun onDestroy() {
             handler.removeCallbacksAndMessages(null)
+            runCatching { this@ImageWallpaperService.unregisterReceiver(settingsReceiver) }
             super.onDestroy()
+        }
+
+        /**
+         * Re-reads the queue and all display settings, then repaints the
+         * surface immediately. Without this the system keeps showing the
+         * previously drawn frame until the next rotation or visibility
+         * change, which is why edited settings appeared to be ignored.
+         */
+        private fun refreshFromSettings() {
+            drawWallpaper()
+            scheduleRotation()
         }
 
         private fun drawWallpaper() {
@@ -84,8 +128,16 @@ class ImageWallpaperService : WallpaperService() {
             val canvas = runCatching { holder.lockCanvas() }.getOrNull() ?: return
             try {
                 canvas.drawColor(android.graphics.Color.BLACK)
-                val scale = min(canvas.width.toFloat() / bitmap.width, canvas.height.toFloat() / bitmap.height)
-                val left = (canvas.width - bitmap.width * scale) / 2f
+                // Fill the whole screen without distorting the image: keep the
+                // aspect ratio and crop the overflowing edges instead of
+                // letterboxing with black bars.
+                val scale = max(canvas.width.toFloat() / bitmap.width, canvas.height.toFloat() / bitmap.height)
+                val overflow = bitmap.width * scale - canvas.width
+                val left = if (spanAcrossScreens() && overflow > 0f) {
+                    -overflow * horizontalOffset.coerceIn(0f, 1f)
+                } else {
+                    (canvas.width - bitmap.width * scale) / 2f
+                }
                 val top = (canvas.height - bitmap.height * scale) / 2f
                 val matrix = Matrix().apply { postScale(scale, scale); postTranslate(left, top) }
                 canvas.drawBitmap(bitmap, matrix, paint)
@@ -151,6 +203,8 @@ class ImageWallpaperService : WallpaperService() {
 
         private fun returnSwitchEnabled() = getSharedPreferences("album_preferences", MODE_PRIVATE).getBoolean("wallpaper_static_switch_on_home", false)
         private fun allowBackground() = getSharedPreferences("album_preferences", MODE_PRIVATE).getBoolean("wallpaper_allow_background", false)
+        private fun spanAcrossScreens() =
+            getSharedPreferences("album_preferences", MODE_PRIVATE).getString("wallpaper_span_mode", "single") == "scrolling"
 
         private fun calculateSampleSize(width: Int, height: Int, targetWidth: Int, targetHeight: Int): Int {
             var sample = 1

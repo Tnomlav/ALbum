@@ -84,6 +84,8 @@ fun TimelineScreen(
     sharedElementEnabled: Boolean = true,
     favoriteUris: Set<String> = emptySet(),
     showFavoriteBadge: Boolean = true,
+    selectionPreview: Boolean = false,
+    selectedUris: Set<String> = emptySet(),
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
@@ -157,6 +159,8 @@ fun TimelineScreen(
             sharedElementEnabled = sharedElementEnabled,
             favoriteUris = favoriteUris,
             showFavoriteBadge = showFavoriteBadge,
+            selectionPreview = selectionPreview,
+            selectedUris = selectedUris,
             initialFirstVisibleItem = initialFirstVisibleItem,
             initialFirstVisibleOffset = initialFirstVisibleOffset,
             onScrollPositionChanged = onScrollPositionChanged
@@ -181,6 +185,8 @@ fun TimelineScreen(
         sharedElementEnabled = sharedElementEnabled,
         favoriteUris = favoriteUris,
         showFavoriteBadge = showFavoriteBadge,
+        selectionPreview = selectionPreview,
+        selectedUris = selectedUris,
         initialFirstVisibleItem = initialFirstVisibleItem,
         initialFirstVisibleOffset = initialFirstVisibleOffset,
         onScrollPositionChanged = onScrollPositionChanged
@@ -206,6 +212,8 @@ private fun OptimizedTimelineGrid(
     sharedElementEnabled: Boolean = true,
     favoriteUris: Set<String> = emptySet(),
     showFavoriteBadge: Boolean = true,
+    selectionPreview: Boolean = false,
+    selectedUris: Set<String> = emptySet(),
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
@@ -334,7 +342,8 @@ private fun OptimizedTimelineGrid(
                             favorite = item.uri.toString() in favoriteUris,
                             showFavoriteBadge = showFavoriteBadge,
                             onLongClick = {},
-                            sharedElementEnabled = sharedElementEnabled
+                            sharedElementEnabled = sharedElementEnabled,
+                            selected = if (selectionPreview) item.uri.toString() in selectedUris else null
                         ) { onOpenMedia(item) }
                     }
                 }
@@ -374,6 +383,8 @@ private fun AdaptiveTimeline(
     sharedElementEnabled: Boolean = true,
     favoriteUris: Set<String> = emptySet(),
     showFavoriteBadge: Boolean = true,
+    selectionPreview: Boolean = false,
+    selectedUris: Set<String> = emptySet(),
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
@@ -487,7 +498,8 @@ private fun AdaptiveTimeline(
                             favorite = mediaItem.uri.toString() in favoriteUris,
                             showFavoriteBadge = showFavoriteBadge,
                             onLongClick = {},
-                            sharedElementEnabled = sharedElementEnabled
+                            sharedElementEnabled = sharedElementEnabled,
+                            selected = if (selectionPreview) mediaItem.uri.toString() in selectedUris else null
                         ) { onOpenMedia(mediaItem) }
                     }
                 }

@@ -123,6 +123,7 @@ import com.example.album.data.displayAddress
 import com.example.album.data.PixivArchiveRepository
 import com.example.album.data.WallpaperQueueState
 import com.example.album.data.WallpaperQueueStore
+import com.example.album.data.WallpaperAppliedStore
 import com.example.album.data.TransferMode
 import com.example.album.data.TransferRequest
 import com.example.album.playback.PlaybackResumeRequest
@@ -138,6 +139,7 @@ import com.example.album.ui.components.VaultOptionSheet
 import com.example.album.ui.components.VaultApplyChoiceSheet
 import com.example.album.ui.components.VaultSortChoiceSheet
 import com.example.album.ui.components.VaultSortWheelSheet
+import com.example.album.ui.components.VaultLayoutWheelSheet
 import com.example.album.ui.components.VaultWheelChoiceSheet
 import com.example.album.ui.components.VaultDateSheet
 import com.example.album.ui.components.VaultTextInputDialog
@@ -255,7 +257,8 @@ fun AlbumApp(
     playbackResumeRequest: PlaybackResumeRequest? = null,
     onPlaybackResumeConsumed: (Long) -> Unit = {},
     pictureInPictureMode: Boolean = false,
-    onEnterPictureInPicture: () -> Boolean = { false }
+    onEnterPictureInPicture: () -> Boolean = { false },
+    onAutoEnterPictureInPictureChange: (Boolean, Int, Int) -> Unit = { _, _, _ -> }
 ) {
     val context = LocalContext.current
     val english = LocalAppEnglish.current
@@ -329,7 +332,8 @@ fun AlbumApp(
     var pixivReloadGeneration by remember { mutableIntStateOf(0) }
     var pixivReloadJob by remember { mutableStateOf<Job?>(null) }
     var wallpaperColumns by rememberSaveable { mutableIntStateOf(4) }
-    var wallpaperLayout by rememberSaveable { mutableStateOf(MediaLayout.Grid) }
+    var wallpaperMediaLayout by rememberSaveable { mutableStateOf(MediaLayout.Grid) }
+    var wallpaperFolderLayout by rememberSaveable { mutableStateOf(MediaLayout.Grid) }
     var wallpaperSort by rememberSaveable { mutableStateOf(WallpaperSort.Time) }
     var wallpaperSortDirection by rememberSaveable { mutableStateOf(SortDirection.Descending) }
     var pixivArchiveOpen by rememberSaveable { mutableStateOf(false) }
@@ -360,6 +364,7 @@ fun AlbumApp(
     val wallpaperImportRunning = wallpaperImportState is WallpaperImportState.Running
     var showFavoriteBadge by remember { mutableStateOf(albumSettings.getBoolean("show_favorite_badge", true)) }
     var selectionMode by rememberSaveable { mutableStateOf(false) }
+    var selectionGestureActive by remember { mutableStateOf(false) }
     var selectingFolders by rememberSaveable { mutableStateOf(false) }
     var selectionMediaSort by rememberSaveable { mutableStateOf(initialSort) }
     var selectionMediaSortDirection by rememberSaveable { mutableStateOf(SortDirection.Descending) }
@@ -369,6 +374,9 @@ fun AlbumApp(
     var showWallpaperLayoutDialog by remember { mutableStateOf(false) }
     var showWallpaperSettings by remember { mutableStateOf(false) }
     var wallpaperCropItem by remember { mutableStateOf<MediaItem?>(null) }
+    var wallpaperAppliedSignature by remember { mutableStateOf<String?>(null) }
+    var wallpaperComponentActive by remember { mutableStateOf(false) }
+    var wallpaperAppliedRefresh by remember { mutableIntStateOf(0) }
 
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedFolders by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -391,6 +399,7 @@ fun AlbumApp(
     var searchOpen by rememberSaveable { mutableStateOf(true) }
     LaunchedEffect(selectionMode) {
         if (!selectionMode) {
+            selectionGestureActive = false
             selectedUris = emptySet()
             selectedFolders = emptySet()
             selectingFolders = false
@@ -446,6 +455,38 @@ fun AlbumApp(
     } }
     val wallpaperSearchMedia by remember(wallpaperLibraryMedia, wallpaperShowVideos) {
         derivedStateOf { wallpaperLibraryMedia.filter { it.isVideo == wallpaperShowVideos } }
+    }
+    val wallpaperApplyItems = remember(
+        wallpaperQueueMedia,
+        wallpaperShowVideos,
+        wallpaperSort,
+        wallpaperSortDirection,
+        wallpaperQueueOrder
+    ) {
+        sortWallpaperMedia(
+            media = wallpaperQueueMedia.filter { it.isVideo == wallpaperShowVideos },
+            sort = wallpaperSort,
+            sortDirection = wallpaperSortDirection,
+            queueOrder = wallpaperQueueOrder
+        )
+    }
+    val wallpaperApplySignature = remember(wallpaperApplyItems) {
+        WallpaperAppliedStore.signature(wallpaperApplyItems.map { it.uri.toString() })
+    }
+    val wallpaperQueueIsApplied = wallpaperComponentActive &&
+        wallpaperApplyItems.isNotEmpty() &&
+        wallpaperAppliedSignature == wallpaperApplySignature
+    LaunchedEffect(wallpaperShowVideos, wallpaperAppliedRefresh, wallpaperImportState) {
+        val kind = if (wallpaperShowVideos) WallpaperAppliedStore.KIND_DYNAMIC else WallpaperAppliedStore.KIND_STATIC
+        wallpaperAppliedSignature = withContext(Dispatchers.IO) { WallpaperAppliedStore.appliedSignature(context, kind) }
+        wallpaperComponentActive = withContext(Dispatchers.IO) { WallpaperAppliedStore.isWallpaperActive(context, kind) }
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) wallpaperAppliedRefresh++
+        }
+        lifecycleOwner?.lifecycle?.addObserver(observer)
+        onDispose { lifecycleOwner?.lifecycle?.removeObserver(observer) }
     }
 
     fun addToWallpaperQueue(items: List<com.example.album.data.MediaItem>) {
@@ -1778,6 +1819,7 @@ fun AlbumApp(
                 } else when {
                     wallpaperQuery.isNotBlank() -> appText("确认", english)
                     wallpaperSelectionMode -> appText("清除", english)
+                    wallpaperQueueIsApplied -> appText("重新应用", english)
                     else -> appText("应用", english)
                 },
                 actionEnabled = if (wallpaperImportRunning) true else if (wallpaperSelectionMode || wallpaperQuery.isNotBlank()) {
@@ -1802,12 +1844,7 @@ fun AlbumApp(
                         wallpaperSelectedUris = emptySet()
                         wallpaperSelectionOrder = emptyList()
                     } else {
-                        val currentItems = sortWallpaperMedia(
-                            media = wallpaperQueueMedia.filter { it.isVideo == wallpaperShowVideos },
-                            sort = wallpaperSort,
-                            sortDirection = wallpaperSortDirection,
-                            queueOrder = wallpaperQueueOrder
-                        )
+                        val currentItems = wallpaperApplyItems
                         if (wallpaperShowVideos) {
                             setDynamicWallpaper(context, currentItems, english)
                         } else {
@@ -1816,7 +1853,7 @@ fun AlbumApp(
                     }
                 },
                 chromeAlpha = pageChromeAlpha
-            ) else if (selectionMode) SelectionTopBar(
+            ) else if (selectionMode || selectionGestureActive) SelectionTopBar(
                 selected = if (selectingFolders) selectedFolders.size else selectedItemsForAction.size,
                 selectingFolders = selectingFolders,
                 onClose = { clearSelection() },
@@ -2406,8 +2443,8 @@ fun AlbumApp(
                         selectingFolders = false
                         selectedUris = selectedUris + items.map { it.uri.toString() }
                     },
-                    onSelectionGestureStartMedia = { pressed -> freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
-                    onSelectionGestureEnd = { selectionMode = true },
+                    onSelectionGestureStartMedia = { pressed -> selectionGestureActive = true; freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
                     onLongPressAlbum = { album, index, offset ->
                         freezeSelectionSort()
                         albumFirstVisibleItem = index
@@ -2418,12 +2455,13 @@ fun AlbumApp(
                         selectingFolders = true
                         selectedFolders = selectedFolders + album.name
                     },
+                    onSelectionGestureStartAlbum = { album -> selectionGestureActive = true; freezeSelectionSort(); selectingFolders = true; selectedFolders = selectedFolders + album.name },
                     onBatchSelectAlbums = { albums ->
                         freezeSelectionSort()
                         selectingFolders = true
                         selectedFolders = selectedFolders + albums.map { it.name }
                     },
-                    onAlbumSelectionGestureEnd = { selectionMode = true },
+                    onAlbumSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
                     onRefresh = { requestMediaScan(false) },
                     openedFolder = openedFolder,
                     onOpenedFolderChange = ::openFolder,
@@ -2431,6 +2469,9 @@ fun AlbumApp(
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
+                    selectionPreview = selectionGestureActive && !selectionMode,
+                    selectedUris = selectedUris,
+                    selectedFolders = selectedFolders,
                     additionalAlbumNames = if (appliedQuery.isBlank()) emptySet() else library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
                     additionalFileNames = if (appliedQuery.isBlank()) emptyMap() else library.searchableFolderFiles,
                     additionalChildFolderNames = if (openedFolder == null) emptySet() else library.searchableFolderChildren[openedFolder].orEmpty(),
@@ -2474,8 +2515,8 @@ fun AlbumApp(
                         selectingFolders = false
                         selectedUris = selectedUris + items.map { it.uri.toString() }
                     },
-                    onSelectionGestureStartMedia = { pressed -> freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
-                    onSelectionGestureEnd = { selectionMode = true },
+                    onSelectionGestureStartMedia = { pressed -> selectionGestureActive = true; freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
                     onLongPressAlbum = { album, index, offset ->
                         freezeSelectionSort()
                         albumFirstVisibleItem = index
@@ -2486,12 +2527,13 @@ fun AlbumApp(
                         selectingFolders = true
                         selectedFolders = selectedFolders + album.name
                     },
+                    onSelectionGestureStartAlbum = { album -> selectionGestureActive = true; freezeSelectionSort(); selectingFolders = true; selectedFolders = selectedFolders + album.name },
                     onBatchSelectAlbums = { albums ->
                         freezeSelectionSort()
                         selectingFolders = true
                         selectedFolders = selectedFolders + albums.map { it.name }
                     },
-                    onAlbumSelectionGestureEnd = { selectionMode = true },
+                    onAlbumSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
                     onRefresh = { requestMediaScan(false) },
                     openedFolder = openedFolder,
                     onOpenedFolderChange = ::openFolder,
@@ -2499,6 +2541,9 @@ fun AlbumApp(
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
+                    selectionPreview = selectionGestureActive && !selectionMode,
+                    selectedUris = selectedUris,
+                    selectedFolders = selectedFolders,
                     additionalAlbumNames = if (appliedQuery.isBlank()) emptySet() else library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
                     additionalFileNames = if (appliedQuery.isBlank()) emptyMap() else library.searchableFolderFiles,
                     additionalChildFolderNames = if (openedFolder == null) emptySet() else library.searchableFolderChildren[openedFolder].orEmpty(),
@@ -2538,12 +2583,14 @@ fun AlbumApp(
                         selectingFolders = false
                         selectedUris = selectedUris + items.map { it.uri.toString() }
                     },
-                    onSelectionGestureStartMedia = { pressed -> freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
-                    onSelectionGestureEnd = { selectionMode = true },
+                    onSelectionGestureStartMedia = { pressed -> selectionGestureActive = true; freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
                     onRefresh = { requestMediaScan(false) },
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
+                    selectionPreview = selectionGestureActive && !selectionMode,
+                    selectedUris = selectedUris,
                     onClearQuery = { query = "" }
                 )
                 MainTab.Pixiv -> Column(Modifier.fillMaxSize()) {
@@ -2579,8 +2626,8 @@ fun AlbumApp(
                         selectingFolders = false
                         selectedUris = selectedUris + items.map { it.uri.toString() }
                     },
-                    onSelectionGestureStartMedia = { pressed -> freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
-                    onSelectionGestureEnd = { selectionMode = true },
+                    onSelectionGestureStartMedia = { pressed -> selectionGestureActive = true; freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
+                    onSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
                     onLongPressAlbum = { album, index, offset ->
                         freezeSelectionSort()
                         selectionFolderFirstVisibleItem = index
@@ -2589,12 +2636,13 @@ fun AlbumApp(
                         selectingFolders = true
                         selectedFolders = selectedFolders + album.name
                     },
+                    onSelectionGestureStartAlbum = { album -> selectionGestureActive = true; freezeSelectionSort(); selectingFolders = true; selectedFolders = selectedFolders + album.name },
                     onBatchSelectAlbums = { albums ->
                         freezeSelectionSort()
                         selectingFolders = true
                         selectedFolders = selectedFolders + albums.map { it.name }
                     },
-                    onAlbumSelectionGestureEnd = { selectionMode = true },
+                    onAlbumSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
                     onRefresh = {
                         requestPixivReload()
                     },
@@ -2605,11 +2653,14 @@ fun AlbumApp(
                     onOpenPixivArchive = {
                         pixivArchiveOpen = true
                     },
+                    selectedFolders = selectedFolders,
                     pinnedAlbumName = pixivSourceFolderName,
                     albumQueryMatchesItems = pixivSearchMode != PixivSearchMode.Artist,
                     flatMode = pixivSearchMode == PixivSearchMode.Tag && appliedQuery.isNotBlank(),
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
+                    selectionPreview = selectionGestureActive && !selectionMode,
+                    selectedUris = selectedUris,
                     emptyMessage = if (appliedQuery.isBlank()) {
                         if (english) "Enter a tag to search images" else "输入 Tag 搜索图片"
                     } else if (english) "No images match this tag" else "没有匹配该 Tag 的图片"
@@ -2695,7 +2746,8 @@ fun AlbumApp(
                         selectedUris = wallpaperSelectedUris,
                         selectionOrder = wallpaperSelectionOrder,
                         columns = wallpaperColumns,
-                        layout = wallpaperLayout,
+                        mediaLayout = wallpaperMediaLayout,
+                        folderLayout = wallpaperFolderLayout,
                         sort = wallpaperSort,
                         sortDirection = wallpaperSortDirection,
                         queueOrder = wallpaperQueueOrder,
@@ -2791,7 +2843,8 @@ fun AlbumApp(
                             onEditTags = { editing -> openTagEditor(editing) },
                             onWallpaper = ::requestWallpaper,
                             pictureInPictureMode = pictureInPictureMode,
-                            onEnterPictureInPicture = onEnterPictureInPicture
+                            onEnterPictureInPicture = onEnterPictureInPicture,
+                            onAutoEnterPictureInPictureChange = onAutoEnterPictureInPictureChange
                         )
                     }
                 }
@@ -2876,14 +2929,24 @@ fun AlbumApp(
         )
     }
     if (showWallpaperLayoutDialog) {
-        val options = MediaLayout.entries.map { appText(it.label, english) }
-        VaultWheelChoiceSheet(
+        // Two wheels like the sort sheet: the first picks which surface is
+        // being configured (media ≈ timeline, folder ≈ album page), the
+        // second picks its layout.
+        val scopes = listOf(appText("媒体", english), appText("文件夹", english))
+        val layouts = MediaLayout.entries.map { appText(it.label, english) }
+        VaultLayoutWheelSheet(
             title = appText("排布方式", english),
-            options = options,
-            selected = appText(wallpaperLayout.label, english),
+            scopes = scopes,
+            layouts = layouts,
+            selectedScope = scopes.first(),
+            layoutForScope = { scope ->
+                val layout = if (scope == scopes.first()) wallpaperMediaLayout else wallpaperFolderLayout
+                appText(layout.label, english)
+            },
             onDismiss = { showWallpaperLayoutDialog = false },
-            onApply = { label ->
-                wallpaperLayout = MediaLayout.entries[options.indexOf(label)]
+            onApply = { scope, layout ->
+                val selected = MediaLayout.entries[layouts.indexOf(layout)]
+                if (scope == scopes.first()) wallpaperMediaLayout = selected else wallpaperFolderLayout = selected
                 showWallpaperLayoutDialog = false
             }
         )

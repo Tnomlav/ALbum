@@ -209,6 +209,64 @@ fun VaultSortWheelSheet(
     }
 }
 
+/**
+ * Two-wheel layout picker. The left wheel selects the surface being
+ * configured (for example media versus folder pages) and the right wheel
+ * selects the layout for that surface.
+ */
+@Composable
+fun VaultLayoutWheelSheet(
+    title: String,
+    scopes: List<String>,
+    layouts: List<String>,
+    selectedScope: String,
+    layoutForScope: (String) -> String,
+    onDismiss: () -> Unit,
+    onApply: (String, String) -> Unit
+) {
+    val english = LocalAppEnglish.current
+    var draftScope by remember(selectedScope, scopes) { mutableStateOf(selectedScope) }
+    var draftLayout by remember(draftScope, layouts) { mutableStateOf(layoutForScope(draftScope)) }
+    VaultBottomSheet(title, onDismiss) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                ChoiceWheel(
+                    scopes,
+                    draftScope,
+                    { next ->
+                        draftScope = next
+                        draftLayout = layoutForScope(next)
+                    },
+                    MaterialTheme.colorScheme.onSurface,
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = .16f)
+                )
+            }
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                ChoiceWheel(
+                    layouts,
+                    draftLayout,
+                    { draftLayout = it },
+                    MaterialTheme.colorScheme.onSurface,
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = .16f)
+                )
+            }
+        }
+        Spacer(Modifier.height(34.dp))
+        Box(Modifier.fillMaxWidth().height(74.dp), contentAlignment = Alignment.Center) {
+            TextButton(
+                onClick = { onApply(draftScope, draftLayout) },
+                modifier = Modifier.fillMaxWidth(.8f).height(54.dp),
+                shape = CircleShape,
+                border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+            ) {
+                Text(if (english) "Apply" else "应用", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
 @Composable
 fun VaultColorSheet(
     title: String,

@@ -235,7 +235,8 @@ fun MediaViewer(
     onEditTags: ((MediaItem) -> Unit)? = null,
     onWallpaper: ((MediaItem) -> Unit)? = null,
     pictureInPictureMode: Boolean = false,
-    onEnterPictureInPicture: () -> Boolean = { false }
+    onEnterPictureInPicture: () -> Boolean = { false },
+    onAutoEnterPictureInPictureChange: (Boolean, Int, Int) -> Unit = { _, _, _ -> }
 ) {
     val context = LocalContext.current
     val showRenameExtension = remember { context.getSharedPreferences("album_settings", android.content.Context.MODE_PRIVATE).getBoolean("rename_show_extension", false) }
@@ -273,6 +274,11 @@ fun MediaViewer(
     var imageViewport by remember { mutableStateOf(IntSize.Zero) }
     var imageControlsVisible by remember { mutableStateOf(true) }
     var videoMiniMode by remember { mutableStateOf(false) }
+    // The custom mini window belongs to the Media3 player; clear it when the
+    // current video is routed to the LibVLC fallback (AVI and friends).
+    LaunchedEffect(current.uri) {
+        if (requiresVlcPlayback(current)) videoMiniMode = false
+    }
     var viewerDirection by remember { mutableIntStateOf(1) }
     var highResolutionLoaded by remember(current.uri) { mutableStateOf(false) }
     var originalResolutionLoaded by remember(current.uri) { mutableStateOf(false) }
@@ -390,6 +396,15 @@ fun MediaViewer(
             }
         ) {
             if (current.isVideo) {
+                if (requiresVlcPlayback(current)) {
+                    VlcVideoPlayer(
+                        current = current,
+                        onBack = ::closeViewer,
+                        pictureInPictureMode = pictureInPictureMode,
+                        onEnterPictureInPicture = onEnterPictureInPicture,
+                        onAutoEnterPictureInPictureChange = onAutoEnterPictureInPictureChange
+                    )
+                } else {
                 Media3VideoPlayer(
                     current = current,
                     videos = viewerItems,
@@ -408,8 +423,10 @@ fun MediaViewer(
                      onWallpaper = onWallpaper?.let { action -> { action(current) } } ?: {},
                      onInfo = { showInfo = true },
                      onSettings = { showVideoSettings = true },
-                    settingsVersion = videoSettingsVersion
+                    settingsVersion = videoSettingsVersion,
+                    onAutoEnterPictureInPictureChange = onAutoEnterPictureInPictureChange
                 )
+                }
             } else {
                 val transformState = rememberTransformableState { zoomChange, panChange, _ ->
                     val nextScale = (imageScale * zoomChange).coerceIn(1f, 5f)
@@ -752,6 +769,9 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
     var normalSkip by remember { mutableStateOf(preferences.getString("normal_skip", "10秒") ?: "10秒") }
     var longSkipLength by remember { mutableStateOf(preferences.getString("long_skip_length", "30秒") ?: "30秒") }
     var gestureSeek by remember { mutableStateOf(preferences.getString("gesture_seek", "90秒") ?: "90秒") }
+    var autoMini by remember { mutableStateOf(preferences.getBoolean("video_auto_mini", false)) }
+    var brightnessVolumeRatio by remember { mutableStateOf(preferences.getString("video_brightness_volume_ratio", "1:1") ?: "1:1") }
+    var seekPauseRatio by remember { mutableStateOf(preferences.getString("video_seek_pause_ratio", "1:1:1") ?: "1:1:1") }
     var openChoice by remember { mutableStateOf<String?>(null) }
 
     fun putBoolean(key: String, value: Boolean) = preferences.edit().putBoolean(key, value).apply()
@@ -760,6 +780,8 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
         "normal" -> listOf("3秒", "5秒", "10秒", "15秒", "30秒")
         "long" -> listOf("30秒", "60秒", "90秒", "120秒")
         "gesture" -> listOf("30秒", "60秒", "90秒", "120秒", "150秒")
+        "brightnessVolume" -> listOf("1:1", "1:1:1", "1:2:1")
+        "seekPause" -> listOf("1:1:1", "1:2:1", "1:0:1")
         else -> emptyList()
     }
 
@@ -804,6 +826,11 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
                     putBoolean("video_portrait_tap_pause", it)
                     putBoolean("video_tap_pause", if (it) true else tapPause)
                 }
+                VideoSettingSwitch(appText("自动小窗", english), autoMini) {
+                    autoMini = it; putBoolean("video_auto_mini", it)
+                }
+                VideoSettingChoice(appText("亮度音量触控占比", english), brightnessVolumeRatio) { openChoice = "brightnessVolume" }
+                VideoSettingChoice(appText("快进暂停触控占比", english), seekPauseRatio) { openChoice = "seekPause" }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(appText("完成", english)) } }
@@ -820,7 +847,9 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
                     when (openChoice) {
                         "normal" -> appText("快进长度", english)
                         "long" -> appText("长快进长度", english)
-                        else -> appText("满屏滑动跳过时间", english)
+                        "gesture" -> appText("满屏滑动跳过时间", english)
+                        "brightnessVolume" -> appText("亮度音量触控占比", english)
+                        else -> appText("快进暂停触控占比", english)
                     }
                 )
             },
@@ -833,6 +862,8 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
                                     "normal" -> { normalSkip = option; putString("normal_skip", option) }
                                     "long" -> { longSkipLength = option; putString("long_skip_length", option) }
                                     "gesture" -> { gestureSeek = option; putString("gesture_seek", option) }
+                                    "brightnessVolume" -> { brightnessVolumeRatio = option; putString("video_brightness_volume_ratio", option) }
+                                    "seekPause" -> { seekPauseRatio = option; putString("video_seek_pause_ratio", option) }
                                 }
                                 openChoice = null
                             },

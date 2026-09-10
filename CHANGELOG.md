@@ -9,6 +9,16 @@ This file records release-level changes. Each exported release should have:
 
 ## v1.1.57 - 2026-09-04 (unreleased)
 
+- Wallpaper settings now re-apply immediately: the running static/live wallpaper services listen for a settings change broadcast and repaint or reload instead of waiting for the next rotation.
+- Static wallpapers fill the whole screen with the original aspect ratio (cropped, never letterboxed) and follow the launcher offset when "across screens" is selected.
+- The wallpaper manager shows "Re-apply" when the displayed queue is already the active wallpaper.
+- The wallpaper manager layout sheet now has two wheels (media ≈ timeline / folder ≈ album page × grid / adaptive) and adaptive layout uses the timeline's staggered presentation.
+- Long pressing a media or album tile enters multi-select immediately, and dragging without releasing keeps batch selecting; the selection bar appears with the first long press.
+- The in-player video settings mirror the Settings video section, and add the brightness/volume touch split (1:1, 1:1:1, 1:2:1) plus the seek/pause touch split (1:1:1, 1:2:1, 1:0:1).
+- Added an "auto mini window" video option (off by default): backgrounding the app during playback keeps playing in the system picture-in-picture window.
+- Rebuilt the in-app mini window: drag corners to resize, drag the middle to move, top-left restores full screen, top-right closes, and the centre row holds rewind / pause / fast-forward.
+- AVI and other containers ExoPlayer cannot demux now play through a bundled LibVLC player (`org.videolan.android:libvlc-all`), which also grows the APK by the bundled native libraries.
+- App text keeps following the system font size (font scale is read from the system configuration and `fontScale` no longer restarts the activity).
 - Added defensive handling for low-memory image conversion, thumbnail decoding, and editor loading paths.
 - Moved rename, delete, cache-size, duplicate-scan, and transfer file work off the main thread.
 - Added direct provider/file moves with permanent-delete fallback, conflict-safe naming, and stale Pixiv scan-state protection.

@@ -136,6 +136,9 @@ fun SettingsScreen(
     var rememberProgress by remember { mutableStateOf(preferences.getBoolean("video_progress", true)) }
     var autoHidePlayer by remember { mutableStateOf(preferences.getBoolean("video_auto_hide", true)) }
     var longSkip by remember { mutableStateOf(preferences.getBoolean("long_skip", false)) }
+    var tapPause by remember { mutableStateOf(preferences.getBoolean("video_tap_pause", false)) }
+    var portraitTapPause by remember { mutableStateOf(preferences.getBoolean("video_portrait_tap_pause", false)) }
+    var autoMini by remember { mutableStateOf(preferences.getBoolean("video_auto_mini", false)) }
     var edgeProtection by remember { mutableStateOf(preferences.getBoolean("edge_protection", true)) }
     var gifThumbnails by remember { mutableStateOf(preferences.getBoolean("gif_thumbnails", true)) }
     var previewOriginal by remember { mutableStateOf(preferences.getBoolean("preview_original", true)) }
@@ -334,6 +337,33 @@ fun SettingsScreen(
         if (longSkip) item { ValueRow("长快进长度", value("long_skip_length", "30秒")) { choose("长快进长度", "long_skip_length", listOf("30秒", "60秒", "90秒", "120秒"), value("long_skip_length", "30秒")) } }
         item { ValueRow("满屏滑动跳过时间", value("gesture_seek", "90秒"), "横向滑满整个屏幕对应的进度") { choose("满屏滑动跳过时间", "gesture_seek", listOf("30秒", "60秒", "90秒", "120秒", "150秒"), value("gesture_seek", "90秒")) } }
         item { ToggleRow("边缘误触保护", "在屏幕边缘松手时取消当次跳转", edgeProtection) { setBoolean("edge_protection", it) { edgeProtection = it } } }
+        item { ToggleRow("单击暂停", null, tapPause) {
+            setBoolean("video_tap_pause", it) {
+                tapPause = it
+                if (!it) {
+                    portraitTapPause = false
+                    preferences.edit().putBoolean("video_portrait_tap_pause", false).apply()
+                }
+            }
+        } }
+        item { ToggleRow("只在竖屏下单击暂停", null, portraitTapPause) {
+            setBoolean("video_portrait_tap_pause", it) {
+                portraitTapPause = it
+                if (it) {
+                    tapPause = true
+                    preferences.edit().putBoolean("video_tap_pause", true).apply()
+                }
+            }
+        } }
+        item { ToggleRow("自动小窗", "播放中切到后台时自动进入小窗并保持播放", autoMini) {
+            setBoolean("video_auto_mini", it) { autoMini = it }
+        } }
+        item { ValueRow("亮度音量触控占比", value("video_brightness_volume_ratio", "1:1")) {
+            choose("亮度音量触控占比", "video_brightness_volume_ratio", listOf("1:1", "1:1:1", "1:2:1"), value("video_brightness_volume_ratio", "1:1"))
+        } }
+        item { ValueRow("快进暂停触控占比", value("video_seek_pause_ratio", "1:1:1")) {
+            choose("快进暂停触控占比", "video_seek_pause_ratio", listOf("1:1:1", "1:2:1", "1:0:1"), value("video_seek_pause_ratio", "1:1:1"))
+        } }
 
         item { SettingsHeader("滚动条", "滚动条" !in collapsedSections) { toggleSection("滚动条") } }
         if ("滚动条" !in collapsedSections) {

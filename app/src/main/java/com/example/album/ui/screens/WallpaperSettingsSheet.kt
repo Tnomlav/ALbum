@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.components.VaultTextInputSheet
 import com.example.album.ui.components.VaultWheelChoiceSheet
+import com.example.album.wallpaper.WallpaperRefresh
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
@@ -228,7 +229,16 @@ fun WallpaperSettingsSheet(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { save(); onDismiss() }) { Text(text("应用", "Apply")) } },
+        confirmButton = {
+            TextButton(onClick = {
+                save()
+                // Let the wallpaper service pick the new settings up right
+                // away instead of waiting for the next rotation or a manual
+                // re-apply that the system may not honour.
+                WallpaperRefresh.notifySettingsChanged(context)
+                onDismiss()
+            }) { Text(text("应用", "Apply")) }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text(text("取消", "Cancel")) } }
     )
 

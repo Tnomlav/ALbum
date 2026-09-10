@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,10 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
@@ -84,7 +89,8 @@ fun WallpaperManagerScreen(
     selectedUris: Set<String>,
     selectionOrder: List<String>,
     columns: Int,
-    layout: MediaLayout,
+    mediaLayout: MediaLayout,
+    folderLayout: MediaLayout,
     sort: WallpaperSort,
     sortDirection: SortDirection,
     queueOrder: List<String>,
@@ -123,72 +129,179 @@ fun WallpaperManagerScreen(
         return
     }
 
-    LazyVerticalGrid(
-        columns = if (layout == MediaLayout.Adaptive) GridCells.Adaptive(96.dp) else GridCells.Fixed(columns.coerceIn(1, 6)),
-        contentPadding = PaddingValues(horizontal = 7.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            Text(
-                if (query.isBlank()) visibleMedia.size.toString()
-                else if (english) "Search results: ${visibleMedia.size}" else "搜索结果 ${visibleMedia.size} 项",
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelSmall,
-                textAlign = TextAlign.End
-            )
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val adaptiveFolderColumns = (maxWidth / 96.dp).toInt().coerceIn(2, 6)
+        val folderColumns = if (folderLayout == MediaLayout.Adaptive) adaptiveFolderColumns else columns.coerceIn(1, 6)
+        if (mediaLayout == MediaLayout.Adaptive) {
+            LazyVerticalStaggeredGrid(
+                columns = StaggeredGridCells.Fixed(columns.coerceIn(1, 6)),
+                contentPadding = PaddingValues(horizontal = 7.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalItemSpacing = 6.dp,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                item(span = StaggeredGridItemSpan.FullLine) {
+                    WallpaperResultCount(visibleMedia.size, query, english)
+                }
+                if (folders.isNotEmpty()) {
+                    item(span = StaggeredGridItemSpan.FullLine, key = "folders") {
+                        WallpaperFolderSection(folders, folderColumns, english)
+                    }
+                }
+                sections.forEach { (date, itemsForDate) ->
+                    item(span = StaggeredGridItemSpan.FullLine, key = "date:$date") {
+                        Text(date, modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 1.dp), color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                    }
+                    items(itemsForDate, key = { it.uri.toString() }) { item ->
+                        WallpaperMediaCell(
+                            item = item,
+                            selectionMode = selectionMode,
+                            selected = item.uri.toString() in selectedUris,
+                            visibleMedia = visibleMedia,
+                            english = english,
+                            aspectRatio = item.displayAspectRatio,
+                            onOpenMedia = onOpenMedia,
+                            onToggleSelection = onToggleSelection,
+                            onEnterSelectionMode = onEnterSelectionMode,
+                            onRemove = onRemove
+                        )
+                    }
+                }
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(columns.coerceIn(1, 6)),
+                contentPadding = PaddingValues(horizontal = 7.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    WallpaperResultCount(visibleMedia.size, query, english)
+                }
+                if (folders.isNotEmpty()) {
+                    item(key = "folders", span = { GridItemSpan(maxLineSpan) }) {
+                        WallpaperFolderSection(folders, folderColumns, english)
+                    }
+                }
+                sections.forEach { (date, itemsForDate) ->
+                    item(key = "date:$date", span = { GridItemSpan(maxLineSpan) }) {
+                        Text(date, modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 1.dp), color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                    }
+                    items(itemsForDate, key = { it.uri.toString() }) { item ->
+                        WallpaperMediaCell(
+                            item = item,
+                            selectionMode = selectionMode,
+                            selected = item.uri.toString() in selectedUris,
+                            visibleMedia = visibleMedia,
+                            english = english,
+                            aspectRatio = 1f,
+                            onOpenMedia = onOpenMedia,
+                            onToggleSelection = onToggleSelection,
+                            onEnterSelectionMode = onEnterSelectionMode,
+                            onRemove = onRemove
+                        )
+                    }
+                }
+            }
         }
-        if (query.isNotBlank()) {
-            folders.forEach { folder ->
-                item(key = "folder:$folder", span = { GridItemSpan(maxLineSpan) }) {
+    }
+}
+
+@Composable
+private fun WallpaperResultCount(count: Int, query: String, english: Boolean) {
+    Text(
+        if (query.isBlank()) count.toString()
+        else if (english) "Search results: $count" else "搜索结果 $count 项",
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall,
+        textAlign = TextAlign.End
+    )
+}
+
+@Composable
+private fun WallpaperFolderSection(folders: List<String>, columns: Int, english: Boolean) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        folders.chunked(columns.coerceAtLeast(1)).forEach { rowFolders ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                rowFolders.forEach { folder ->
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 5.dp),
+                        Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(Icons.Outlined.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                        Text(folder.substringAfterLast('/'), maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
+                        Icon(
+                            Icons.Outlined.Folder,
+                            contentDescription = appText("文件夹", english),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            folder.substringAfterLast('/'),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 12.sp
+                        )
                     }
+                }
+                repeat(columns - rowFolders.size) {
+                    Box(Modifier.weight(1f))
                 }
             }
         }
-        sections.forEach { (date, itemsForDate) ->
-            item(key = "date:$date", span = { GridItemSpan(maxLineSpan) }) {
-                Text(date, modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 1.dp), color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
-            }
-            items(itemsForDate, key = { it.uri.toString() }) { item ->
-                val selected = item.uri.toString() in selectedUris
-                Column(Modifier.fillMaxWidth()) {
-                    Box(
-                        Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(4.dp))
-                            .combinedClickable(
-                                onClick = { if (selectionMode) onToggleSelection(item) else onOpenMedia(item) },
-                                onLongClick = { onEnterSelectionMode(item, visibleMedia) }
-                            )
-                    ) {
-                        MediaThumbnail(item, Modifier.fillMaxSize(), showVideoDuration = item.isVideo, contentScale = ContentScale.Crop)
-                        if (selectionMode) {
-                            Box(
-                                Modifier.align(Alignment.TopEnd).padding(5.dp).size(23.dp)
-                                    .background(if (selected) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = .48f), RoundedCornerShape(50))
-                            ) {
-                                if (selected) Icon(Icons.Outlined.Check, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.fillMaxSize().padding(3.dp))
-                            }
-                        } else {
-                            Box(
-                                Modifier.align(Alignment.TopEnd).padding(4.dp).size(26.dp)
-                                    .clickable { onRemove(item) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Outlined.Close, appText("移出壁纸队列", english), tint = Color.White, modifier = Modifier.size(20.dp))
-                            }
-                        }
-                    }
-                    Text(item.name, modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 3.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
+private fun WallpaperMediaCell(
+    item: MediaItem,
+    selectionMode: Boolean,
+    selected: Boolean,
+    visibleMedia: List<MediaItem>,
+    english: Boolean,
+    aspectRatio: Float,
+    onOpenMedia: (MediaItem) -> Unit,
+    onToggleSelection: (MediaItem) -> Unit,
+    onEnterSelectionMode: (MediaItem, List<MediaItem>) -> Unit,
+    onRemove: (MediaItem) -> Unit
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(aspectRatio.coerceIn(.45f, 2.4f)).clip(RoundedCornerShape(4.dp))
+                .combinedClickable(
+                    onClick = { if (selectionMode) onToggleSelection(item) else onOpenMedia(item) },
+                    onLongClick = { onEnterSelectionMode(item, visibleMedia) }
+                )
+        ) {
+            MediaThumbnail(item, Modifier.fillMaxSize(), showVideoDuration = item.isVideo, contentScale = ContentScale.Crop)
+            if (selectionMode) {
+                Box(
+                    Modifier.align(Alignment.TopEnd).padding(5.dp).size(23.dp)
+                        .background(if (selected) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = .48f), RoundedCornerShape(50))
+                ) {
+                    if (selected) Icon(Icons.Outlined.Check, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.fillMaxSize().padding(3.dp))
+                }
+            } else {
+                Box(
+                    Modifier.align(Alignment.TopEnd).padding(4.dp).size(26.dp)
+                        .clickable { onRemove(item) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Outlined.Close, appText("移出壁纸队列", english), tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             }
         }
+        Text(
+            item.name,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 3.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }

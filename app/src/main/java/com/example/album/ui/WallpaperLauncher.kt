@@ -23,6 +23,8 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
 import com.example.album.data.MediaItem
+import com.example.album.data.WallpaperAppliedStore
+import com.example.album.wallpaper.WallpaperRefresh
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -154,7 +156,14 @@ fun setStaticWallpaper(context: Context, items: List<MediaItem>, english: Boolea
         english = english,
         failureMessage = if (english) "Unable to import images" else "无法导入图片",
         work = { update -> importStaticQueue(context, imageItems, update) },
-        onSuccess = { openStaticWallpaperSettings(context, english) }
+        onSuccess = {
+            WallpaperAppliedStore.markApplied(
+                context,
+                WallpaperAppliedStore.KIND_STATIC,
+                imageItems.map { it.uri.toString() }
+            )
+            openStaticWallpaperSettings(context, english)
+        }
     )
 }
 
@@ -208,7 +217,14 @@ fun setDynamicWallpaper(context: Context, items: List<MediaItem>, english: Boole
         english = english,
         failureMessage = if (english) "Unable to import videos" else "无法导入视频",
         work = { update -> importDynamicQueue(context, videoItems, update) },
-        onSuccess = { openDynamicWallpaperSettings(context, english) }
+        onSuccess = {
+            WallpaperAppliedStore.markApplied(
+                context,
+                WallpaperAppliedStore.KIND_DYNAMIC,
+                videoItems.map { it.uri.toString() }
+            )
+            openDynamicWallpaperSettings(context, english)
+        }
     )
 }
 
@@ -391,6 +407,9 @@ private fun cleanupUnusedWallpaperArtifacts(context: Context) {
 }
 
 private fun openStaticWallpaperSettings(context: Context, english: Boolean) {
+    // The queue was just rewritten, so a running static wallpaper must reload
+    // even if the system decides not to recreate the live wallpaper engine.
+    WallpaperRefresh.notifySettingsChanged(context)
     val component = ComponentName(context, com.example.album.wallpaper.ImageWallpaperService::class.java)
     val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
         putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, component)
@@ -401,6 +420,7 @@ private fun openStaticWallpaperSettings(context: Context, english: Boolean) {
 }
 
 private fun openDynamicWallpaperSettings(context: Context, english: Boolean) {
+    WallpaperRefresh.notifySettingsChanged(context)
     val component = ComponentName(context, com.example.album.wallpaper.VideoWallpaperService::class.java)
     val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
         putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, component)
