@@ -1,6 +1,6 @@
 # Album Changelog
 
-## v1.1.60 - 2026-09-13 (local signed build)
+## v1.1.62 - 2026-09-13 (local signed build)
 
 - Selection mode no longer builds a second grid: the page the user came from stays mounted, so the layout never switches to adaptive, the scroll position is kept, and leaving selection no longer flashes. Folder multi-select still uses the folder grid.
 - The layout setting is shared by the timeline and the folder pages, so choosing grid once means grid everywhere.
@@ -10,7 +10,7 @@
 - Empty and non-media folders appear while the storage walk is still running instead of only after it finishes, so searching for them is no longer much slower than for folders already known from the media scan.
 - The applied wallpaper queue is copied outside the app's private storage and restored (with a single system confirmation) after an update or reinstall cleared the live wallpaper.
 - APK: `app/release/app-release.apk` (arm64-v8a split)
-- SHA-256: `11FA4D1F2E2067F5CE8A01D10411AC524E60240764354ADA1507FDF34A999498`
+- SHA-256: `EF2AD641D893E663CA2AAB12FE680FD8C5E6D0E22E85A77581810A7C65BA8431`
 - Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug` and `assembleRelease` passed; the signed arm64 build was installed on the connected phone, where grid layout keeps square tiles in selection mode and the mini-window button enters picture-in-picture.
 
 ## v1.1.59 - 2026-09-12 (local signed build)
