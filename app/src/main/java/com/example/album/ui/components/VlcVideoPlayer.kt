@@ -13,18 +13,24 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.FastForward
 import androidx.compose.material.icons.outlined.FastRewind
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PictureInPictureAlt
+import androidx.compose.material.icons.outlined.ScreenRotation
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -57,6 +63,9 @@ import com.example.album.data.MediaItem
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
 import kotlinx.coroutines.delay
+import kotlin.math.abs
+import kotlin.math.min
+import kotlin.math.roundToInt
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
@@ -131,7 +140,9 @@ internal fun VlcVideoPlayer(
     onBack: () -> Unit,
     pictureInPictureMode: Boolean,
     onEnterPictureInPicture: () -> Boolean,
-    onAutoEnterPictureInPictureChange: (Boolean, Int, Int) -> Unit = { _, _, _ -> }
+    onAutoEnterPictureInPictureChange: (Boolean, Int, Int) -> Unit = { _, _, _ -> },
+    miniMode: Boolean = false,
+    onMiniModeChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val english = LocalAppEnglish.current
@@ -143,6 +154,14 @@ internal fun VlcVideoPlayer(
     var controlsInteraction by remember { mutableIntStateOf(0) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
+    var miniWidthPx by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var miniOffset by remember { androidx.compose.runtime.mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var miniInitialized by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var viewportSize by remember { androidx.compose.runtime.mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    var orientationMode by remember {
+        androidx.compose.runtime.mutableIntStateOf(preferences.getInt("video_orientation_mode", 0).coerceIn(0, 3))
+    }
+    val activity = context as? Activity
     val skip = (preferences.getString("normal_skip", "10秒")?.filter(Char::isDigit)?.toLongOrNull() ?: 10L) * 1000L
     val autoHide = preferences.getBoolean("video_auto_hide", true)
     LaunchedEffect(playing, current.width, current.height) {
@@ -246,7 +265,48 @@ internal fun VlcVideoPlayer(
         return "%02d:%02d".format(seconds / 60L, seconds % 60L)
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    val videoAspect = if (current.width > 0 && current.height > 0) {
+        (current.width.toFloat() / current.height.toFloat()).coerceIn(.45f, 2.4f)
+    } else {
+        16f / 9f
+    }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    LaunchedEffect(miniMode, viewportSize, videoAspect) {
+        if (!miniMode || viewportSize == androidx.compose.ui.unit.IntSize.Zero) return@LaunchedEffect
+        val horizontalLimit = (viewportSize.width - with(density) { 24.dp.toPx() }).coerceAtLeast(1f)
+        val verticalLimit = (viewportSize.height - with(density) { 100.dp.toPx() }).coerceAtLeast(1f)
+        val targetWidth = with(density) { 250.dp.toPx() }
+            .coerceAtMost(horizontalLimit)
+            .coerceAtMost(verticalLimit * videoAspect)
+        if (!miniInitialized) {
+            miniWidthPx = targetWidth
+            val margin = with(density) { 12.dp.toPx() }
+            val bottom = with(density) { 84.dp.toPx() }
+            miniOffset = androidx.compose.ui.geometry.Offset(
+                x = (viewportSize.width - targetWidth - margin).coerceAtLeast(margin),
+                y = (viewportSize.height - targetWidth / videoAspect - bottom).coerceAtLeast(margin)
+            )
+            miniInitialized = true
+        }
+    }
+    Box(
+        Modifier.fillMaxSize()
+            .background(if (miniMode) Color.Transparent else Color.Black)
+            .onSizeChanged { viewportSize = it }
+    ) {
+        Box(
+            Modifier.then(
+                if (miniMode) {
+                    Modifier
+                        .offset { androidx.compose.ui.unit.IntOffset(miniOffset.x.roundToInt(), miniOffset.y.roundToInt()) }
+                        .width(with(density) { miniWidthPx.toDp() })
+                        .aspectRatio(videoAspect)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(7.dp))
+                } else {
+                    Modifier.fillMaxSize()
+                }
+            ).background(Color.Black)
+        ) {
         AndroidView(
             factory = { viewContext ->
                 VLCVideoLayout(viewContext).also { layout ->
@@ -256,6 +316,48 @@ internal fun VlcVideoPlayer(
             update = { },
             modifier = Modifier.fillMaxSize()
         )
+        if (miniMode) {
+            MiniWindowOverlay(
+                playing = playing,
+                seekBack = { seekBy(-skip); controlsInteraction++ },
+                seekForward = { seekBy(skip); controlsInteraction++ },
+                onTogglePlay = { togglePlayback() },
+                onMove = { delta ->
+                    val height = miniWidthPx / videoAspect
+                    miniOffset = androidx.compose.ui.geometry.Offset(
+                        (miniOffset.x + delta.x).coerceIn(8f, (viewportSize.width - miniWidthPx - 8f).coerceAtLeast(8f)),
+                        (miniOffset.y + delta.y).coerceIn(8f, (viewportSize.height - height - 8f).coerceAtLeast(8f))
+                    )
+                },
+                onResize = { delta, fromLeft, fromTop ->
+                    val ratio = videoAspect
+                    val horizontalDelta = if (fromLeft) -delta.x else delta.x
+                    val verticalDelta = (if (fromTop) -delta.y else delta.y) * ratio
+                    val sizeDelta = if (abs(horizontalDelta) >= abs(verticalDelta)) horizontalDelta else verticalDelta
+                    val oldWidth = miniWidthPx
+                    val oldHeight = oldWidth / ratio
+                    val oldRight = miniOffset.x + oldWidth
+                    val oldBottom = miniOffset.y + oldHeight
+                    val minimum = min(with(density) { 180.dp.toPx() }, (viewportSize.width - 16f).coerceAtLeast(1f))
+                    val maximum = min(
+                        (viewportSize.width - 16f).coerceAtLeast(minimum),
+                        ((viewportSize.height - 16f) * ratio).coerceAtLeast(minimum)
+                    )
+                    val newWidth = (oldWidth + sizeDelta).coerceIn(minimum, maximum)
+                    val newHeight = newWidth / ratio
+                    miniWidthPx = newWidth
+                    miniOffset = androidx.compose.ui.geometry.Offset(
+                        (if (fromLeft) oldRight - newWidth else miniOffset.x)
+                            .coerceIn(8f, (viewportSize.width - newWidth - 8f).coerceAtLeast(8f)),
+                        (if (fromTop) oldBottom - newHeight else miniOffset.y)
+                            .coerceIn(8f, (viewportSize.height - newHeight - 8f).coerceAtLeast(8f))
+                    )
+                },
+                onRestore = { onMiniModeChange(false) },
+                onClose = onBack
+            )
+        }
+        if (!miniMode) {
         Box(
             Modifier.fillMaxSize().pointerInput(Unit) {
                 detectTapGestures(
@@ -278,7 +380,7 @@ internal fun VlcVideoPlayer(
                 )
             }
         )
-        if (controlsVisible && !pictureInPictureMode) {
+        if (controlsVisible) {
             Row(
                 Modifier.align(Alignment.TopCenter).fillMaxWidth()
                     .background(Brush.verticalGradient(listOf(Color.Black.copy(.72f), Color.Transparent)))
@@ -296,8 +398,8 @@ internal fun VlcVideoPlayer(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                IconButton(onClick = { onEnterPictureInPicture() }, modifier = Modifier.size(46.dp)) {
-                    Icon(Icons.Outlined.PictureInPictureAlt, appText("画中画", english), tint = Color.White)
+                IconButton(onClick = { onMiniModeChange(true) }, modifier = Modifier.size(46.dp)) {
+                    Icon(Icons.Outlined.PictureInPictureAlt, appText("小窗", english), tint = Color.White)
                 }
             }
             Row(
@@ -327,7 +429,7 @@ internal fun VlcVideoPlayer(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(timeText(position), color = Color.White, fontSize = 12.sp, modifier = Modifier.size(width = 48.dp, height = 24.dp))
-                    Slider(
+                    VaultLineSlider(
                         value = if (duration > 0L) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f,
                         onValueChange = { fraction ->
                             runCatching {
@@ -336,15 +438,55 @@ internal fun VlcVideoPlayer(
                             controlsInteraction++
                         },
                         modifier = Modifier.weight(1f).height(24.dp),
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color.White,
-                            activeTrackColor = Color.White,
-                            inactiveTrackColor = Color.White.copy(.3f)
-                        )
+                        activeColor = Color.White,
+                        inactiveColor = Color.White.copy(alpha = .35f),
+                        thumbColor = Color.White,
+                        thumbBorderColor = Color.White
                     )
                     Text(timeText(duration), color = Color.White, fontSize = 12.sp, modifier = Modifier.size(width = 48.dp, height = 24.dp))
                 }
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = {
+                            val next = (orientationMode + 1) % 4
+                            orientationMode = next
+                            preferences.edit().putInt("video_orientation_mode", next).apply()
+                            activity?.requestedOrientation = when (next) {
+                                1 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                2 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                3 -> if (current.width > current.height && current.height > 0) {
+                                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                } else {
+                                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                }
+                                else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+                            }
+                            controlsInteraction++
+                        },
+                        modifier = Modifier.weight(1f).height(46.dp)
+                    ) {
+                        Icon(
+                            when (orientationMode) {
+                                1 -> Icons.Outlined.ScreenRotation
+                                2 -> Icons.Outlined.ScreenRotation
+                                else -> Icons.Outlined.ScreenRotation
+                            },
+                            appText(orientationModeLabel(orientationMode), english),
+                            tint = Color.White,
+                            modifier = Modifier.size(25.dp)
+                        )
+                    }
+                    Text(
+                        appText(orientationModeLabel(orientationMode), english),
+                        Modifier.weight(2f),
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
             }
+        }
+        }
         }
     }
 }

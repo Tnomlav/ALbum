@@ -37,7 +37,9 @@ internal fun DeferredVideoSeekSlider(
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
     colors: SliderColors,
-    thumb: (@Composable (() -> Unit))? = null
+    thumb: (@Composable (() -> Unit))? = null,
+    activeColor: Color = Color.White,
+    inactiveColor: Color = Color.White.copy(alpha = .35f)
 ) {
     val duration = durationMs.coerceAtLeast(1L)
     var displayedValue by remember { mutableFloatStateOf(valueMs.toFloat()) }
@@ -93,7 +95,7 @@ internal fun DeferredVideoSeekSlider(
         }
     }
 
-    Slider(
+    VaultLineSlider(
         value = displayedValue.coerceIn(0f, duration.toFloat()),
         // During touch gestures the custom handler owns the interaction. Keep
         // the callback for semantic/keyboard actions, which have no pointer
@@ -107,11 +109,10 @@ internal fun DeferredVideoSeekSlider(
         },
         valueRange = 0f..duration.toFloat(),
         modifier = modifier.then(gestureModifier),
-        colors = colors,
-        thumb = {
-            if (thumb != null) thumb()
-            else Box(Modifier.size(20.dp).background(Color.White, CircleShape))
-        }
+        activeColor = activeColor,
+        inactiveColor = inactiveColor,
+        thumbColor = Color.White,
+        thumbBorderColor = Color.White
     )
 }
 

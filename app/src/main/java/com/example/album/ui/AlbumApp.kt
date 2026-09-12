@@ -778,10 +778,16 @@ fun AlbumApp(
             scope.isNotEmpty() && scope.all { it.folder == openedFolder } &&
                 scope.any { it.uri == item.uri }
         } == true
-        val candidateScope = if (hasExactFolderOrder) {
-            visibleItems
-        } else {
-            mediaInDisplayOrder(visibleItems)
+        val candidateScope = when {
+            // The timeline shows the library list order grouped by date; the
+            // player must use that same order for "next video".
+            selectedTab == MainTab.Timeline -> {
+                val timelineItems = (if (timelineShowsVideos) visibleVideos else visibleImages)
+                    .filter { it.isVideo == item.isVideo }
+                timelineItems.takeIf { scope -> scope.any { it.uri == item.uri } } ?: visibleItems
+            }
+            hasExactFolderOrder -> visibleItems
+            else -> mediaInDisplayOrder(visibleItems)
         }
             ?: if (item.isVideo) {
                 mediaInDisplayOrder((library.videos + library.localVideos).distinctBy { it.uri.toString() })
@@ -1041,7 +1047,6 @@ fun AlbumApp(
             wallpaperManagerOpen -> wallpaperManagerOpen = false
             openedFolder != null -> navigateFolderBack()
             query.isNotBlank() -> suspendSearch()
-            searchOpen -> suspendSearch()
             favoriteFilter -> favoriteFilter = false
             timelineJumpDate != null -> timelineJumpDate = null
             selectedTab != primaryTab -> returnToPrimaryTab()
@@ -2568,8 +2573,10 @@ fun AlbumApp(
                     isVideo = timelineShowsVideos,
                     columns = timelineColumns,
                     layout = timelineLayout,
-                    initialFirstVisibleItem = timelineFirstVisibleItem,
-                    initialFirstVisibleOffset = timelineFirstVisibleOffset,
+                    // Selection mode updates the shared position; use it so
+                    // leaving selection returns to the same spot.
+                    initialFirstVisibleItem = selectionMediaFirstVisibleItem,
+                    initialFirstVisibleOffset = selectionMediaFirstVisibleOffset,
                     onScrollPositionChanged = { index, offset ->
                         timelineFirstVisibleItem = index
                         timelineFirstVisibleOffset = offset
@@ -2952,7 +2959,7 @@ fun AlbumApp(
             title = appText("排布方式", english),
             scopes = scopes,
             layouts = layouts,
-            selectedScope = scopes.first(),
+            selectedScope = if (wallpaperFolderMode) scopes.last() else scopes.first(),
             layoutForScope = { scope ->
                 val layout = if (scope == scopes.first()) wallpaperMediaLayout else wallpaperFolderLayout
                 appText(layout.label, english)

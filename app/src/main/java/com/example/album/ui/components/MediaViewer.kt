@@ -274,16 +274,16 @@ fun MediaViewer(
     var imageViewport by remember { mutableStateOf(IntSize.Zero) }
     var imageControlsVisible by remember { mutableStateOf(true) }
     var videoMiniMode by remember { mutableStateOf(false) }
-    // null = still probing which player can handle the current video.
+    // Start on the Media3 player (so its brightness/volume state is not torn
+    // down by a probe) and only switch to LibVLC when the format or the
+    // platform decoder requires it.
     var useVlcPlayer by remember(current.uri) {
-        mutableStateOf<Boolean?>(if (current.isVideo && requiresVlcPlayback(current)) true else null)
+        mutableStateOf(current.isVideo && requiresVlcPlayback(current))
     }
     LaunchedEffect(current.uri) {
         if (!current.isVideo) return@LaunchedEffect
-        if (requiresVlcPlayback(current)) {
+        if (!requiresVlcPlayback(current) && platformLacksVideoDecoder(context, current)) {
             useVlcPlayer = true
-        } else {
-            useVlcPlayer = platformLacksVideoDecoder(context, current)
         }
     }
     // Formats/codecs the platform player cannot handle are replayed with the
@@ -412,7 +412,7 @@ fun MediaViewer(
             }
         ) {
             if (current.isVideo) {
-                if (useVlcPlayer == true || vlcFallbackForCurrent) {
+                if (useVlcPlayer || vlcFallbackForCurrent) {
                     android.util.Log.i("AlbumVlcFallback", "rendering LibVLC player for ${current.name}")
                     VlcVideoPlayer(
                         current = current,
@@ -421,7 +421,7 @@ fun MediaViewer(
                         onEnterPictureInPicture = onEnterPictureInPicture,
                         onAutoEnterPictureInPictureChange = onAutoEnterPictureInPictureChange
                     )
-                } else if (useVlcPlayer == false) {
+                } else {
                 Media3VideoPlayer(
                     current = current,
                     videos = viewerItems,
@@ -453,8 +453,6 @@ fun MediaViewer(
                         }
                     }
                 )
-                } else {
-                    Box(Modifier.fillMaxSize().background(Color.Black))
                 }
             } else {
                 val transformState = rememberTransformableState { zoomChange, panChange, _ ->
@@ -1936,33 +1934,33 @@ private fun MiniVideoPlayer(
                 )
             }
         )
-        MiniVideoButton(
+        LegacyMiniVideoButton(
             Icons.Outlined.Fullscreen,
             appText("恢复全屏播放", english),
             Modifier.align(Alignment.TopStart).zIndex(1000f),
             onRestore
         )
-        MiniVideoButton(
+        LegacyMiniVideoButton(
             Icons.Outlined.Close,
             appText("关闭", english),
             Modifier.align(Alignment.TopEnd).zIndex(1000f),
             onClose
         )
-        MiniVideoButton(
+        LegacyMiniVideoButton(
             Icons.Outlined.FastRewind,
             appText("快退", english),
             Modifier.align(Alignment.CenterStart).zIndex(1000f)
         ) {
             seekToVideoFrame(player, player.currentPosition - seekIncrement)
         }
-        MiniVideoButton(
+        LegacyMiniVideoButton(
             if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
             appText(if (playing) "暂停" else "播放", english),
             Modifier.align(Alignment.Center).zIndex(1000f)
         ) {
             if (player.isPlaying) player.pause() else player.play()
         }
-        MiniVideoButton(
+        LegacyMiniVideoButton(
             Icons.Outlined.FastForward,
             appText("快进", english),
             Modifier.align(Alignment.CenterEnd).zIndex(1000f)
@@ -1973,7 +1971,7 @@ private fun MiniVideoPlayer(
 }
 
 @Composable
-private fun MiniVideoButton(
+private fun LegacyMiniVideoButton(
     icon: ImageVector,
     label: String,
     modifier: Modifier = Modifier,

@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.components.VaultTextInputSheet
 import com.example.album.ui.components.VaultWheelChoiceSheet
+import com.example.album.ui.components.VaultLineSlider
 import com.example.album.wallpaper.WallpaperRefresh
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -182,49 +183,14 @@ fun WallpaperSettingsSheet(
                     val volumeActiveColor = androidx.compose.material3.MaterialTheme.colorScheme.primary
                     val volumeInactiveColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant
                     val volumeEnabled = dynamicBackground && sound != WallpaperSound.Disabled
-                    Slider(
+                    VaultLineSlider(
                         value = wallpaperVolume,
                         onValueChange = { wallpaperVolume = it },
                         enabled = volumeEnabled,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
-                        track = { sliderState ->
-                            Canvas(Modifier.fillMaxWidth().height(4.dp)) {
-                                val fraction = ((sliderState.value - sliderState.valueRange.start) /
-                                    (sliderState.valueRange.endInclusive - sliderState.valueRange.start))
-                                    .coerceIn(0f, 1f)
-                                val centerY = size.height / 2f
-                                val thumbCenter = size.width * fraction
-                                drawLine(
-                                    volumeActiveColor,
-                                    androidx.compose.ui.geometry.Offset(0f, centerY),
-                                    androidx.compose.ui.geometry.Offset(thumbCenter, centerY),
-                                    strokeWidth = size.height,
-                                    cap = androidx.compose.ui.graphics.StrokeCap.Round
-                                )
-                                drawLine(
-                                    volumeInactiveColor,
-                                    androidx.compose.ui.geometry.Offset(thumbCenter, centerY),
-                                    androidx.compose.ui.geometry.Offset(size.width, centerY),
-                                    strokeWidth = size.height,
-                                    cap = androidx.compose.ui.graphics.StrokeCap.Round
-                                )
-                            }
-                        },
-                        thumb = {
-                            Box(
-                                Modifier.size(12.dp)
-                                    .clip(CircleShape)
-                                    .background(volumeActiveColor, CircleShape)
-                            )
-                        },
-                        colors = SliderDefaults.colors(
-                            activeTrackColor = androidx.compose.ui.graphics.Color.Transparent,
-                            inactiveTrackColor = androidx.compose.ui.graphics.Color.Transparent,
-                            thumbColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledActiveTrackColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledInactiveTrackColor = androidx.compose.ui.graphics.Color.Transparent,
-                            disabledThumbColor = androidx.compose.ui.graphics.Color.Transparent
-                        )
+                        activeColor = volumeActiveColor,
+                        inactiveColor = volumeInactiveColor,
+                        thumbColor = volumeActiveColor
                     )
                 }
             }

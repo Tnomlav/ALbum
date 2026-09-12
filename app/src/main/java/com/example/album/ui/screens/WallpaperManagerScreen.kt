@@ -52,6 +52,7 @@ import com.example.album.ui.MediaSort
 import com.example.album.ui.SortDirection
 import com.example.album.ui.components.MediaThumbnail
 import com.example.album.ui.searchTextMatches
+import com.example.album.ui.theme.VaultDimens
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -160,6 +161,7 @@ fun WallpaperManagerScreen(
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 7.dp, vertical = 8.dp)) {
                 WallpaperFolderSection(
                     folders = folderQueue.keys.toList(),
+                    covers = folderQueue.mapValues { it.value.firstOrNull() },
                     counts = folderQueue.mapValues { it.value.size },
                     columns = folderColumns,
                     english = english,
@@ -184,7 +186,17 @@ fun WallpaperManagerScreen(
                 }
                 if (folders.isNotEmpty()) {
                     item(span = StaggeredGridItemSpan.FullLine, key = "folders") {
-                        WallpaperFolderSection(folders, folderColumns, english)
+                        WallpaperFolderSection(
+                            folders = folders,
+                            covers = remember(folders, searchMedia) {
+                                folders.associateWith { folder -> searchMedia.firstOrNull { it.folder == folder } }
+                            },
+                            counts = remember(folders, searchMedia) {
+                                folders.associateWith { folder -> searchMedia.count { it.folder == folder } }
+                            },
+                            columns = folderColumns,
+                            english = english
+                        )
                     }
                 }
                 sections.forEach { (date, itemsForDate) ->
@@ -223,7 +235,17 @@ fun WallpaperManagerScreen(
                 }
                 if (folders.isNotEmpty()) {
                     item(key = "folders", span = { GridItemSpan(maxLineSpan) }) {
-                        WallpaperFolderSection(folders, folderColumns, english)
+                        WallpaperFolderSection(
+                            folders = folders,
+                            covers = remember(folders, searchMedia) {
+                                folders.associateWith { folder -> searchMedia.firstOrNull { it.folder == folder } }
+                            },
+                            counts = remember(folders, searchMedia) {
+                                folders.associateWith { folder -> searchMedia.count { it.folder == folder } }
+                            },
+                            columns = folderColumns,
+                            english = english
+                        )
                     }
                 }
                 sections.forEach { (date, itemsForDate) ->
@@ -278,6 +300,7 @@ private fun WallpaperFolderBackRow(folder: String, english: Boolean, onClose: ()
 @Composable
 private fun WallpaperFolderSection(
     folders: List<String>,
+    covers: Map<String, MediaItem?>,
     columns: Int,
     english: Boolean,
     counts: Map<String, Int> = emptyMap(),
@@ -287,29 +310,46 @@ private fun WallpaperFolderSection(
         folders.chunked(columns.coerceAtLeast(1)).forEach { rowFolders ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 rowFolders.forEach { folder ->
-                    Row(
-                        Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .clickable { onOpenFolder(folder) }
-                            .padding(horizontal = 8.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            Icons.Outlined.Folder,
-                            contentDescription = appText("文件夹", english),
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            folder.substringAfterLast('/'),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 12.sp
-                        )
-                        counts[folder]?.let { count ->
-                            Text(count.toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    Column(Modifier.weight(1f).clickable { onOpenFolder(folder) }) {
+                        Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
+                            val cover = covers[folder]
+                            if (cover != null) {
+                                MediaThumbnail(
+                                    cover,
+                                    Modifier.fillMaxSize().clip(RoundedCornerShape(VaultDimens.AlbumRadius)),
+                                    showVideoDuration = false
+                                )
+                            } else {
+                                Box(
+                                    Modifier.fillMaxSize()
+                                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(VaultDimens.AlbumRadius)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Folder,
+                                        contentDescription = appText("文件夹", english),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.fillMaxSize(.34f)
+                                    )
+                                }
+                            }
+                        }
+                        Row(
+                            Modifier.fillMaxWidth().padding(start = 2.dp, top = 7.dp, end = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                folder.substringAfterLast('/'),
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = VaultDimens.AlbumName
+                            )
+                            counts[folder]?.let { count ->
+                                Text(count.toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = VaultDimens.AlbumCount)
+                            }
                         }
                     }
                 }

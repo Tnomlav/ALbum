@@ -1,4 +1,4 @@
-﻿package com.example.album.ui.screens
+package com.example.album.ui.screens
 
 import android.content.Context
 import androidx.compose.animation.AnimatedContent
@@ -272,20 +272,16 @@ fun AlbumsScreen(
 private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolean, onOpenAlbum: (String) -> Unit, onLongPressAlbum: (MediaAlbum, Int, Int) -> Unit, onSelectionGestureStartAlbum: ((MediaAlbum) -> Unit)?, onBatchSelectAlbums: (List<MediaAlbum>) -> Unit, onSelectionGestureEnd: () -> Unit, onRefresh: () -> Unit, sharedElementEnabled: Boolean = true, favoriteUris: Set<String> = emptySet(), selectionPreview: Boolean = false, selectedFolders: Set<String> = emptySet(), initialFirstVisibleItem: Int = 0, initialFirstVisibleOffset: Int = 0, onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
-    val gridState = rememberLazyGridState()
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
+    )
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
             .sample(80L)
             .collectLatest { (index, offset) -> onScrollPositionChanged(index, offset) }
     }
-    var restored by remember { mutableStateOf(false) }
-    LaunchedEffect(albums) {
-        if (!restored && albums.isNotEmpty()) {
-            gridState.scrollToItem(initialFirstVisibleItem.coerceIn(0, albums.lastIndex), initialFirstVisibleOffset.coerceAtLeast(0))
-            restored = true
-        }
-    }
-    val albumCovers = remember(albums) { albums.mapNotNull { it.coverItem ?: it.items.firstOrNull() } }
+        val albumCovers = remember(albums) { albums.mapNotNull { it.coverItem ?: it.items.firstOrNull() } }
     LazyGridMediaPrefetch(gridState, albumCovers, keySelector = MediaItem::folder)
     var pullDistance by remember { mutableFloatStateOf(0f) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -407,20 +403,16 @@ private fun FolderGrid(
 ) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
-    val gridState = rememberLazyGridState()
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
+    )
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
             .sample(80L)
             .collectLatest { (index, offset) -> onScrollPositionChanged(index, offset) }
     }
-    var restored by remember { mutableStateOf(false) }
-    LaunchedEffect(album.items) {
-        if (!restored && album.items.isNotEmpty()) {
-            gridState.scrollToItem(initialFirstVisibleItem.coerceIn(0, album.items.lastIndex), initialFirstVisibleOffset.coerceAtLeast(0))
-            restored = true
-        }
-    }
-    LazyGridMediaPrefetch(gridState, album.items)
+        LazyGridMediaPrefetch(gridState, album.items)
     var pullDistance by remember { mutableFloatStateOf(0f) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val scrollJob = remember { arrayOfNulls<Job>(1) }
@@ -533,20 +525,16 @@ private fun AdaptiveFolderGrid(
 ) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
-    val state = rememberLazyStaggeredGridState()
+    val state = androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState(
+        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
+    )
     LaunchedEffect(state) {
         snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
             .sample(80L)
             .collectLatest { (index, offset) -> onScrollPositionChanged(index, offset) }
     }
-    var restored by remember { mutableStateOf(false) }
-    LaunchedEffect(album.items) {
-        if (!restored && album.items.isNotEmpty()) {
-            state.scrollToItem(initialFirstVisibleItem.coerceIn(0, album.items.lastIndex), initialFirstVisibleOffset.coerceAtLeast(0))
-            restored = true
-        }
-    }
-    LazyStaggeredGridMediaPrefetch(state, album.items)
+        LazyStaggeredGridMediaPrefetch(state, album.items)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val scrollJob = remember { arrayOfNulls<Job>(1) }
     val metrics by remember(state) { derivedStateOf { staggeredGridScrollMetrics(state) } }

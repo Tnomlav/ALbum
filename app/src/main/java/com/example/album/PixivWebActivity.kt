@@ -331,20 +331,43 @@ class PixivWebActivity : ComponentActivity() {
          */
         private const val PIXIV_DIRECT_LOGIN_SCRIPT = """
             (function () {
-              try {
-                var wanted = ['使用pixiv ID或邮箱地址', '使用邮箱地址', '邮箱地址', 'メールアドレス', 'pixiv ID / メールアドレス'];
-                var nodes = document.querySelectorAll('a,button,div[role=button],li,span,label');
-                for (var i = 0; i < nodes.length; i++) {
-                  var text = (nodes[i].textContent || '').replace(/\s+/g, '');
-                  if (wanted.indexOf(text) >= 0) { nodes[i].click(); break; }
-                }
-                var password = document.querySelector('input[type=password]');
-                if (password) {
-                  password.scrollIntoView({ block: 'center' });
-                  var field = document.querySelector('input[name="pixiv_id"], input[type=text], input[type=email]');
-                  if (field) field.focus();
-                }
-              } catch (error) { }
+              if (window.__albumPixivDirectLogin) return;
+              window.__albumPixivDirectLogin = true;
+              var wanted = [
+                '使用pixivID或邮箱地址', '使用pixivID或邮箱地址登录', '使用邮箱地址', '邮箱地址登录',
+                'pixivID或邮箱地址', 'pixivID/邮箱地址', 'ID/邮箱地址', '邮箱地址', '登录',
+                'メールアドレスでログイン', 'メールアドレス', 'pixivIDまたはメールアドレス', 'ログイン'
+              ];
+              var tries = 0;
+              var timer = setInterval(function () {
+                tries += 1;
+                try {
+                  var password = document.querySelector('input[type=password]');
+                  if (!password) {
+                    var nodes = document.querySelectorAll('a,button,div[role=button],li,span,label,p');
+                    for (var i = 0; i < nodes.length; i++) {
+                      var node = nodes[i];
+                      var text = (node.textContent || '').replace(/\s+/g, '');
+                      if (!text || text.length > 40) continue;
+                      var href = node.getAttribute ? (node.getAttribute('href') || '') : '';
+                      var direct = href.indexOf('login_type=email') >= 0 || href.indexOf('/login/email') >= 0;
+                      if (direct || wanted.indexOf(text) >= 0) {
+                        var target = node.closest('a,button,div[role=button],li,label') || node;
+                        target.click();
+                        break;
+                      }
+                    }
+                  }
+                  password = document.querySelector('input[type=password]');
+                  if (password) {
+                    password.scrollIntoView({ block: 'center' });
+                    var field = document.querySelector('input[name="pixiv_id"], input[name="login_id"], input[type=text], input[type=email]');
+                    if (field) field.focus();
+                    clearInterval(timer);
+                  }
+                } catch (error) { }
+                if (tries >= 20) clearInterval(timer);
+              }, 700);
             })();
         """
     }

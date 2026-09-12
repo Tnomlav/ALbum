@@ -182,7 +182,20 @@ private val HtmlPortraitIcon: ImageVector by lazy {
 private fun htmlOrientationIcon(mode: Int): ImageVector = when (mode) {
     1 -> HtmlLandscapeIcon
     2 -> HtmlPortraitIcon
+    3 -> HtmlAutoOrientationIcon
     else -> HtmlFullscreenIcon
+}
+
+private val HtmlAutoOrientationIcon = htmlLineIcon("html-auto-orientation") {
+    moveTo(8f, 4f); lineTo(16f, 4f); lineTo(18f, 6f); lineTo(18f, 18f); lineTo(16f, 20f); lineTo(8f, 20f); lineTo(6f, 18f); lineTo(6f, 6f); close()
+    moveTo(11f, 9f); lineTo(13f, 9f); lineTo(13f, 15f); lineTo(11f, 15f); close()
+}
+
+internal fun orientationModeLabel(mode: Int): String = when (mode) {
+    1 -> "始终横屏"
+    2 -> "始终竖屏"
+    3 -> "按视频比例"
+    else -> "适配重力"
 }
 
 private fun htmlLineIcon(name: String, draw: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit): ImageVector =
@@ -265,14 +278,6 @@ internal fun Media3VideoPlayer(
     val autoMiniWindow = preferences.getBoolean("video_auto_mini", false)
     val brightnessVolumeRatio = preferences.getString("video_brightness_volume_ratio", "1:1") ?: "1:1"
     val seekPauseRatio = preferences.getString("video_seek_pause_ratio", "1:1:1") ?: "1:1:1"
-    // Android 12+ auto-enters picture-in-picture when the app leaves the
-    // foreground, which keeps the player resumed instead of pausing first.
-    LaunchedEffect(autoMiniWindow, playing, current.width, current.height) {
-        onAutoEnterPictureInPictureChange(autoMiniWindow && playing, current.width, current.height)
-    }
-    DisposableEffect(Unit) {
-        onDispose { onAutoEnterPictureInPictureChange(false, 0, 0) }
-    }
     var mode by remember { mutableIntStateOf(0) }
     val latestMode by rememberUpdatedState(mode)
     var speed by remember { mutableFloatStateOf(1f) }
@@ -296,7 +301,7 @@ internal fun Media3VideoPlayer(
         mutableFloatStateOf(((audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: max).toFloat() / max).coerceIn(0f, 1f))
     }
     var orientationMode by remember {
-        mutableIntStateOf(preferences.getInt("video_orientation_mode", 0).coerceIn(0, 2))
+        mutableIntStateOf(preferences.getInt("video_orientation_mode", 0).coerceIn(0, 3))
     }
     var lockedOrientation by remember { mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) }
     var displayedOrientationMode by remember { mutableIntStateOf(0) }
@@ -395,10 +400,23 @@ internal fun Media3VideoPlayer(
         }
     }
 
+    @android.annotation.SuppressLint("WrongConstant")
     fun orientationRequest(mode: Int): Int = when (mode) {
         1 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         2 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        3 -> if (current.width > current.height && current.height > 0) {
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else if (current.height > 0) {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        }
         else -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+    }
+
+    @android.annotation.SuppressLint("WrongConstant")
+    fun applyOrientation(mode: Int) {
+        hostActivity?.requestedOrientation = orientationRequest(mode)
     }
 
     // Let the player own the window orientation while it is open. This gives
@@ -492,13 +510,10 @@ internal fun Media3VideoPlayer(
                     val pauseOnBackground = preferences.getBoolean("video_pause_on_background", true)
                     val autoMini = preferences.getBoolean("video_auto_mini", false)
                     if (autoMini && !miniMode && !pictureInPictureMode && player.playWhenReady) {
-                        // Auto mini window: hand the still-playing instance to
-                        // the system picture-in-picture window so playback
-                        // continues without an interruption.
-                        if (!onEnterPictureInPicture() && pauseOnBackground) {
-                            pausedForBackground = true
-                            player.pause()
-                        }
+                        // Auto mini window: keep playing and switch to the
+                        // app's own floating window instead of the system
+                        // picture-in-picture window.
+                        onMiniModeChange(true)
                     } else if (pauseOnBackground && player.playWhenReady) {
                         pausedForBackground = true
                         player.pause()
@@ -1057,9 +1072,6 @@ internal fun Media3VideoPlayer(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                IconButton(onClick = { refreshControls(); onEnterPictureInPicture() }) {
-                    Icon(HtmlPipIcon, appText("画中画", english), tint = Color.White)
-                }
                 IconButton(onClick = { refreshControls(); onMiniModeChange(true) }) {
                     Icon(HtmlMiniWindowIcon, appText("小窗", english), tint = Color.White, modifier = Modifier.size(25.dp))
                 }
@@ -1134,13 +1146,9 @@ internal fun Media3VideoPlayer(
                             refreshControls()
                         }))
                         add(Triple(HtmlNextIcon, "下一个视频", { adjacent(true) }))
-                        add(Triple(htmlOrientationIcon(displayedOrientationMode), "横竖屏", {
-                            val nextMode = (orientationMode + 1) % 3
-                            hostActivity?.requestedOrientation = when (nextMode) {
-                                1 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                                2 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                                else -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
-                            }
+                        add(Triple(htmlOrientationIcon(displayedOrientationMode), orientationModeLabel(orientationMode), {
+                            val nextMode = (orientationMode + 1) % 4
+                            applyOrientation(nextMode)
                             orientationMode = nextMode
                             preferences.edit().putInt("video_orientation_mode", nextMode).apply()
                             refreshControls()
@@ -1265,17 +1273,23 @@ internal fun Media3VideoPlayer(
  * top-left restores full screen, top-right closes, and the centre row holds
  * rewind / pause / fast-forward.
  */
+/**
+ * Shared floating-window controls: drag the corners to resize, drag the middle
+ * to move, top-left restores full screen, top-right closes, and the centre row
+ * holds rewind / pause / fast-forward.
+ */
 @Composable
-private fun MiniWindowControls(
-    player: ExoPlayer,
+internal fun MiniWindowOverlay(
     playing: Boolean,
-    seekIncrement: Long,
-    english: Boolean,
+    seekBack: () -> Unit,
+    seekForward: () -> Unit,
+    onTogglePlay: () -> Unit,
     onMove: (Offset) -> Unit,
     onResize: (Offset, Boolean, Boolean) -> Unit,
     onRestore: () -> Unit,
     onClose: () -> Unit
 ) {
+    val english = LocalAppEnglish.current
     val currentOnMove by rememberUpdatedState(onMove)
     val currentOnResize by rememberUpdatedState(onResize)
     Box(Modifier.fillMaxSize()) {
@@ -1310,44 +1324,44 @@ private fun MiniWindowControls(
                 )
             }
         )
-        MiniVideoButton(
-            Icons.Outlined.Fullscreen,
-            appText("恢复全屏播放", english),
-            Modifier.align(Alignment.TopStart).zIndex(1000f),
-            onRestore
-        )
-        MiniVideoButton(
-            Icons.Outlined.Close,
-            appText("关闭", english),
-            Modifier.align(Alignment.TopEnd).zIndex(1000f),
-            onClose
-        )
-        MiniVideoButton(
-            Icons.Outlined.FastRewind,
-            appText("快退", english),
-            Modifier.align(Alignment.CenterStart).zIndex(1000f)
-        ) {
-            seekToVideoFrame(player, player.currentPosition - seekIncrement)
-        }
+        MiniVideoButton(Icons.Outlined.Fullscreen, appText("恢复全屏播放", english), Modifier.align(Alignment.TopStart).zIndex(1000f), onRestore)
+        MiniVideoButton(Icons.Outlined.Close, appText("关闭", english), Modifier.align(Alignment.TopEnd).zIndex(1000f), onClose)
+        MiniVideoButton(Icons.Outlined.FastRewind, appText("快退", english), Modifier.align(Alignment.CenterStart).zIndex(1000f), seekBack)
         MiniVideoButton(
             if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
             appText(if (playing) "暂停" else "播放", english),
-            Modifier.align(Alignment.Center).zIndex(1000f)
-        ) {
-            if (player.isPlaying) player.pause() else player.play()
-        }
-        MiniVideoButton(
-            Icons.Outlined.FastForward,
-            appText("快进", english),
-            Modifier.align(Alignment.CenterEnd).zIndex(1000f)
-        ) {
-            seekToVideoFrame(player, player.currentPosition + seekIncrement)
-        }
+            Modifier.align(Alignment.Center).zIndex(1000f),
+            onTogglePlay
+        )
+        MiniVideoButton(Icons.Outlined.FastForward, appText("快进", english), Modifier.align(Alignment.CenterEnd).zIndex(1000f), seekForward)
     }
 }
 
 @Composable
-private fun MiniVideoButton(
+private fun MiniWindowControls(
+    player: ExoPlayer,
+    playing: Boolean,
+    seekIncrement: Long,
+    english: Boolean,
+    onMove: (Offset) -> Unit,
+    onResize: (Offset, Boolean, Boolean) -> Unit,
+    onRestore: () -> Unit,
+    onClose: () -> Unit
+) {
+    MiniWindowOverlay(
+        playing = playing,
+        seekBack = { seekToVideoFrame(player, player.currentPosition - seekIncrement) },
+        seekForward = { seekToVideoFrame(player, player.currentPosition + seekIncrement) },
+        onTogglePlay = { if (player.isPlaying) player.pause() else player.play() },
+        onMove = onMove,
+        onResize = onResize,
+        onRestore = onRestore,
+        onClose = onClose
+    )
+}
+
+@Composable
+internal fun MiniVideoButton(
     icon: ImageVector,
     label: String,
     modifier: Modifier = Modifier,

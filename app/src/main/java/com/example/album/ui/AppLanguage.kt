@@ -41,6 +41,7 @@ private val APP_ENGLISH = mapOf(
     "收藏" to "Favorite", "取消收藏所选" to "Unfavorite selected", "移到回收站" to "Move to Trash", "菜单" to "Menu", "壁纸" to "Wallpaper",
     "播放速度" to "Playback speed", "倍速" to "Speed", "画中画" to "Picture-in-picture",
     "小窗" to "Mini window", "自动小窗" to "Auto mini window", "恢复全屏播放" to "Restore full screen",
+    "适配重力" to "Follow sensor", "始终横屏" to "Always landscape", "始终竖屏" to "Always portrait", "按视频比例" to "Match video ratio",
     "亮度：空白：音量 触控占比" to "Brightness/volume touch split", "快退：暂停：快进 触控占比" to "Seek/pause touch split",
     "后台播放" to "Background playback", "锁定控制" to "Lock controls", "解锁控制" to "Unlock controls",
     "旋转方向" to "Orientation", "自适应" to "Adaptive", "横屏" to "Landscape", "竖屏" to "Portrait",

@@ -1,4 +1,4 @@
-﻿package com.example.album.ui.screens
+package com.example.album.ui.screens
 
 import android.content.Context
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -223,20 +223,16 @@ private fun OptimizedTimelineGrid(
     val pullEnabled = remember {
         context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true)
     }
-    val state = rememberLazyGridState()
+    val state = rememberLazyGridState(
+        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
+    )
     LaunchedEffect(state) {
         snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
             .sample(80L)
             .collectLatest { (index, offset) -> onScrollPositionChanged(index, offset) }
     }
-    var restored by remember { mutableStateOf(false) }
-    LaunchedEffect(groupedDates) {
-        if (!restored && groupedDates.isNotEmpty()) {
-            state.scrollToItem(initialFirstVisibleItem.coerceAtLeast(0), initialFirstVisibleOffset.coerceAtLeast(0))
-            restored = true
-        }
-    }
-    val flatItems = remember(groupedDates) { groupedDates.flatMap { it.value } }
+        val flatItems = remember(groupedDates) { groupedDates.flatMap { it.value } }
     LazyGridMediaPrefetch(state, flatItems)
     var pullDistance by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
@@ -392,20 +388,16 @@ private fun AdaptiveTimeline(
     val english = LocalAppEnglish.current
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
-    val state = rememberLazyStaggeredGridState()
+    val state = androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState(
+        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
+    )
     LaunchedEffect(state) {
         snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
             .sample(80L)
             .collectLatest { (index, offset) -> onScrollPositionChanged(index, offset) }
     }
-    var restored by remember { mutableStateOf(false) }
-    LaunchedEffect(groupedDates) {
-        if (!restored && groupedDates.isNotEmpty()) {
-            state.scrollToItem(initialFirstVisibleItem.coerceAtLeast(0), initialFirstVisibleOffset.coerceAtLeast(0))
-            restored = true
-        }
-    }
-    val flatItems = remember(groupedDates) { groupedDates.flatMap { it.value } }
+        val flatItems = remember(groupedDates) { groupedDates.flatMap { it.value } }
     LazyStaggeredGridMediaPrefetch(state, flatItems)
     val scope = rememberCoroutineScope()
     val scrollJob = remember { arrayOfNulls<Job>(1) }
