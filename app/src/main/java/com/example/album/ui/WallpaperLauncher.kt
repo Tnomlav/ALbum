@@ -25,6 +25,7 @@ import androidx.media3.transformer.VideoEncoderSettings
 import com.example.album.data.MediaItem
 import com.example.album.data.WallpaperAppliedStore
 import com.example.album.wallpaper.WallpaperRefresh
+import com.example.album.wallpaper.WallpaperBackup
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -162,6 +163,11 @@ fun setStaticWallpaper(context: Context, items: List<MediaItem>, english: Boolea
                 WallpaperAppliedStore.KIND_STATIC,
                 imageItems.map { it.uri.toString() }
             )
+            WallpaperBackup.save(
+                context,
+                WallpaperAppliedStore.KIND_STATIC,
+                imageItems.map { it.uri.toString() }
+            )
             openStaticWallpaperSettings(context, english)
         }
     )
@@ -219,6 +225,11 @@ fun setDynamicWallpaper(context: Context, items: List<MediaItem>, english: Boole
         work = { update -> importDynamicQueue(context, videoItems, update) },
         onSuccess = {
             WallpaperAppliedStore.markApplied(
+                context,
+                WallpaperAppliedStore.KIND_DYNAMIC,
+                videoItems.map { it.uri.toString() }
+            )
+            WallpaperBackup.save(
                 context,
                 WallpaperAppliedStore.KIND_DYNAMIC,
                 videoItems.map { it.uri.toString() }

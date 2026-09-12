@@ -261,18 +261,38 @@ class MediaLibraryState(context: Context) {
         val names = linkedSetOf<String>()
         val children = linkedMapOf<String, MutableSet<String>>()
         val files = linkedMapOf<String, MutableSet<String>>()
+        // Empty and non-media folders are not in MediaStore, so they can only
+        // come from the storage walk. Publish the growing index while the walk
+        // is still running instead of waiting for the very end, otherwise
+        // searching for a folder without media appears much slower than one
+        // that is already known from the media scan.
+        var lastPublishAt = 0L
+        fun publishProgress(force: Boolean = false) {
+            val now = System.currentTimeMillis()
+            if (!force && now - lastPublishAt < 250L) return
+            lastPublishAt = now
+            searchableFolderNames = names.toSet()
+            searchableFolderChildren = children.mapValues { (_, childNames) -> childNames.toSet() }
+            searchableFolderFiles = files.mapValues { (_, fileNames) -> fileNames.toSet() }
+            searchableFoldersReady = true
+        }
         try {
             localFolders.streamFolderNames(
-                onBatch = { batch -> names += batch },
+                onBatch = { batch ->
+                    names += batch
+                    publishProgress()
+                },
                 onChildBatch = { childBatch ->
                     childBatch.forEach { (parent, childNames) ->
                         children.getOrPut(parent) { linkedSetOf() } += childNames
                     }
+                    publishProgress()
                 },
                 onFileBatch = { fileBatch ->
                     fileBatch.forEach { (folder, fileNames) ->
                         files.getOrPut(folder) { linkedSetOf() } += fileNames
                     }
+                    publishProgress()
                 }
             )
             writeFolderIndex(accessKey, names, children, files)

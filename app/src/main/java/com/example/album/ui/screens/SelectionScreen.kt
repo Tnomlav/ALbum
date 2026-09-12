@@ -92,6 +92,7 @@ fun SelectionScreen(
     layout: MediaLayout = MediaLayout.Grid,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     itemSpacing: Dp = 3.dp,
+    anchorUri: String? = null,
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
@@ -132,14 +133,31 @@ fun SelectionScreen(
     val dateSections = remember(orderedMedia, dateFormatter) {
         orderedMedia.groupBy { dateFormatter.format(Date(it.dateTaken)) }.entries.toList()
     }
-    // Start the grid at the same position the page showed before selection
-    // started: restoring it after the first frame caused a visible jump.
+    // Locate the item that was on screen before selection started. Lists can
+    // differ (Pixiv adds a navigation row, staggered layouts add headers), so
+    // the anchor is the media URI, not a raw index.
+    val anchorIndex = remember(orderedMedia, dateSections, showDateHeaders, topTrailingCount, anchorUri) {
+        val uri = anchorUri ?: return@remember initialFirstVisibleItem.coerceAtLeast(0)
+        var index = if (topTrailingCount != null) 1 else 0
+        if (showDateHeaders) {
+            for ((_, items) in dateSections) {
+                index += 1
+                val position = items.indexOfFirst { it.uri.toString() == uri }
+                if (position >= 0) return@remember index + position
+                index += items.size
+            }
+            index
+        } else {
+            val position = orderedMedia.indexOfFirst { it.uri.toString() == uri }
+            if (position >= 0) index + position else index
+        }
+    }
     val gridState = rememberLazyGridState(
-        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemIndex = anchorIndex,
         initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
     )
     val staggeredState = androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState(
-        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemIndex = anchorIndex,
         initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
     )
     if (layout == MediaLayout.Adaptive) {
@@ -324,6 +342,7 @@ fun AlbumSelectionScreen(
     pinnedFolderName: String? = null,
     query: String = "",
     searchingFolders: Boolean = false,
+    anchorFolder: String? = null,
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
@@ -347,8 +366,12 @@ fun AlbumSelectionScreen(
     // Match the album page exactly (outer 7 dp padding, 8/20 vertical content
     // padding) and start at the same scroll position, so entering selection
     // does not resize the tiles or jump the list.
+    val anchorIndex = remember(albums, anchorFolder) {
+        val index = anchorFolder?.let { name -> albums.indexOfFirst { it.name == name } } ?: -1
+        if (index >= 0) index else initialFirstVisibleItem.coerceAtLeast(0)
+    }
     val gridState = rememberLazyGridState(
-        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemIndex = anchorIndex,
         initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
     )
     LaunchedEffect(gridState) {

@@ -1,5 +1,18 @@
 # Album Changelog
 
+## v1.1.60 - 2026-09-13 (local signed build)
+
+- Selection mode no longer builds a second grid: the page the user came from stays mounted, so the layout never switches to adaptive, the scroll position is kept, and leaving selection no longer flashes. Folder multi-select still uses the folder grid.
+- The layout setting is shared by the timeline and the folder pages, so choosing grid once means grid everywhere.
+- The floating window is the system picture-in-picture again, but it now renders the app's own window controls (restore, close, rewind, pause, fast-forward) instead of the full player UI, and it keeps floating above other apps. The separate picture-in-picture button is gone; the single mini-window button and auto-mini both use it, with the in-app window only as a fallback for devices without PiP.
+- Player orientation "follow gravity" now lets the platform handle the sensor instead of mapping raw angles to explicit landscape/portrait sides, which inverted the direction in landscape.
+- The player seek bar uses the archive-page slider geometry without the vertical squash that distorted the thumb.
+- Empty and non-media folders appear while the storage walk is still running instead of only after it finishes, so searching for them is no longer much slower than for folders already known from the media scan.
+- The applied wallpaper queue is copied outside the app's private storage and restored (with a single system confirmation) after an update or reinstall cleared the live wallpaper.
+- APK: `app/release/app-release.apk` (arm64-v8a split)
+- SHA-256: `11FA4D1F2E2067F5CE8A01D10411AC524E60240764354ADA1507FDF34A999498`
+- Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug` and `assembleRelease` passed; the signed arm64 build was installed on the connected phone, where grid layout keeps square tiles in selection mode and the mini-window button enters picture-in-picture.
+
 ## v1.1.59 - 2026-09-12 (local signed build)
 
 - The mini window replaces the system picture-in-picture entry: the player now has a single "mini window" button, auto-mini keeps playing in the app's own floating window, and that window floats over the album pages with corner drag, centre drag, restore, close, rewind, pause and fast-forward.

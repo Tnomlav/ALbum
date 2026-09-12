@@ -426,12 +426,10 @@ internal fun Media3VideoPlayer(
         val requested = if (controlsLocked) {
             lockedOrientation
         } else if (orientationMode == 0) {
-            // FULL_SENSOR enables the first rotation. After the sensor gives
-            // us the exact side, request that side explicitly; this is needed
-            // on devices that do not re-evaluate reverse landscape while an
-            // Activity remains alive under configChanges.
-            sensorOrientation.takeIf { it != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
-                ?: ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+            // Let the platform follow gravity. Mapping raw sensor angles to
+            // explicit landscape/portrait sides inverted the direction on
+            // some devices in landscape.
+            ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
         } else {
             orientationRequest(orientationMode)
         }
@@ -510,10 +508,10 @@ internal fun Media3VideoPlayer(
                     val pauseOnBackground = preferences.getBoolean("video_pause_on_background", true)
                     val autoMini = preferences.getBoolean("video_auto_mini", false)
                     if (autoMini && !miniMode && !pictureInPictureMode && player.playWhenReady) {
-                        // Auto mini window: keep playing and switch to the
-                        // app's own floating window instead of the system
-                        // picture-in-picture window.
-                        onMiniModeChange(true)
+                        // Auto mini window: keep playing in the floating window
+                        // and fall back to the in-app window when the platform
+                        // has no picture-in-picture support.
+                        if (!onEnterPictureInPicture()) onMiniModeChange(true)
                     } else if (pauseOnBackground && player.playWhenReady) {
                         pausedForBackground = true
                         player.pause()
@@ -868,7 +866,7 @@ internal fun Media3VideoPlayer(
                 scaleX = if (mirrorVideo) -1f else 1f
             }
         )
-        if (miniMode) {
+        if (miniMode || pictureInPictureMode) {
             MiniWindowControls(
                 player = player,
                 playing = playing,
@@ -1072,7 +1070,14 @@ internal fun Media3VideoPlayer(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                IconButton(onClick = { refreshControls(); onMiniModeChange(true) }) {
+                IconButton(onClick = {
+                    refreshControls()
+                    // The system picture-in-picture window is the only way to
+                    // float above other apps; it shows the same floating
+                    // window controls. Devices without PiP use the in-app
+                    // fallback window.
+                    if (!onEnterPictureInPicture()) onMiniModeChange(true)
+                }) {
                     Icon(HtmlMiniWindowIcon, appText("小窗", english), tint = Color.White, modifier = Modifier.size(25.dp))
                 }
                 IconButton(onClick = ::startBackground) {
@@ -1107,7 +1112,7 @@ internal fun Media3VideoPlayer(
                         valueMs = position,
                         durationMs = duration,
                         onSeek = { seekToVideoFrame(player, it); refreshControls() },
-                        modifier = Modifier.weight(1f).height(24.dp).graphicsLayer { scaleY = .65f },
+                        modifier = Modifier.weight(1f).height(32.dp),
                         colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(.3f))
                     )
                     Text(timeText(duration), color = Color.White, fontSize = 12.sp, modifier = Modifier.size(width = 48.dp, height = 24.dp))

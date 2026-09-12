@@ -89,6 +89,7 @@ fun TimelineScreen(
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
+    onFirstVisibleMediaChanged: (String?) -> Unit = {},
     onClearQuery: () -> Unit = {}
 ) {
     val refreshing = loading || scanning
@@ -163,7 +164,8 @@ fun TimelineScreen(
             selectedUris = selectedUris,
             initialFirstVisibleItem = initialFirstVisibleItem,
             initialFirstVisibleOffset = initialFirstVisibleOffset,
-            onScrollPositionChanged = onScrollPositionChanged
+            onScrollPositionChanged = onScrollPositionChanged,
+            onFirstVisibleMediaChanged = onFirstVisibleMediaChanged
         )
         return
     }
@@ -189,7 +191,8 @@ fun TimelineScreen(
         selectedUris = selectedUris,
         initialFirstVisibleItem = initialFirstVisibleItem,
         initialFirstVisibleOffset = initialFirstVisibleOffset,
-        onScrollPositionChanged = onScrollPositionChanged
+        onScrollPositionChanged = onScrollPositionChanged,
+        onFirstVisibleMediaChanged = onFirstVisibleMediaChanged
     )
     return
 }
@@ -216,7 +219,8 @@ private fun OptimizedTimelineGrid(
     selectedUris: Set<String> = emptySet(),
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
-    onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
+    onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
+    onFirstVisibleMediaChanged: (String?) -> Unit = {}
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current
@@ -227,10 +231,18 @@ private fun OptimizedTimelineGrid(
         initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
         initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
     )
-    LaunchedEffect(state) {
-        snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
+    LaunchedEffect(state, groupedDates) {
+        snapshotFlow {
+            val firstKey = state.layoutInfo.visibleItemsInfo
+                .firstOrNull { info -> groupedDates.any { group -> group.value.any { it.uri.toString() == info.key } } }
+                ?.key as? String
+            Triple(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset, firstKey)
+        }
             .sample(80L)
-            .collectLatest { (index, offset) -> onScrollPositionChanged(index, offset) }
+            .collectLatest { (index, offset, firstKey) ->
+                onScrollPositionChanged(index, offset)
+                onFirstVisibleMediaChanged(firstKey)
+            }
     }
         val flatItems = remember(groupedDates) { groupedDates.flatMap { it.value } }
     LazyGridMediaPrefetch(state, flatItems)
@@ -383,7 +395,8 @@ private fun AdaptiveTimeline(
     selectedUris: Set<String> = emptySet(),
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
-    onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }
+    onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
+    onFirstVisibleMediaChanged: (String?) -> Unit = {}
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current
@@ -392,10 +405,18 @@ private fun AdaptiveTimeline(
         initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
         initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
     )
-    LaunchedEffect(state) {
-        snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
+    LaunchedEffect(state, groupedDates) {
+        snapshotFlow {
+            val firstKey = state.layoutInfo.visibleItemsInfo
+                .firstOrNull { info -> groupedDates.any { group -> group.value.any { it.uri.toString() == info.key } } }
+                ?.key as? String
+            Triple(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset, firstKey)
+        }
             .sample(80L)
-            .collectLatest { (index, offset) -> onScrollPositionChanged(index, offset) }
+            .collectLatest { (index, offset, firstKey) ->
+                onScrollPositionChanged(index, offset)
+                onFirstVisibleMediaChanged(firstKey)
+            }
     }
         val flatItems = remember(groupedDates) { groupedDates.flatMap { it.value } }
     LazyStaggeredGridMediaPrefetch(state, flatItems)
@@ -554,4 +575,3 @@ private fun sameDay(first: Calendar, second: Calendar): Boolean =
     first.get(Calendar.ERA) == second.get(Calendar.ERA) &&
         first.get(Calendar.YEAR) == second.get(Calendar.YEAR) &&
         first.get(Calendar.DAY_OF_YEAR) == second.get(Calendar.DAY_OF_YEAR)
-

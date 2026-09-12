@@ -124,6 +124,7 @@ import com.example.album.data.PixivArchiveRepository
 import com.example.album.data.WallpaperQueueState
 import com.example.album.data.WallpaperQueueStore
 import com.example.album.data.WallpaperAppliedStore
+import com.example.album.wallpaper.WallpaperBackup
 import com.example.album.data.TransferMode
 import com.example.album.data.TransferRequest
 import com.example.album.playback.PlaybackResumeRequest
@@ -371,6 +372,8 @@ fun AlbumApp(
     var selectionMediaSort by rememberSaveable { mutableStateOf(initialSort) }
     var selectionMediaSortDirection by rememberSaveable { mutableStateOf(SortDirection.Descending) }
     var selectionMediaOrderUris by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectionAnchorUri by remember { mutableStateOf<String?>(null) }
+    var selectionAnchorFolder by remember { mutableStateOf<String?>(null) }
     var showWallpaperSortDialog by remember { mutableStateOf(false) }
     var showWallpaperColumnDialog by remember { mutableStateOf(false) }
     var showWallpaperLayoutDialog by remember { mutableStateOf(false) }
@@ -395,6 +398,33 @@ fun AlbumApp(
         wallpaperQueueSaveJob?.cancel()
         wallpaperQueueSaveJob = scope.launch(Dispatchers.IO) {
             WallpaperQueueStore.save(context, WallpaperQueueState(uris, order))
+        }
+    }
+    // Re-applying a wallpaper used to be lost when the app was updated or
+    // reinstalled: the launcher drops the live wallpaper and the private queue
+    // can be gone. Restore it from the backup copy so one confirmation brings
+    // the wallpaper back.
+    var wallpaperRestoreAttempted by remember { mutableStateOf(false) }
+    LaunchedEffect(wallpaperQueueLoaded, wallpaperQueueUris, library.loading, library.images.size, library.videos.size) {
+        if (!wallpaperQueueLoaded || wallpaperRestoreAttempted || library.loading) return@LaunchedEffect
+        val appliedKind = when {
+            WallpaperAppliedStore.appliedSignature(context, WallpaperAppliedStore.KIND_DYNAMIC) != null -> WallpaperAppliedStore.KIND_DYNAMIC
+            WallpaperAppliedStore.appliedSignature(context, WallpaperAppliedStore.KIND_STATIC) != null -> WallpaperAppliedStore.KIND_STATIC
+            else -> null
+        }
+        val stillActive = appliedKind?.let { WallpaperAppliedStore.isWallpaperActive(context, it) } == true
+        val queuePresent = wallpaperQueueUris.isNotEmpty()
+        if (stillActive && queuePresent) return@LaunchedEffect
+        val backup = withContext(Dispatchers.IO) { WallpaperBackup.load(context) } ?: return@LaunchedEffect
+        val allMedia = (library.images + library.videos + library.localImages + library.localVideos)
+            .distinctBy { it.uri.toString() }
+        val restored = backup.uris.mapNotNull { uri -> allMedia.firstOrNull { it.uri.toString() == uri } }
+        if (restored.isEmpty()) return@LaunchedEffect
+        wallpaperRestoreAttempted = true
+        if (backup.kind == WallpaperAppliedStore.KIND_DYNAMIC) {
+            setDynamicWallpaper(context, restored.filter { it.isVideo }, english)
+        } else {
+            setStaticWallpaper(context, restored.filterNot { it.isVideo }, english)
         }
     }
     var suspendedSearchQuery by rememberSaveable { mutableStateOf<String?>(null) }
@@ -2387,42 +2417,9 @@ fun AlbumApp(
                     selectionFolderFirstVisibleItem = index
                     selectionFolderFirstVisibleOffset = offset
                 },
+                anchorFolder = selectionAnchorFolder,
                 onToggle = { folder -> selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder }
-            ) else if (selectionMode) SelectionScreen(
-                    media = selectionMedia,
-                    orderUris = selectionMediaOrderUris,
-                    selectedUris = selectedUris,
-                    // Mirror the page the user came from so entering selection
-                    // does not resize the thumbnails.
-                    layout = if (tab == MainTab.Timeline) timelineLayout else folderLayout,
-                    contentPadding = if (tab == MainTab.Timeline) {
-                        androidx.compose.foundation.layout.PaddingValues(horizontal = 7.dp, vertical = 2.dp)
-                    } else {
-                        androidx.compose.foundation.layout.PaddingValues(0.dp)
-                    },
-                    columns = when {
-                        tab == MainTab.Timeline -> timelineColumns
-                        tab == MainTab.Pixiv -> folderColumns
-                        openedFolder != null -> folderColumns
-                        else -> albumColumns
-                    },
-                    topTrailingCount = selectionMedia.size.takeIf { openedFolder != null || tab == MainTab.Timeline },
-                    query = appliedQuery,
-                    searching = library.loading,
-                    showDateHeaders = tab == MainTab.Timeline,
-                    initialFirstVisibleItem = selectionMediaFirstVisibleItem,
-                    initialFirstVisibleOffset = selectionMediaFirstVisibleOffset,
-                    onScrollPositionChanged = { index, offset ->
-                        selectionMediaFirstVisibleItem = index
-                        selectionMediaFirstVisibleOffset = offset
-                    },
-                    sort = selectionMediaSort,
-                    sortDirection = selectionMediaSortDirection,
-                    onToggle = { item ->
-                        val key = item.uri.toString()
-                        selectedUris = if (key in selectedUris) selectedUris - key else selectedUris + key
-                    }
-                ) else when (tab) {
+            ) else when (tab) {
                 MainTab.Albums -> AlbumsScreen(
                     media = albumImages,
                     isVideo = false,
@@ -2446,12 +2443,14 @@ fun AlbumApp(
                     },
                     initialMediaFirstVisibleItem = selectionMediaFirstVisibleItem,
                     initialMediaFirstVisibleOffset = selectionMediaFirstVisibleOffset,
+                    onFirstVisibleMediaChanged = { selectionAnchorUri = it },
+                    onFirstVisibleFolderChanged = { selectionAnchorFolder = it },
                     onMediaScrollPositionChanged = { index, offset ->
                         selectionMediaFirstVisibleItem = index
                         selectionMediaFirstVisibleOffset = offset
                     },
                     onRequestPermission = requestPermission,
-                    onOpenMedia = ::openMedia,
+                    onOpenMedia = { item -> if (selectionMode) { val key = item.uri.toString(); selectedUris = if (key in selectedUris) selectedUris - key else selectedUris + key } else openMedia(item) },
                     onLongPressMedia = { pressed -> freezeSelectionSort(); selectionMode = true; selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
                     onBatchSelectMedia = { items ->
                         freezeSelectionSort()
@@ -2484,7 +2483,7 @@ fun AlbumApp(
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
-                    selectionPreview = selectionGestureActive && !selectionMode,
+                    selectionPreview = selectionMode || selectionGestureActive,
                     selectedUris = selectedUris,
                     selectedFolders = selectedFolders,
                     additionalAlbumNames = if (appliedQuery.isBlank()) emptySet() else library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
@@ -2518,12 +2517,14 @@ fun AlbumApp(
                     },
                     initialMediaFirstVisibleItem = selectionMediaFirstVisibleItem,
                     initialMediaFirstVisibleOffset = selectionMediaFirstVisibleOffset,
+                    onFirstVisibleMediaChanged = { selectionAnchorUri = it },
+                    onFirstVisibleFolderChanged = { selectionAnchorFolder = it },
                     onMediaScrollPositionChanged = { index, offset ->
                         selectionMediaFirstVisibleItem = index
                         selectionMediaFirstVisibleOffset = offset
                     },
                     onRequestPermission = requestPermission,
-                    onOpenMedia = ::openMedia,
+                    onOpenMedia = { item -> if (selectionMode) { val key = item.uri.toString(); selectedUris = if (key in selectedUris) selectedUris - key else selectedUris + key } else openMedia(item) },
                     onLongPressMedia = { pressed -> freezeSelectionSort(); selectionMode = true; selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
                     onBatchSelectMedia = { items ->
                         freezeSelectionSort()
@@ -2556,7 +2557,7 @@ fun AlbumApp(
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
-                    selectionPreview = selectionGestureActive && !selectionMode,
+                    selectionPreview = selectionMode || selectionGestureActive,
                     selectedUris = selectedUris,
                     selectedFolders = selectedFolders,
                     additionalAlbumNames = if (appliedQuery.isBlank()) emptySet() else library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
@@ -2577,6 +2578,7 @@ fun AlbumApp(
                     // leaving selection returns to the same spot.
                     initialFirstVisibleItem = selectionMediaFirstVisibleItem,
                     initialFirstVisibleOffset = selectionMediaFirstVisibleOffset,
+                    onFirstVisibleMediaChanged = { selectionAnchorUri = it },
                     onScrollPositionChanged = { index, offset ->
                         timelineFirstVisibleItem = index
                         timelineFirstVisibleOffset = offset
@@ -2586,7 +2588,7 @@ fun AlbumApp(
                     jumpToDate = timelineJumpDate,
                     onJumpConsumed = { timelineJumpDate = null },
                     onRequestPermission = requestPermission,
-                    onOpenMedia = ::openMedia,
+                    onOpenMedia = { item -> if (selectionMode) { val key = item.uri.toString(); selectedUris = if (key in selectedUris) selectedUris - key else selectedUris + key } else openMedia(item) },
                     onLongPressMedia = { pressed ->
                         freezeSelectionSort()
                         selectionMediaFirstVisibleItem = timelineFirstVisibleItem
@@ -2606,7 +2608,7 @@ fun AlbumApp(
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
-                    selectionPreview = selectionGestureActive && !selectionMode,
+                    selectionPreview = selectionMode || selectionGestureActive,
                     selectedUris = selectedUris,
                     onClearQuery = { query = "" }
                 )
@@ -2631,7 +2633,7 @@ fun AlbumApp(
                     folderColumns = folderColumns,
                     layout = folderLayout,
                     onRequestPermission = requestPermission,
-                    onOpenMedia = ::openMedia,
+                    onOpenMedia = { item -> if (selectionMode) { val key = item.uri.toString(); selectedUris = if (key in selectedUris) selectedUris - key else selectedUris + key } else openMedia(item) },
                     onLongPressMedia = { pressed ->
                         freezeSelectionSort()
                         selectionMode = true
@@ -2676,7 +2678,7 @@ fun AlbumApp(
                     flatMode = pixivSearchMode == PixivSearchMode.Tag && appliedQuery.isNotBlank(),
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
-                    selectionPreview = selectionGestureActive && !selectionMode,
+                    selectionPreview = selectionMode || selectionGestureActive,
                     selectedUris = selectedUris,
                     emptyMessage = if (appliedQuery.isBlank()) {
                         if (english) "Enter a tag to search images" else "输入 Tag 搜索图片"
@@ -3042,7 +3044,10 @@ fun AlbumApp(
             onDismiss = { showLayoutDialog = false },
             onApply = { label ->
                 val selected = MediaLayout.entries[options.indexOf(label)]
-                if (selectedTab == MainTab.Timeline) timelineLayout = selected else folderLayout = selected
+                // One layout setting for every media page, so choosing "grid"
+                // on one page also means grid on the timeline and vice versa.
+                timelineLayout = selected
+                folderLayout = selected
                 showLayoutDialog = false
             }
         )
