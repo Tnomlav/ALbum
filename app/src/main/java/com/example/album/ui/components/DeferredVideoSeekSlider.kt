@@ -112,7 +112,11 @@ internal fun DeferredVideoSeekSlider(
         activeColor = activeColor,
         inactiveColor = inactiveColor,
         thumbColor = Color.White,
-        thumbBorderColor = Color.White
+        thumbBorderColor = Color.White,
+        // The player renders white on black, so the separation band between
+        // the thumb and the track needs to be wide enough to stay visible
+        // (the archive slider relies on its colour contrast instead).
+        thumbGap = 5.dp
     )
 }
 

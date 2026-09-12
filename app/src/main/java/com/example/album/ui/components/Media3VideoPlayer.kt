@@ -43,6 +43,10 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material.icons.outlined.FastForward
 import androidx.compose.material.icons.outlined.FastRewind
+import androidx.compose.material.icons.outlined.AspectRatio
+import androidx.compose.material.icons.outlined.ScreenRotation
+import androidx.compose.material.icons.outlined.StayCurrentLandscape
+import androidx.compose.material.icons.outlined.StayCurrentPortrait
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FormatListNumbered
 import androidx.compose.material.icons.outlined.Fullscreen
@@ -198,6 +202,14 @@ internal fun orientationModeLabel(mode: Int): String = when (mode) {
     else -> "适配重力"
 }
 
+/** Icons that make each orientation mode obvious at a glance. */
+private fun orientationModeIcon(mode: Int): ImageVector = when (mode) {
+    1 -> Icons.Outlined.StayCurrentLandscape
+    2 -> Icons.Outlined.StayCurrentPortrait
+    3 -> Icons.Outlined.AspectRatio
+    else -> Icons.Outlined.ScreenRotation
+}
+
 private fun htmlLineIcon(name: String, draw: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit): ImageVector =
     ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
         path(fill = null, stroke = androidx.compose.ui.graphics.SolidColor(Color.White), strokeLineWidth = 1.7f, pathBuilder = draw)
@@ -325,6 +337,9 @@ internal fun Media3VideoPlayer(
     var restoreSystemBrightnessOnExit by remember { mutableStateOf(false) }
     var hasLeftPlayer by remember { mutableStateOf(false) }
     var pausedForBackground by remember { mutableStateOf(false) }
+    // Entering picture-in-picture pauses the activity; remember that the pause
+    // came from the floating window so playback is not stopped.
+    var pictureInPictureRequested by remember { mutableStateOf(false) }
     fun exitPlayer() {
         // Restore the Activity policy before the viewer leaves. The player may
         // have changed it to landscape, portrait, or sensor mode.
@@ -507,17 +522,26 @@ internal fun Media3VideoPlayer(
                 Lifecycle.Event.ON_PAUSE -> {
                     val pauseOnBackground = preferences.getBoolean("video_pause_on_background", true)
                     val autoMini = preferences.getBoolean("video_auto_mini", false)
-                    if (autoMini && !miniMode && !pictureInPictureMode && player.playWhenReady) {
+                    val inPictureInPicture = pictureInPictureRequested ||
+                        (hostActivity as? android.app.Activity)?.isInPictureInPictureMode == true
+                    if (inPictureInPicture) {
+                        // The floating window keeps playing; nothing to do.
+                    } else if (autoMini && !miniMode && !pictureInPictureMode && player.playWhenReady) {
                         // Auto mini window: keep playing in the floating window
                         // and fall back to the in-app window when the platform
                         // has no picture-in-picture support.
-                        if (!onEnterPictureInPicture()) onMiniModeChange(true)
+                        if (onEnterPictureInPicture()) {
+                            pictureInPictureRequested = true
+                        } else {
+                            onMiniModeChange(true)
+                        }
                     } else if (pauseOnBackground && player.playWhenReady) {
                         pausedForBackground = true
                         player.pause()
                     }
                 }
                 Lifecycle.Event.ON_RESUME -> {
+                    pictureInPictureRequested = false
                     if (pausedForBackground) {
                         pausedForBackground = false
                         player.play()
@@ -875,7 +899,8 @@ internal fun Media3VideoPlayer(
                 onMove = miniOnMove,
                 onResize = miniOnResize,
                 onRestore = { onMiniModeChange(false) },
-                onClose = { exitPlayer() }
+                onClose = { exitPlayer() },
+                pictureInPicture = pictureInPictureMode
             )
         } else if (!pictureInPictureMode) {
             Box(
@@ -1076,9 +1101,13 @@ internal fun Media3VideoPlayer(
                     // float above other apps; it shows the same floating
                     // window controls. Devices without PiP use the in-app
                     // fallback window.
-                    if (!onEnterPictureInPicture()) onMiniModeChange(true)
+                    if (onEnterPictureInPicture()) {
+                        pictureInPictureRequested = true
+                    } else {
+                        onMiniModeChange(true)
+                    }
                 }) {
-                    Icon(HtmlMiniWindowIcon, appText("小窗", english), tint = Color.White, modifier = Modifier.size(25.dp))
+                    Icon(HtmlPipIcon, appText("小窗", english), tint = Color.White, modifier = Modifier.size(25.dp))
                 }
                 IconButton(onClick = ::startBackground) {
                     Icon(HtmlBackgroundIcon, appText("后台播放", english), tint = Color.White, modifier = Modifier.size(25.dp))
@@ -1151,7 +1180,7 @@ internal fun Media3VideoPlayer(
                             refreshControls()
                         }))
                         add(Triple(HtmlNextIcon, "下一个视频", { adjacent(true) }))
-                        add(Triple(htmlOrientationIcon(displayedOrientationMode), orientationModeLabel(orientationMode), {
+                        add(Triple(orientationModeIcon(orientationMode), orientationModeLabel(orientationMode), {
                             val nextMode = (orientationMode + 1) % 4
                             applyOrientation(nextMode)
                             orientationMode = nextMode
@@ -1292,7 +1321,8 @@ internal fun MiniWindowOverlay(
     onMove: (Offset) -> Unit,
     onResize: (Offset, Boolean, Boolean) -> Unit,
     onRestore: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    pictureInPicture: Boolean = false
 ) {
     val english = LocalAppEnglish.current
     val currentOnMove by rememberUpdatedState(onMove)
@@ -1329,8 +1359,21 @@ internal fun MiniWindowOverlay(
                 )
             }
         )
-        MiniVideoButton(Icons.Outlined.Fullscreen, appText("恢复全屏播放", english), Modifier.align(Alignment.TopStart).zIndex(1000f), onRestore)
-        MiniVideoButton(Icons.Outlined.Close, appText("关闭", english), Modifier.align(Alignment.TopEnd).zIndex(1000f), onClose)
+        // The system draws its own controls in the PiP window; keep ours below
+        // them so both stay reachable.
+        val topInset = if (pictureInPicture) 34.dp else 0.dp
+        MiniVideoButton(
+            Icons.Outlined.Fullscreen,
+            appText("恢复全屏播放", english),
+            Modifier.align(Alignment.TopStart).padding(top = topInset).zIndex(1000f),
+            onRestore
+        )
+        MiniVideoButton(
+            Icons.Outlined.Close,
+            appText("关闭", english),
+            Modifier.align(Alignment.TopEnd).padding(top = topInset).zIndex(1000f),
+            onClose
+        )
         MiniVideoButton(Icons.Outlined.FastRewind, appText("快退", english), Modifier.align(Alignment.CenterStart).zIndex(1000f), seekBack)
         MiniVideoButton(
             if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
@@ -1351,7 +1394,8 @@ private fun MiniWindowControls(
     onMove: (Offset) -> Unit,
     onResize: (Offset, Boolean, Boolean) -> Unit,
     onRestore: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    pictureInPicture: Boolean = false
 ) {
     MiniWindowOverlay(
         playing = playing,
@@ -1361,7 +1405,8 @@ private fun MiniWindowControls(
         onMove = onMove,
         onResize = onResize,
         onRestore = onRestore,
-        onClose = onClose
+        onClose = onClose,
+        pictureInPicture = pictureInPicture
     )
 }
 

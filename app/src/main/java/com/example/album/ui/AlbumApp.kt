@@ -415,12 +415,17 @@ fun AlbumApp(
         val stillActive = appliedKind?.let { WallpaperAppliedStore.isWallpaperActive(context, it) } == true
         val queuePresent = wallpaperQueueUris.isNotEmpty()
         if (stillActive && queuePresent) return@LaunchedEffect
+        // Only offer the restore once per installed version so deliberately
+        // changing the wallpaper is not fought on every launch.
+        val restoreVersion = preferences.getInt("wallpaper_restore_version", -1)
+        if (restoreVersion == com.example.album.BuildConfig.VERSION_CODE) return@LaunchedEffect
         val backup = withContext(Dispatchers.IO) { WallpaperBackup.load(context) } ?: return@LaunchedEffect
         val allMedia = (library.images + library.videos + library.localImages + library.localVideos)
             .distinctBy { it.uri.toString() }
         val restored = backup.uris.mapNotNull { uri -> allMedia.firstOrNull { it.uri.toString() == uri } }
         if (restored.isEmpty()) return@LaunchedEffect
         wallpaperRestoreAttempted = true
+        preferences.edit().putInt("wallpaper_restore_version", com.example.album.BuildConfig.VERSION_CODE).apply()
         if (backup.kind == WallpaperAppliedStore.KIND_DYNAMIC) {
             setDynamicWallpaper(context, restored.filter { it.isVideo }, english)
         } else {
@@ -2391,35 +2396,7 @@ fun AlbumApp(
                 label = "main-tab-transition"
             ) { tab ->
                 Box(Modifier.fillMaxSize()) {
-            if (selectionMode && selectingFolders) AlbumSelectionScreen(
-                // Use the same global search media source as normal search;
-                // the directory index below adds empty/non-media folders.
-                // Folder multi-select uses the same media source and folder
-                // matcher as the normal AlbumsScreen search.
-                media = when (selectedTab) {
-                    MainTab.Videos -> visibleVideos
-                    else -> albumImages
-                },
-                selectedFolders = selectedFolders,
-                columns = albumColumns,
-                sort = selectionMediaSort,
-                sortDirection = selectionMediaSortDirection,
-                // Folder selection must use the exact same directory index as
-                // the normal album search, including empty/non-media folders.
-                additionalFolderNames = library.searchableFolderNames + library.searchableFolderChildren.values.flatten(),
-                additionalFileNames = library.searchableFolderFiles,
-                pinnedFolderName = pixivSourceFolderName.takeIf { selectedTab == MainTab.Pixiv },
-                query = suspendedSearchQuery ?: appliedQuery,
-                searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
-                initialFirstVisibleItem = selectionFolderFirstVisibleItem,
-                initialFirstVisibleOffset = selectionFolderFirstVisibleOffset,
-                onScrollPositionChanged = { index, offset ->
-                    selectionFolderFirstVisibleItem = index
-                    selectionFolderFirstVisibleOffset = offset
-                },
-                anchorFolder = selectionAnchorFolder,
-                onToggle = { folder -> selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder }
-            ) else when (tab) {
+            when (tab) {
                 MainTab.Albums -> AlbumsScreen(
                     media = albumImages,
                     isVideo = false,
@@ -2478,7 +2455,7 @@ fun AlbumApp(
                     onAlbumSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
                     onRefresh = { requestMediaScan(false) },
                     openedFolder = openedFolder,
-                    onOpenedFolderChange = ::openFolder,
+                    onOpenedFolderChange = { folder -> if (folder != null && selectionMode && selectingFolders) { selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder } else openFolder(folder) },
                     onVisibleScopeChanged = { folderScope = it },
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
@@ -2552,7 +2529,7 @@ fun AlbumApp(
                     onAlbumSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
                     onRefresh = { requestMediaScan(false) },
                     openedFolder = openedFolder,
-                    onOpenedFolderChange = ::openFolder,
+                    onOpenedFolderChange = { folder -> if (folder != null && selectionMode && selectingFolders) { selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder } else openFolder(folder) },
                     onVisibleScopeChanged = { folderScope = it },
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
@@ -2666,7 +2643,7 @@ fun AlbumApp(
                         requestPixivReload()
                     },
                     openedFolder = openedFolder,
-                    onOpenedFolderChange = ::openFolder,
+                    onOpenedFolderChange = { folder -> if (folder != null && selectionMode && selectingFolders) { selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder } else openFolder(folder) },
                     onVisibleScopeChanged = { folderScope = it },
                     sharedElementEnabled = tab == selectedTab,
                     onOpenPixivArchive = {

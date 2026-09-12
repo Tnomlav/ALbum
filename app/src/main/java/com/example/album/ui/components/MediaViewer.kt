@@ -419,7 +419,14 @@ fun MediaViewer(
                         onBack = ::closeViewer,
                         pictureInPictureMode = pictureInPictureMode,
                         onEnterPictureInPicture = onEnterPictureInPicture,
-                        onAutoEnterPictureInPictureChange = onAutoEnterPictureInPictureChange
+                        onAutoEnterPictureInPictureChange = onAutoEnterPictureInPictureChange,
+                        miniMode = videoMiniMode,
+                        onMiniModeChange = { videoMiniMode = it },
+                        favorite = favorite(current),
+                        onFavorite = { onFavorite(current) },
+                        onShare = { share(context, current, english) },
+                        onWallpaper = onWallpaper?.let { action -> { action(current) } } ?: {},
+                        onInfo = { showInfo = true }
                     )
                 } else {
                 Media3VideoPlayer(

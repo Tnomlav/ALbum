@@ -8,6 +8,7 @@ import android.os.ParcelFileDescriptor
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,15 @@ import androidx.compose.material.icons.outlined.FastForward
 import androidx.compose.material.icons.outlined.FastRewind
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PictureInPictureAlt
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Wallpaper
 import androidx.compose.material.icons.outlined.ScreenRotation
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.Icon
@@ -62,6 +72,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.album.data.MediaItem
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
+import com.example.album.ui.appSeekText
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.min
@@ -142,7 +153,12 @@ internal fun VlcVideoPlayer(
     onEnterPictureInPicture: () -> Boolean,
     onAutoEnterPictureInPictureChange: (Boolean, Int, Int) -> Unit = { _, _, _ -> },
     miniMode: Boolean = false,
-    onMiniModeChange: (Boolean) -> Unit = {}
+    onMiniModeChange: (Boolean) -> Unit = {},
+    favorite: Boolean = false,
+    onFavorite: () -> Unit = {},
+    onShare: () -> Unit = {},
+    onWallpaper: () -> Unit = {},
+    onInfo: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val english = LocalAppEnglish.current
@@ -162,6 +178,37 @@ internal fun VlcVideoPlayer(
         androidx.compose.runtime.mutableIntStateOf(preferences.getInt("video_orientation_mode", 0).coerceIn(0, 3))
     }
     val activity = context as? Activity
+    var speed by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
+    var playerMenuOpen by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var gestureHud by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var temporaryFastPlayback by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var gestureWidth by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var gestureHeight by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var brightness by remember {
+        androidx.compose.runtime.mutableFloatStateOf(
+            ((context as? Activity)?.window?.attributes?.screenBrightness ?: .5f).takeIf { it >= 0f } ?: .5f
+        )
+    }
+    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager }
+    var volume by remember {
+        val max = audioManager?.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)?.coerceAtLeast(1) ?: 1
+        androidx.compose.runtime.mutableFloatStateOf(
+            ((audioManager?.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) ?: max).toFloat() / max).coerceIn(0f, 1f)
+        )
+    }
+    val seekPauseRatio = preferences.getString("video_seek_pause_ratio", "1:1:1") ?: "1:1:1"
+    val brightnessVolumeRatio = preferences.getString("video_brightness_volume_ratio", "1:1") ?: "1:1"
+    fun setBrightnessValue(value: Float) {
+        brightness = value.coerceIn(0f, 1f)
+        (context as? Activity)?.let { host ->
+            host.window.attributes = host.window.attributes.apply { screenBrightness = brightness.coerceAtLeast(.01f) }
+        }
+    }
+    fun setVolumeValue(value: Float) {
+        volume = value.coerceIn(0f, 1f)
+        val max = audioManager?.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)?.coerceAtLeast(1) ?: return
+        audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, (volume * max).toInt().coerceIn(0, max), 0)
+    }
     val skip = (preferences.getString("normal_skip", "10秒")?.filter(Char::isDigit)?.toLongOrNull() ?: 10L) * 1000L
     val autoHide = preferences.getBoolean("video_auto_hide", true)
     LaunchedEffect(playing, current.width, current.height) {
@@ -358,31 +405,111 @@ internal fun VlcVideoPlayer(
             )
         }
         if (!miniMode) {
-        Box(
-            Modifier.fillMaxSize().pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = {
-                        if (controlsVisible) controlsVisible = false else {
-                            controlsVisible = true
-                            controlsInteraction++
-                        }
-                    },
-                    onDoubleTap = { offset ->
-                        val width = size.width.coerceAtLeast(1)
-                        when {
-                            offset.x < width / 3f -> seekBy(-skip)
-                            offset.x > width * 2f / 3f -> seekBy(skip)
-                            else -> togglePlayback()
-                        }
-                        controlsVisible = true
-                        controlsInteraction++
+            Box(
+                Modifier.fillMaxSize()
+                    .onSizeChanged { gestureWidth = it.width; gestureHeight = it.height }
+                    .pointerInput(controlsVisible, seekPauseRatio, brightnessVolumeRatio, skip) {
+                        detectTapGestures(
+                            onPress = {
+                                val releasedBeforeLongPress = kotlinx.coroutines.withTimeoutOrNull(460L) { tryAwaitRelease() }
+                                if (releasedBeforeLongPress == null) {
+                                    val wasPlaying = mediaPlayer.isPlaying
+                                    temporaryFastPlayback = true
+                                    runCatching { mediaPlayer.rate = 2f }
+                                    runCatching { mediaPlayer.play() }
+                                    gestureHud = "2x ${appText("播放", english)}"
+                                    try {
+                                        tryAwaitRelease()
+                                    } finally {
+                                        runCatching { mediaPlayer.rate = speed }
+                                        if (!wasPlaying) runCatching { mediaPlayer.pause() }
+                                        temporaryFastPlayback = false
+                                        gestureHud = if (speed == 1f) "1x" else "${speed}x"
+                                    }
+                                }
+                            },
+                            onTap = {
+                                if (controlsVisible) controlsVisible = false else {
+                                    controlsVisible = true
+                                    controlsInteraction++
+                                }
+                            },
+                            onDoubleTap = { offset ->
+                                val width = size.width.coerceAtLeast(1)
+                                when (doubleTapZone(offset.x / width, seekPauseRatio)) {
+                                    -1 -> {
+                                        seekBy(-skip)
+                                        gestureHud = appSeekText("快退", skip, english)
+                                    }
+                                    1 -> {
+                                        seekBy(skip)
+                                        gestureHud = appSeekText("快进", skip, english)
+                                    }
+                                    else -> {
+                                        togglePlayback()
+                                        gestureHud = appText(if (playing) "暂停" else "播放", english)
+                                    }
+                                }
+                                controlsVisible = true
+                                controlsInteraction++
+                            }
+                        )
                     }
-                )
+                    .pointerInput(controlsVisible, mediaPlayer, brightnessVolumeRatio) {
+                        var totalDragX = 0f
+                        var totalDragY = 0f
+                        var gestureStartX = 0f
+                        var gestureMode = 0
+                        detectDragGestures(
+                            onDragStart = { start ->
+                                totalDragX = 0f
+                                totalDragY = 0f
+                                gestureStartX = start.x
+                                gestureMode = 0
+                            },
+                            onDrag = { change, dragAmount ->
+                                if (temporaryFastPlayback) return@detectDragGestures
+                                change.consume()
+                                totalDragX += dragAmount.x
+                                totalDragY += dragAmount.y
+                                if (gestureMode == 0 && kotlin.math.hypot(totalDragX.toDouble(), totalDragY.toDouble()) > 10.0) {
+                                    val angle = Math.toDegrees(kotlin.math.atan2(kotlin.math.abs(totalDragY).toDouble(), kotlin.math.abs(totalDragX).toDouble()))
+                                    gestureMode = if (angle <= 60.0) 1 else verticalGestureZone(gestureStartX / gestureWidth.coerceAtLeast(1), brightnessVolumeRatio)
+                                }
+                                when (gestureMode) {
+                                    1 -> {
+                                        val delta = (dragAmount.x / gestureWidth.coerceAtLeast(1) * skip).toLong()
+                                        seekBy(delta)
+                                        gestureHud = timeText((position + delta).coerceAtLeast(0L))
+                                    }
+                                    2 -> {
+                                        setBrightnessValue(brightness - dragAmount.y / gestureHeight.coerceAtLeast(1) * 0.5f)
+                                        gestureHud = "${appText("亮度", english)} ${(brightness * 100).toInt()}%"
+                                    }
+                                    3 -> {
+                                        setVolumeValue(volume - dragAmount.y / gestureHeight.coerceAtLeast(1) * 0.5f)
+                                        gestureHud = "${appText("音量", english)} ${(volume * 100).toInt()}%"
+                                    }
+                                }
+                                controlsVisible = true
+                                controlsInteraction++
+                            },
+                            onDragEnd = { gestureMode = 0 },
+                            onDragCancel = { gestureMode = 0 }
+                        )
+                    }
+            )
+            gestureHud?.let { hud ->
+                Box(
+                    Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .72f)).padding(horizontal = 14.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(hud, color = Color.White, fontSize = 14.sp)
+                }
             }
-        )
-        if (controlsVisible) {
-            Row(
-                Modifier.align(Alignment.TopCenter).fillMaxWidth()
+            if (controlsVisible) {
+                Row(
+                    Modifier.align(Alignment.TopCenter).fillMaxWidth()
                     .background(Brush.verticalGradient(listOf(Color.Black.copy(.72f), Color.Transparent)))
                     .statusBarsPadding().height(72.dp).padding(start = 8.dp, end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -398,6 +525,29 @@ internal fun VlcVideoPlayer(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                val speedSteps = listOf(0.5f, 1f, 1.25f, 1.5f, 2f)
+                TextButton(
+                    onClick = {
+                        val next = speedSteps[(speedSteps.indexOfFirst { it == speed }.coerceAtLeast(0) + 1) % speedSteps.size]
+                        speed = next
+                        runCatching { mediaPlayer.rate = next }
+                        controlsInteraction++
+                    },
+                    modifier = Modifier.size(46.dp),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text(if (speed == 1f) "1.0x" else "${speed}x", color = Color.White, fontSize = 13.sp, maxLines = 1)
+                }
+                IconButton(onClick = { controlsInteraction++; onFavorite() }, modifier = Modifier.size(46.dp)) {
+                    Icon(
+                        if (favorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                        appText("收藏", english),
+                        tint = if (favorite) Color(0xFFFFD60A) else Color.White
+                    )
+                }
+                IconButton(onClick = { controlsInteraction++; playerMenuOpen = true }, modifier = Modifier.size(46.dp)) {
+                    Icon(Icons.Outlined.MoreVert, appText("菜单", english), tint = Color.White)
+                }
                 IconButton(onClick = { onMiniModeChange(true) }, modifier = Modifier.size(46.dp)) {
                     Icon(Icons.Outlined.PictureInPictureAlt, appText("小窗", english), tint = Color.White)
                 }
@@ -488,5 +638,34 @@ internal fun VlcVideoPlayer(
         }
         }
         }
+    }
+    if (playerMenuOpen) {
+        AlertDialog(
+            onDismissRequest = { playerMenuOpen = false },
+            containerColor = Color.Black.copy(alpha = .85f),
+            titleContentColor = Color.White,
+            textContentColor = Color.White,
+            title = { Text(appText("菜单", english)) },
+            text = {
+                Column {
+                    DropdownMenuItem(
+                        text = { Text(appText("分享", english), color = Color.White) },
+                        leadingIcon = { Icon(Icons.Outlined.Share, null, tint = Color.White) },
+                        onClick = { playerMenuOpen = false; onShare() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(appText("设置为壁纸", english), color = Color.White) },
+                        leadingIcon = { Icon(Icons.Outlined.Wallpaper, null, tint = Color.White) },
+                        onClick = { playerMenuOpen = false; onWallpaper() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(appText("信息", english), color = Color.White) },
+                        leadingIcon = { Icon(Icons.Outlined.Info, null, tint = Color.White) },
+                        onClick = { playerMenuOpen = false; onInfo() }
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { playerMenuOpen = false }) { Text(appText("关闭", english)) } }
+        )
     }
 }

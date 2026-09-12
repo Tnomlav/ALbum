@@ -36,10 +36,11 @@ fun VaultLineSlider(
     thumbColor: Color,
     thumbBorderColor: Color = Color.White,
     enabled: Boolean = true,
-    steps: Int = 0
+    steps: Int = 0,
+    thumbGap: androidx.compose.ui.unit.Dp = 3.dp
 ) {
     val trackStrokeWidth = with(LocalDensity.current) { 12.dp.toPx() }
-    val thumbTrackGap = with(LocalDensity.current) { 3.dp.toPx() }
+    val thumbTrackGap = with(LocalDensity.current) { thumbGap.toPx() }
     Slider(
         value = value.coerceIn(valueRange.start, valueRange.endInclusive),
         onValueChange = onValueChange,
