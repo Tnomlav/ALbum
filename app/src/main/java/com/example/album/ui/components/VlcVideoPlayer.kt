@@ -548,8 +548,14 @@ internal fun VlcVideoPlayer(
                 IconButton(onClick = { controlsInteraction++; playerMenuOpen = true }, modifier = Modifier.size(46.dp)) {
                     Icon(Icons.Outlined.MoreVert, appText("菜单", english), tint = Color.White)
                 }
-                IconButton(onClick = { onMiniModeChange(true) }, modifier = Modifier.size(46.dp)) {
-                    Icon(Icons.Outlined.PictureInPictureAlt, appText("小窗", english), tint = Color.White)
+            }
+            Row(
+                Modifier.align(Alignment.CenterStart).padding(start = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(26.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { onMiniModeChange(true) }) {
+                    Icon(Icons.Outlined.PictureInPictureAlt, appText("小窗", english), tint = Color.White, modifier = Modifier.size(25.dp))
                 }
             }
             Row(

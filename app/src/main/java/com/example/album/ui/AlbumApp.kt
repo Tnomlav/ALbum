@@ -46,6 +46,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
@@ -63,6 +67,11 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material.icons.outlined.WatchLater
+import androidx.compose.material.icons.outlined.Widgets
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.CleaningServices
+import androidx.compose.material.icons.outlined.Slideshow
+import androidx.compose.material.icons.outlined.Wallpaper
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -182,6 +191,7 @@ private enum class MainTab(val label: String, val icon: ImageVector) {
     Videos("视频", Icons.Outlined.VideoLibrary),
     Timeline("时间轴", Icons.Outlined.WatchLater),
     Pixiv("Pixiv", PixivPMark),
+    Tools("工具箱", Icons.Outlined.Widgets),
     Settings("设置", Icons.Outlined.Settings)
 }
 
@@ -245,6 +255,79 @@ private fun normalizedTabOrder(stored: List<MainTab>, pixivEnabled: Boolean): Li
         }
     }
     return result
+}
+
+internal data class PixivTagSearchEntry(val item: MediaItem, val tags: List<String>)
+
+/** Toolbox tab: shortcuts to the standalone tools that used to be buried in menus. */
+@Composable
+private fun ToolsScreen(
+    english: Boolean,
+    onOpenArchive: () -> Unit,
+    onOpenWallpaper: () -> Unit,
+    onOpenCleanup: () -> Unit,
+    onStartSlideshow: () -> Unit
+) {
+    Column(
+        Modifier.fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        ToolEntry(
+            icon = Icons.Outlined.Archive,
+            title = appText("Pixiv 文件归档", english),
+            subtitle = appText("扫描并整理 Pixiv 图片到画师目录", english),
+            onClick = onOpenArchive
+        )
+        ToolEntry(
+            icon = Icons.Outlined.Wallpaper,
+            title = appText("壁纸队列", english),
+            subtitle = appText("管理静态与动态壁纸队列并应用", english),
+            onClick = onOpenWallpaper
+        )
+        ToolEntry(
+            icon = Icons.Outlined.CleaningServices,
+            title = appText("文件清理", english),
+            subtitle = appText("重复图片、回收站与排除文件夹", english),
+            onClick = onOpenCleanup
+        )
+        ToolEntry(
+            icon = Icons.Outlined.Slideshow,
+            title = appText("幻灯片播放", english),
+            subtitle = appText("按当前相册顺序播放全部图片", english),
+            onClick = onStartSlideshow
+        )
+    }
+}
+
+@Composable
+private fun ToolEntry(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(color = MaterialTheme.colorScheme.primary, shape = androidx.compose.foundation.shape.RoundedCornerShape(7.dp)) {
+                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.padding(9.dp).size(22.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.primary)
+        }
+    }
 }
 
 @Composable
@@ -452,6 +535,11 @@ fun AlbumApp(
     var timelineFirstVisibleItem by remember { mutableIntStateOf(0) }
     var timelineFirstVisibleOffset by remember { mutableIntStateOf(0) }
     var folderScope by remember { mutableStateOf<List<MediaItem>?>(null) }
+    // The list the current page displays, so the viewer pages through the same
+    // order (and the same filters) the user sees.
+    var pageScope by remember { mutableStateOf<List<MediaItem>?>(null) }
+    var wallpaperReturnTab by remember { mutableStateOf<MainTab?>(null) }
+    var wallpaperReturnFolder by remember { mutableStateOf<String?>(null) }
     var openedFolder by rememberSaveable { mutableStateOf<String?>(null) }
     var selectionRenameItem by remember { mutableStateOf<MediaItem?>(null) }
     var selectionRenameFolder by remember { mutableStateOf<String?>(null) }
@@ -521,6 +609,18 @@ fun AlbumApp(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) wallpaperAppliedRefresh++
+            if (event == Lifecycle.Event.ON_RESUME) {
+                // Returning from the wallpaper chooser: restore the page the
+                // user was on before the system UI took over.
+                wallpaperReturnTab?.let { tab ->
+                    if (selectedTab != tab) selectedTab = tab
+                    wallpaperReturnTab = null
+                }
+                if (openedFolder != wallpaperReturnFolder && wallpaperReturnFolder != null) {
+                    openedFolder = wallpaperReturnFolder
+                }
+                wallpaperReturnFolder = null
+            }
         }
         lifecycleOwner?.lifecycle?.addObserver(observer)
         onDispose { lifecycleOwner?.lifecycle?.removeObserver(observer) }
@@ -549,6 +649,11 @@ fun AlbumApp(
         persistWallpaperQueue(updated, updatedOrder)
     }
     fun requestWallpaper(item: MediaItem) {
+        // The wallpaper flows leave the app (system chooser / live wallpaper
+        // preview); remember where the user was so returning does not drop
+        // them back on the home page.
+        wallpaperReturnTab = selectedTab
+        wallpaperReturnFolder = openedFolder
         launchWallpaperAppChooser(context, item, english)
     }
     var backgroundOptimizationEnabled by remember {
@@ -660,10 +765,27 @@ fun AlbumApp(
     val albumImages by remember { derivedStateOf {
         (visibleImages + library.localImages).distinctBy { it.uri }
     } }
+    val pixivTagSearchIndex = remember(pixivSearchImages, pixivTagsByUri) {
+        if (pixivTagsByUri.isEmpty()) emptyList()
+        else pixivSearchImages.map { item ->
+            PixivTagSearchEntry(item, pixivTagsByUri[item.uri.toString()].orEmpty())
+        }
+    }
     val pixivTagResults by remember { derivedStateOf {
         val tagQuery = appliedQuery.trim().removePrefix("#").trim()
-        if (tagQuery.isBlank()) emptyList() else pixivSearchImages.filter { item ->
-            pixivRepository.matchesTagQuery(pixivTagsByUri[item.uri.toString()].orEmpty(), tagQuery)
+        if (tagQuery.isBlank()) emptyList()
+        else {
+            // The tag index and each item's uri string are precomputed, so a
+            // keystroke only scans cached strings instead of rebuilding them
+            // for the whole archive on the main thread.
+            val index = pixivTagSearchIndex
+            if (index.isEmpty()) {
+                pixivSearchImages.filter { item ->
+                    pixivRepository.matchesTagQuery(pixivTagsByUri[item.uri.toString()].orEmpty(), tagQuery)
+                }
+            } else {
+                index.filter { entry -> pixivRepository.matchesTagQuery(entry.tags, tagQuery) }.map { it.item }
+            }
         }
     } }
     val currentSelectionMedia by remember { derivedStateOf {
@@ -685,6 +807,7 @@ fun AlbumApp(
                     ?: openedFolder?.let { folder -> pixivSearchImages.filter { it.folder == folder } }
                     ?: pixivSearchImages
             }
+            MainTab.Tools -> emptyList()
             MainTab.Settings -> emptyList()
         }
     } }
@@ -701,6 +824,7 @@ fun AlbumApp(
                 MainTab.Albums -> albumImages
                 MainTab.Timeline -> if (timelineShowsVideos) visibleVideos else visibleImages
                 MainTab.Pixiv -> pixivSearchImages
+                MainTab.Tools -> emptyList()
                 MainTab.Settings -> emptyList()
             }
             searchMedia(text, searchSource)
@@ -739,6 +863,7 @@ fun AlbumApp(
                 library.images + library.localImages
             }
             MainTab.Pixiv -> pixivSearchImages
+            MainTab.Tools -> emptyList()
             MainTab.Settings -> emptyList()
         }
         // favoriteFilter is a display filter, just like query. Do not apply
@@ -788,6 +913,7 @@ fun AlbumApp(
         MainTab.Videos -> "Videos"
         MainTab.Timeline -> "Timeline"
         MainTab.Pixiv -> "Pixiv"
+        MainTab.Tools -> "Tools"
         MainTab.Settings -> "Settings"
     } else tab.label
 
@@ -816,6 +942,10 @@ fun AlbumApp(
         val candidateScope = when {
             // The timeline shows the library list order grouped by date; the
             // player must use that same order for "next video".
+            // Whatever page is showing reports its exact list; paging must
+            // follow it (order, filters and search included).
+            pageScope?.any { it.uri == item.uri } == true &&
+                pageScope?.all { it.isVideo == item.isVideo } == true -> pageScope!!
             selectedTab == MainTab.Timeline -> {
                 val timelineItems = (if (timelineShowsVideos) visibleVideos else visibleImages)
                     .filter { it.isVideo == item.isVideo }
@@ -2017,6 +2147,7 @@ fun AlbumApp(
                     } else if (openedFolder == null) {
                         listOf("扫描刷新", "列数", "排序方式", "进入多选", "注意事项")
                     } else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
+                    MainTab.Tools -> emptyList()
                     MainTab.Settings -> emptyList()
                 },
                 onMenuItemClick = { action ->
@@ -2421,6 +2552,7 @@ fun AlbumApp(
                     initialMediaFirstVisibleItem = selectionMediaFirstVisibleItem,
                     initialMediaFirstVisibleOffset = selectionMediaFirstVisibleOffset,
                     onFirstVisibleMediaChanged = { selectionAnchorUri = it },
+                    onVisibleScopeChanged = { scope -> pageScope = scope; folderScope = scope },
                     onFirstVisibleFolderChanged = { selectionAnchorFolder = it },
                     onMediaScrollPositionChanged = { index, offset ->
                         selectionMediaFirstVisibleItem = index
@@ -2456,7 +2588,6 @@ fun AlbumApp(
                     onRefresh = { requestMediaScan(false) },
                     openedFolder = openedFolder,
                     onOpenedFolderChange = { folder -> if (folder != null && selectionMode && selectingFolders) { selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder } else openFolder(folder) },
-                    onVisibleScopeChanged = { folderScope = it },
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
@@ -2495,6 +2626,7 @@ fun AlbumApp(
                     initialMediaFirstVisibleItem = selectionMediaFirstVisibleItem,
                     initialMediaFirstVisibleOffset = selectionMediaFirstVisibleOffset,
                     onFirstVisibleMediaChanged = { selectionAnchorUri = it },
+                    onVisibleScopeChanged = { scope -> pageScope = scope; folderScope = scope },
                     onFirstVisibleFolderChanged = { selectionAnchorFolder = it },
                     onMediaScrollPositionChanged = { index, offset ->
                         selectionMediaFirstVisibleItem = index
@@ -2530,7 +2662,6 @@ fun AlbumApp(
                     onRefresh = { requestMediaScan(false) },
                     openedFolder = openedFolder,
                     onOpenedFolderChange = { folder -> if (folder != null && selectionMode && selectingFolders) { selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder } else openFolder(folder) },
-                    onVisibleScopeChanged = { folderScope = it },
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
@@ -2556,6 +2687,7 @@ fun AlbumApp(
                     initialFirstVisibleItem = selectionMediaFirstVisibleItem,
                     initialFirstVisibleOffset = selectionMediaFirstVisibleOffset,
                     onFirstVisibleMediaChanged = { selectionAnchorUri = it },
+                    onVisibleScopeChanged = { pageScope = it },
                     onScrollPositionChanged = { index, offset ->
                         timelineFirstVisibleItem = index
                         timelineFirstVisibleOffset = offset
@@ -2644,7 +2776,6 @@ fun AlbumApp(
                     },
                     openedFolder = openedFolder,
                     onOpenedFolderChange = { folder -> if (folder != null && selectionMode && selectingFolders) { selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder } else openFolder(folder) },
-                    onVisibleScopeChanged = { folderScope = it },
                     sharedElementEnabled = tab == selectedTab,
                     onOpenPixivArchive = {
                         pixivArchiveOpen = true
@@ -2653,6 +2784,7 @@ fun AlbumApp(
                     pinnedAlbumName = pixivSourceFolderName,
                     albumQueryMatchesItems = pixivSearchMode != PixivSearchMode.Artist,
                     flatMode = pixivSearchMode == PixivSearchMode.Tag && appliedQuery.isNotBlank(),
+                    onVisibleScopeChanged = { scope -> pageScope = scope; folderScope = scope },
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
                     selectionPreview = selectionMode || selectionGestureActive,
@@ -2663,6 +2795,20 @@ fun AlbumApp(
                 )
                     }
                 }
+                MainTab.Tools -> ToolsScreen(
+                    english = english,
+                    onOpenArchive = { pixivArchiveOpen = true },
+                    onOpenWallpaper = {
+                        wallpaperShowVideos = false
+                        wallpaperManagerOpen = true
+                    },
+                    onOpenCleanup = { cleanupOpen = true },
+                    onStartSlideshow = {
+                        val slideshowItems = (library.images + library.localImages)
+                            .distinctBy { it.uri.toString() }
+                        if (slideshowItems.isNotEmpty()) selectionSlideshow = slideshowItems
+                    }
+                )
                 MainTab.Settings -> SettingsScreen(
                     language = appLanguage,
                     onOpenCleanup = { cleanupOpen = true },

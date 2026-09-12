@@ -340,6 +340,11 @@ internal fun Media3VideoPlayer(
     // Entering picture-in-picture pauses the activity; remember that the pause
     // came from the floating window so playback is not stopped.
     var pictureInPictureRequested by remember { mutableStateOf(false) }
+    LaunchedEffect(pictureInPictureMode) {
+        // Leaving the floating window must restore the normal
+        // "pause when backgrounded" behaviour.
+        if (!pictureInPictureMode) pictureInPictureRequested = false
+    }
     fun exitPlayer() {
         // Restore the Activity policy before the viewer leaves. The player may
         // have changed it to landscape, portrait, or sensor mode.
@@ -1328,6 +1333,28 @@ internal fun MiniWindowOverlay(
     val currentOnMove by rememberUpdatedState(onMove)
     val currentOnResize by rememberUpdatedState(onResize)
     Box(Modifier.fillMaxSize()) {
+        if (pictureInPicture) {
+            // Inside the PiP window the system owns the top edge (its own
+            // close/expand buttons and gesture layer), so keep every control
+            // in one row along the bottom where touches reach the app.
+            Row(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MiniVideoButton(Icons.Outlined.Close, appText("关闭", english), Modifier.zIndex(1000f), onClose)
+                MiniVideoButton(Icons.Outlined.FastRewind, appText("快退", english), Modifier.zIndex(1000f), seekBack)
+                MiniVideoButton(
+                    if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                    appText(if (playing) "暂停" else "播放", english),
+                    Modifier.zIndex(1000f),
+                    onTogglePlay
+                )
+                MiniVideoButton(Icons.Outlined.FastForward, appText("快进", english), Modifier.zIndex(1000f), seekForward)
+                MiniVideoButton(Icons.Outlined.Fullscreen, appText("恢复全屏播放", english), Modifier.zIndex(1000f), onRestore)
+            }
+            return@Box
+        }
         Box(
             Modifier.fillMaxSize().zIndex(0f).pointerInput(Unit) {
                 var resizeFromLeft: Boolean? = null

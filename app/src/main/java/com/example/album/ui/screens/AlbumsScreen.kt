@@ -149,17 +149,25 @@ fun AlbumsScreen(
     fun itemsInDisplayOrder(items: List<MediaItem>): List<MediaItem> {
         return sortMediaItems(items, sort, sortDirection)
     }
-    val allAlbums = remember(media, sort, sortDirection, albumQueryMatchesItems, additionalAlbumNames, additionalFileNames, pinnedAlbumName) {
-        searchAlbums(
-            media = media,
-            query = "",
-            sort = sort,
-            sortDirection = sortDirection,
-            additionalFolderNames = additionalAlbumNames,
-            additionalFileNames = additionalFileNames,
-            matchItems = albumQueryMatchesItems,
-            pinnedFolderName = pinnedAlbumName
-        )
+    // Building the album index walks the whole library; keep it off the main
+    // thread so toggling the favourite filter (or any other list change) does
+    // not freeze the UI.
+    val allAlbums by androidx.compose.runtime.produceState(
+        initialValue = emptyList<MediaAlbum>(),
+        media, sort, sortDirection, albumQueryMatchesItems, additionalAlbumNames, additionalFileNames, pinnedAlbumName
+    ) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            searchAlbums(
+                media = media,
+                query = "",
+                sort = sort,
+                sortDirection = sortDirection,
+                additionalFolderNames = additionalAlbumNames,
+                additionalFileNames = additionalFileNames,
+                matchItems = albumQueryMatchesItems,
+                pinnedFolderName = pinnedAlbumName
+            )
+        }
     }
     val albums = remember(allAlbums, query, additionalFileNames, pinnedAlbumName) {
         filterAlbums(allAlbums, query, additionalFileNames, pinnedAlbumName, albumQueryMatchesItems)
@@ -183,7 +191,9 @@ fun AlbumsScreen(
         }
     }
     LaunchedEffect(openedFolder, currentAlbum?.items) {
-        onVisibleScopeChanged(if (openedFolder == null) null else currentAlbum?.items.orEmpty())
+        // Report the exact list the page is showing so the viewer's
+        // "next item" follows the current sort and filters.
+        onVisibleScopeChanged(if (openedFolder == null) media else currentAlbum?.items.orEmpty())
     }
 
     when {

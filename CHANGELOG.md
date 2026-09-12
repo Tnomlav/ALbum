@@ -1,5 +1,20 @@
 # Album Changelog
 
+## v1.1.64 - 2026-09-13 (local signed build)
+
+- Every multi-select now happens inside the list that is already on screen (media and folders), so positions never change and the current sort order is respected.
+- Image and video paging follows the exact list the page shows (current sort, search and favourite filters) instead of a separately derived list.
+- The picture-in-picture window keeps playing when it opens or closes, and its controls sit in one row along the bottom so the system's own PiP buttons and gesture layer cannot cover them. Leaving the window restores the normal "pause in background" behaviour.
+- The player seek bar shows the archive slider's thumb/track separation (dark ring between white thumb and white track).
+- LibVLC-based formats (MPG, AVI, …) use the same player layout as the main player (controls on the left, lock on the right, title bar, seek bar and orientation row).
+- Pixiv tag search uses a precomputed tag index, so typing no longer rebuilds uri strings and tag lists for the whole archive.
+- The album index is built off the main thread, so toggling the favourite filter no longer freezes the UI.
+- New bottom-bar "Tools" page with entries for the Pixiv archive, wallpaper queue, file cleanup and slideshow playback.
+- Setting a wallpaper from inside a folder returns to that folder instead of the home page.
+- APK: `app/release/app-release.apk` (arm64-v8a split)
+- SHA-256: `2C04E6A00EE7D93A84EB8FE7B67D3034953F712E8FC7DB57AF4F00347B90AD34`
+- Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug` and `assembleRelease` passed. The phone was disconnected during this round, so on-device verification is still pending.
+
 ## v1.1.63 - 2026-09-13 (local signed build)
 
 - Folder multi-select now happens inside the list that is already on screen (like media multi-select), so the Pixiv page keeps its scroll position and no second grid is built.

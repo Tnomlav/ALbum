@@ -90,6 +90,7 @@ fun TimelineScreen(
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
     onFirstVisibleMediaChanged: (String?) -> Unit = {},
+    onVisibleScopeChanged: (List<MediaItem>) -> Unit = {},
     onClearQuery: () -> Unit = {}
 ) {
     val refreshing = loading || scanning
@@ -141,6 +142,8 @@ fun TimelineScreen(
     }
     val groups = remember(filtered) { filtered.groupBy { formatter.format(Date(it.dateTaken)) } }
     val groupedDates = remember(groups) { groups.entries.toList() }
+    // The viewer must page through exactly what this page shows, in this order.
+    LaunchedEffect(filtered) { onVisibleScopeChanged(filtered) }
 
     if (layout == MediaLayout.Adaptive) {
         AdaptiveTimeline(
