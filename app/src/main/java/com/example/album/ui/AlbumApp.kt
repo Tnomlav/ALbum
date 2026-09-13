@@ -132,6 +132,7 @@ import com.example.album.data.displayAddress
 import com.example.album.data.PixivArchiveRepository
 import com.example.album.data.WallpaperQueueState
 import com.example.album.data.WallpaperQueueStore
+import com.example.album.data.SlideshowQueueStore
 import com.example.album.data.WallpaperAppliedStore
 import com.example.album.wallpaper.WallpaperBackup
 import com.example.album.data.TransferMode
@@ -163,6 +164,8 @@ import com.example.album.ui.screens.SelectionScreen
 import com.example.album.ui.screens.AlbumSelectionScreen
 import com.example.album.ui.screens.CleanupScreen
 import com.example.album.ui.screens.WallpaperManagerScreen
+import com.example.album.ui.screens.SlideshowQueueScreen
+import com.example.album.ui.screens.SlideshowQueueScreen
 import com.example.album.ui.screens.WallpaperSort
 import com.example.album.ui.screens.sortWallpaperMedia
 import com.example.album.ui.screens.WallpaperSettingsSheet
@@ -242,7 +245,9 @@ internal fun PixivArchiveNavigation(onClick: () -> Unit) {
 }
 
 private fun enabledMainTabs(pixivEnabled: Boolean): List<MainTab> =
-    MainTab.entries.filter { it != MainTab.Pixiv || pixivEnabled }
+    MainTab.entries.filter { tab ->
+        (tab != MainTab.Pixiv || pixivEnabled) && tab != MainTab.Videos
+    }
 
 private fun normalizedTabOrder(stored: List<MainTab>, pixivEnabled: Boolean): List<MainTab> {
     val enabled = enabledMainTabs(pixivEnabled)
@@ -266,7 +271,8 @@ private fun ToolsScreen(
     onOpenArchive: () -> Unit,
     onOpenWallpaper: () -> Unit,
     onOpenCleanup: () -> Unit,
-    onStartSlideshow: () -> Unit
+    onStartSlideshow: () -> Unit,
+    onOpenPixiv: () -> Unit
 ) {
     Column(
         Modifier.fillMaxSize()
@@ -295,8 +301,14 @@ private fun ToolsScreen(
         ToolEntry(
             icon = Icons.Outlined.Slideshow,
             title = appText("幻灯片播放", english),
-            subtitle = appText("按当前相册顺序播放全部图片", english),
+            subtitle = appText("管理幻灯片队列并开始播放", english),
             onClick = onStartSlideshow
+        )
+        ToolEntry(
+            icon = Icons.Outlined.Collections,
+            title = appText("Pixiv 页面", english),
+            subtitle = appText("进入 Pixiv 归档浏览与标签搜索", english),
+            onClick = onOpenPixiv
         )
     }
 }
@@ -360,7 +372,7 @@ fun AlbumApp(
     val transferPreferences = remember { context.getSharedPreferences("transfer_preferences", android.content.Context.MODE_PRIVATE) }
     val pixivEnabledAtStart = albumSettings.getBoolean("pixiv_tab_enabled", false)
     val initialTab = when (albumSettings.getString("default_home", "相册")) {
-        "视频" -> MainTab.Videos
+        "视频" -> MainTab.Albums
         "时间轴" -> MainTab.Timeline
         "Pixiv" -> if (pixivEnabledAtStart) MainTab.Pixiv else MainTab.Albums
         else -> MainTab.Albums
@@ -437,6 +449,7 @@ fun AlbumApp(
     var showDateDialog by remember { mutableStateOf(false) }
     var timelineJumpDate by rememberSaveable { mutableStateOf<String?>(null) }
     var timelineShowsVideos by rememberSaveable { mutableStateOf(false) }
+    var albumShowsVideos by rememberSaveable { mutableStateOf(false) }
     var showExcludeDialog by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var showPixivHomeIntro by remember { mutableStateOf(false) }
@@ -446,6 +459,10 @@ fun AlbumApp(
     var wallpaperQueueLoaded by remember { mutableStateOf(false) }
     var wallpaperQueueUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var wallpaperQueueSaveJob by remember { mutableStateOf<Job?>(null) }
+    var slideshowQueueOpen by rememberSaveable { mutableStateOf(false) }
+    var slideshowQueueUris by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var slideshowQueueOrder by remember { mutableStateOf<List<String>>(emptyList()) }
+    var slideshowQueueSaveJob by remember { mutableStateOf<Job?>(null) }
     val wallpaperImportState by WallpaperImportCoordinator.state.collectAsState()
     val wallpaperImportRunning = wallpaperImportState is WallpaperImportState.Running
     var showFavoriteBadge by remember { mutableStateOf(albumSettings.getBoolean("show_favorite_badge", true)) }
@@ -515,6 +532,34 @@ fun AlbumApp(
             setStaticWallpaper(context, restored.filterNot { it.isVideo }, english)
         }
     }
+    LaunchedEffect(context) {
+        val loaded = withContext(Dispatchers.IO) { SlideshowQueueStore.load(context) }
+        slideshowQueueUris = loaded.uris
+        slideshowQueueOrder = loaded.order
+    }
+    fun persistSlideshowQueue(uris: Set<String>, order: List<String>) {
+        slideshowQueueSaveJob?.cancel()
+        slideshowQueueSaveJob = scope.launch(Dispatchers.IO) {
+            SlideshowQueueStore.save(context, SlideshowQueueStore.State(uris, order))
+        }
+    }
+    fun addToSlideshowQueue(items: List<MediaItem>) {
+        if (items.isEmpty()) return
+        val keys = items.map { it.uri.toString() }
+        val updated = slideshowQueueUris + keys
+        val order = slideshowQueueOrder + keys.filterNot { it in slideshowQueueOrder }
+        slideshowQueueUris = updated
+        slideshowQueueOrder = order
+        persistSlideshowQueue(updated, order)
+        Toast.makeText(context, if (english) "Added to slideshow queue" else "已加入幻灯片队列", Toast.LENGTH_SHORT).show()
+    }
+    val slideshowQueueMedia by remember { derivedStateOf {
+        val all = (library.images + library.localImages + library.videos + library.localVideos)
+            .distinctBy { it.uri.toString() }
+        val positions = slideshowQueueOrder.withIndex().associate { it.value to it.index }
+        all.filter { it.uri.toString() in slideshowQueueUris }
+            .sortedBy { positions[it.uri.toString()] ?: Int.MAX_VALUE }
+    } }
     var suspendedSearchQuery by rememberSaveable { mutableStateOf<String?>(null) }
     var searchOpen by rememberSaveable { mutableStateOf(true) }
     LaunchedEffect(selectionMode) {
@@ -704,6 +749,16 @@ fun AlbumApp(
         val generation = ++pixivReloadGeneration
         pixivPageRefreshing = true
         try {
+            // Show the previous snapshot immediately (SAF tree walks are slow)
+            // and replace it once the fresh walk finishes.
+            if (pixivLibraryImages == null) {
+                withContext(Dispatchers.IO) { pixivRepository.loadCachedLibrary() }?.let { cached ->
+                    if (generation != pixivReloadGeneration) return
+                    pixivLibraryImages = cached.items
+                    pixivFolderNames = cached.folderNames
+                    pixivSourceFolderName = cached.sourceFolderName
+                }
+            }
             val snapshot = pixivRepository.loadLibrary(defaultPixivImages)
             if (generation != pixivReloadGeneration) return
             pixivLibraryImages = snapshot.items
@@ -908,8 +963,12 @@ fun AlbumApp(
         }
     }
 
+    fun tabIcon(tab: MainTab): ImageVector = if (tab == MainTab.Albums && albumShowsVideos) {
+        Icons.Outlined.VideoLibrary
+    } else tab.icon
+
     fun tabLabel(tab: MainTab): String = if (appLanguage == "English") when (tab) {
-        MainTab.Albums -> "Albums"
+        MainTab.Albums -> if (albumShowsVideos) "Videos" else "Albums"
         MainTab.Videos -> "Videos"
         MainTab.Timeline -> "Timeline"
         MainTab.Pixiv -> "Pixiv"
@@ -998,7 +1057,8 @@ fun AlbumApp(
             isVideo = mime.startsWith("video/"),
             isDocument = true
         )
-        selectedTab = if (externalItem.isVideo) MainTab.Videos else MainTab.Albums
+        albumShowsVideos = externalItem.isVideo
+        selectedTab = MainTab.Albums
         openMedia(externalItem)
     }
 
@@ -1039,7 +1099,8 @@ fun AlbumApp(
             .firstOrNull { it.uri.toString() == request.uri }
             ?: return@LaunchedEffect
         viewerPlaybackResume = request
-        selectedTab = MainTab.Videos
+        albumShowsVideos = true
+        selectedTab = MainTab.Albums
         openMedia(video)
         onPlaybackResumeConsumed(request.requestId)
     }
@@ -1183,6 +1244,7 @@ fun AlbumApp(
     BackHandler(enabled = appBackEnabled) {
         when {
             transferRequest != null -> transferRequest = null
+            slideshowQueueOpen -> slideshowQueueOpen = false
             wallpaperManagerOpen && wallpaperSelectionMode -> {
                 wallpaperSelectionMode = false
                 wallpaperSelectedUris = emptySet()
@@ -1909,7 +1971,8 @@ fun AlbumApp(
             onOpenMedia = ::openMedia,
             onOpenExcludedFolder = { folder, isVideo ->
                 cleanupOpen = false
-                selectedTab = if (isVideo) MainTab.Videos else MainTab.Albums
+                albumShowsVideos = isVideo
+                selectedTab = MainTab.Albums
                 openedFolder = folder
                 folderScope = null
                 query = ""
@@ -1929,7 +1992,35 @@ fun AlbumApp(
                 modifier = Modifier.fillMaxSize(),
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 topBar = {
-            if (wallpaperManagerOpen) VaultTopBar(
+            if (slideshowQueueOpen) VaultTopBar(
+                title = appText("幻灯片队列", english),
+                query = "",
+                searchEnabled = false,
+                onQueryChange = {},
+                favoriteActive = false,
+                favoriteVisible = false,
+                onFavoriteClick = {},
+                menuItems = listOf(appText("清空幻灯片队列", english)),
+                onMenuItemClick = { action ->
+                    if (action == appText("清空幻灯片队列", english)) {
+                        slideshowQueueUris = emptySet()
+                        slideshowQueueOrder = emptyList()
+                        persistSlideshowQueue(emptySet(), emptyList())
+                    }
+                },
+                onBack = { slideshowQueueOpen = false },
+                actionLabel = appText("播放", english),
+                actionEnabled = slideshowQueueMedia.isNotEmpty(),
+                actionCapsule = true,
+                onActionClick = {
+                    val items = slideshowQueueMedia.filterNot { it.isVideo }
+                    if (items.isNotEmpty()) {
+                        selectionSlideshow = items
+                        slideshowQueueOpen = false
+                    }
+                },
+                chromeAlpha = pageChromeAlpha
+            ) else if (wallpaperManagerOpen) VaultTopBar(
                 title = if (english) "Wallpaper manager" else "壁纸管理",
                 query = wallpaperQuery,
                 searchEnabled = true,
@@ -2059,6 +2150,11 @@ fun AlbumApp(
                 onDelete = {
                     requestDeleteWithConfirmation(selectedItemsForAction)
                 },
+                onAddToSlideshowQueue = selectedItemsForAction.takeIf { items -> items.any { !it.isVideo } }?.let {{
+                    addToSlideshowQueue(selectedItemsForAction.filterNot { it.isVideo })
+                    selectionMode = false
+                    selectingFolders = false
+                }},
                 onSlideshow = selectedItemsForAction.takeIf { items -> items.any { !it.isVideo } }?.let {{
                     selectionSlideshow = selectedItemsForAction.filterNot { it.isVideo }
                     selectionMode = false
@@ -2126,18 +2222,26 @@ fun AlbumApp(
                     }
                 },
                 favoriteActive = favoriteFilter,
+                favoriteVisible = selectedTab != MainTab.Tools,
                 onFavoriteClick = { favoriteFilter = !favoriteFilter },
                 menuItems = when (tab) {
-                    MainTab.Albums, MainTab.Videos -> if (appLanguage == "English") {
-                        if (openedFolder == null) listOf("Scan", "Add local folder", "Columns", "Sort", "Select", "Wallpaper manager")
-                        else listOf("Scan", "New folder", "Columns", "Layout", "Sort", "Select", "Wallpaper manager")
+                    MainTab.Albums -> if (appLanguage == "English") {
+                        if (openedFolder == null) listOf("Scan", "Add local folder", "Columns", "Sort", "Select")
+                        else listOf("Scan", "New folder", "Columns", "Layout", "Sort", "Select")
                     } else {
-                        if (openedFolder == null) listOf("扫描刷新", "添加本地文件夹", "列数", "排序方式", "进入多选", "壁纸管理")
-                        else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选", "壁纸管理")
+                        if (openedFolder == null) listOf("扫描刷新", "添加本地文件夹", "列数", "排序方式", "进入多选")
+                        else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
                     }
                     MainTab.Timeline -> if (appLanguage == "English") {
                         listOf("Scan", "Add local folder", "Jump to date", "Columns", "Layout", "Select")
                     } else listOf("扫描刷新", "添加本地文件夹", "跳转日期", "列数", "排布方式", "进入多选")
+                    MainTab.Videos -> if (appLanguage == "English") {
+                        if (openedFolder == null) listOf("Scan", "Add local folder", "Columns", "Sort", "Select")
+                        else listOf("Scan", "New folder", "Columns", "Layout", "Sort", "Select")
+                    } else {
+                        if (openedFolder == null) listOf("扫描刷新", "添加本地文件夹", "列数", "排序方式", "进入多选")
+                        else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
+                    }
                     MainTab.Pixiv -> if (appLanguage == "English") {
                         if (pixivSearchMode == PixivSearchMode.Tag) listOf("Scan", "Columns", "Layout", "Sort", "Select", "Notes")
                         else if (openedFolder == null) listOf("Scan", "Columns", "Sort", "Select", "Notes")
@@ -2225,8 +2329,26 @@ fun AlbumApp(
                 selectedSearchMode = when {
                     tab == MainTab.Timeline && timelineShowsVideos -> 1
                     tab == MainTab.Timeline -> 0
+                    tab == MainTab.Albums -> if (albumShowsVideos) 1 else 0
                     pixivSearchMode == PixivSearchMode.Artist -> 0
                     else -> 1
+                },
+                titleSwitch = if (tab == MainTab.Albums) {
+                    listOf(
+                        if (english) "Albums" else "相册",
+                        if (english) "Videos" else "视频"
+                    )
+                } else null,
+                onTitleSwitchChange = { index ->
+                    if (tab == MainTab.Albums) {
+                        val showVideos = index == 1
+                        if (albumShowsVideos != showVideos) {
+                            albumShowsVideos = showVideos
+                            query = ""
+                            openedFolder = null
+                            appliedQuery = ""
+                        }
+                    }
                 },
                 onSearchModeChange = { index ->
                     if (tab == MainTab.Timeline) {
@@ -2367,7 +2489,7 @@ fun AlbumApp(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    tab.icon,
+                                    tabIcon(tab),
                                     contentDescription = tabLabel(tab),
                                     tint = navTint,
                                     modifier = Modifier.fillMaxSize().graphicsLayer {
@@ -2378,7 +2500,7 @@ fun AlbumApp(
                             }
                         } else {
                             Icon(
-                                tab.icon,
+                                tabIcon(tab),
                                 contentDescription = tabLabel(tab),
                                 tint = navTint,
                                 modifier = Modifier.height(24.dp).offset { IntOffset(0, iconOffset.roundToPx()) }
@@ -2529,13 +2651,15 @@ fun AlbumApp(
                 Box(Modifier.fillMaxSize()) {
             when (tab) {
                 MainTab.Albums -> AlbumsScreen(
-                    media = albumImages,
-                    isVideo = false,
+                    // One page for both libraries; the top-bar switch decides
+                    // whether it shows photos or videos.
+                    media = if (albumShowsVideos) visibleVideos else albumImages,
+                    isVideo = albumShowsVideos,
                     query = appliedQuery,
                     searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                     loading = library.loading,
                     scanning = library.scanning,
-                    permissionGranted = library.imagePermissionGranted,
+                    permissionGranted = if (albumShowsVideos) library.videoPermissionGranted else library.imagePermissionGranted,
                     sort = mediaSort,
                     sortDirection = sortDirection,
                     albumColumns = albumColumns,
@@ -2804,9 +2928,15 @@ fun AlbumApp(
                     },
                     onOpenCleanup = { cleanupOpen = true },
                     onStartSlideshow = {
-                        val slideshowItems = (library.images + library.localImages)
-                            .distinctBy { it.uri.toString() }
-                        if (slideshowItems.isNotEmpty()) selectionSlideshow = slideshowItems
+                        slideshowQueueOpen = true
+                    },
+                    onOpenPixiv = {
+                        if (!pixivTabEnabled) {
+                            pixivTabEnabled = true
+                            tabOrder = normalizedTabOrder(tabOrder, true)
+                            preferences.edit().putBoolean("pixiv_tab_enabled", true).apply()
+                        }
+                        selectedTab = MainTab.Pixiv
                     }
                 )
                 MainTab.Settings -> SettingsScreen(
@@ -2866,6 +2996,27 @@ fun AlbumApp(
             }
         }
 
+            if (slideshowQueueOpen) {
+                Box(
+                    Modifier.fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.statusBars)
+                        .padding(top = VaultDimens.HeaderContentHeight)
+                        .background(MaterialTheme.colorScheme.surface)
+                ) {
+                    SlideshowQueueScreen(
+                        items = slideshowQueueMedia,
+                        onOpenMedia = ::openMedia,
+                        onRemove = { item ->
+                            val key = item.uri.toString()
+                            val uris = slideshowQueueUris - key
+                            val order = slideshowQueueOrder - key
+                            slideshowQueueUris = uris
+                            slideshowQueueOrder = order
+                            persistSlideshowQueue(uris, order)
+                        }
+                    )
+                }
+            }
             if (wallpaperManagerOpen) {
                 Box(
                     Modifier.fillMaxSize()

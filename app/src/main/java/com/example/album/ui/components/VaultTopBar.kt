@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -61,6 +62,7 @@ fun VaultTopBar(
     searchEnabled: Boolean,
     onQueryChange: (String) -> Unit,
     favoriteActive: Boolean,
+    favoriteVisible: Boolean = true,
     onFavoriteClick: () -> Unit,
     menuItems: List<String>,
     onMenuItemClick: (String) -> Unit,
@@ -78,6 +80,9 @@ fun VaultTopBar(
     actionStartPadding: Dp = 0.dp,
     onTitleClick: (() -> Unit)? = null,
     chromeAlpha: Float = 1f
+    ,
+    titleSwitch: List<String>? = null,
+    onTitleSwitchChange: (Int) -> Unit = {}
 ) {
     val english = LocalAppEnglish.current
     var menuExpanded by remember { mutableStateOf(false) }
@@ -111,6 +116,46 @@ fun VaultTopBar(
                 }
                 if (!searchEnabled) {
                     Text(title, modifier = Modifier.weight(1f), fontSize = 16.sp, maxLines = 1)
+                }
+            } else if (titleSwitch != null && titleSwitch.isNotEmpty()) {
+                // Prominent page-type switch: replaces the plain title text so
+                // switching between the photo and video libraries is the first
+                // thing the user sees.
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val index = selectedSearchMode.coerceIn(titleSwitch.indices)
+                    titleSwitch.forEachIndexed { position, label ->
+                        val selected = position == index
+                        Box(
+                            modifier = Modifier
+                                .height(38.dp)
+                                .then(
+                                    if (selected) Modifier
+                                        .shadow(2.dp, RoundedCornerShape(7.dp))
+                                        .clip(RoundedCornerShape(7.dp))
+                                        .background(MaterialTheme.colorScheme.surface)
+                                    else Modifier
+                                )
+                                .clickable { onTitleSwitchChange(position) }
+                                .padding(horizontal = 14.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                label,
+                                fontSize = 15.sp,
+                                fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.SemiBold else androidx.compose.ui.text.font.FontWeight.Normal,
+                                color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
                 }
             } else {
                 Row(
@@ -230,7 +275,7 @@ fun VaultTopBar(
                         )
                     }
                 } else {
-                    IconButton(
+                    if (favoriteVisible) IconButton(
                         onClick = onFavoriteClick,
                         modifier = Modifier.height(48.dp).width(if (searchModeLabels.isNotEmpty()) 44.dp else 48.dp)
                     ) {
@@ -256,7 +301,7 @@ fun VaultTopBar(
                 // Keep the favorite filter available when a search is
                 // suspended. The normal page hides the search field in that
                 // state, but hiding this action makes favorites appear lost.
-                IconButton(
+                if (favoriteVisible) IconButton(
                     onClick = onFavoriteClick,
                     modifier = Modifier.height(48.dp).width(48.dp)
                 ) {

@@ -14,6 +14,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioAttributes
 import android.os.Build
 import android.provider.Settings
+import android.net.Uri
 import android.view.OrientationEventListener
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -340,6 +341,15 @@ internal fun Media3VideoPlayer(
     // Entering picture-in-picture pauses the activity; remember that the pause
     // came from the floating window so playback is not stopped.
     var pictureInPictureRequested by remember { mutableStateOf(false) }
+    var pendingFloatingWindow by remember { mutableStateOf(false) }
+    var floatingWindow by remember { mutableStateOf<OverlayMiniWindow?>(null) }
+    val overlayPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        // The system settings screen returns here; the window is created on the
+        // next composition once the permission is actually granted.
+        if (OverlayMiniWindow.canShow(context)) pendingFloatingWindow = true
+    }
     LaunchedEffect(pictureInPictureMode) {
         // Leaving the floating window must restore the normal
         // "pause when backgrounded" behaviour.
@@ -520,6 +530,61 @@ internal fun Media3VideoPlayer(
     // navigation does not repeatedly calculate from a stale player index.
     var requestedIndex by remember(player) { mutableIntStateOf(currentIndex) }
 
+    fun showFloatingWindow() {
+        if (floatingWindow?.isShowing == true) return
+        if (!OverlayMiniWindow.canShow(context)) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${context.packageName}")
+            )
+            runCatching { overlayPermissionLauncher.launch(intent) }
+                .onFailure { if (onEnterPictureInPicture()) pictureInPictureRequested = true else onMiniModeChange(true) }
+            return
+        }
+        val window = OverlayMiniWindow(
+            context = context,
+            player = player,
+            onRestore = {
+                floatingWindow = null
+                pictureInPictureRequested = false
+                controlsVisible = true
+                controlsInteraction++
+            },
+            onClose = {
+                floatingWindow = null
+                pictureInPictureRequested = false
+                exitPlayer()
+            },
+            onTogglePlay = {
+                if (player.isPlaying) player.pause() else {
+                    if (player.playbackState == Player.STATE_IDLE) player.prepare()
+                    player.play()
+                }
+            },
+            onSeekBack = { seekToVideoFrame(player, player.currentPosition - normalSkip) },
+            onSeekForward = { seekToVideoFrame(player, player.currentPosition + normalSkip) },
+            isPlaying = { player.isPlaying }
+        )
+        window.show()
+        if (window.isShowing) {
+            floatingWindow = window
+            // Keep playing while the app is in the background.
+            pictureInPictureRequested = true
+        } else if (onEnterPictureInPicture()) {
+            pictureInPictureRequested = true
+        } else {
+            onMiniModeChange(true)
+        }
+    }
+    LaunchedEffect(pendingFloatingWindow) {
+        if (pendingFloatingWindow) {
+            pendingFloatingWindow = false
+            showFloatingWindow()
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { floatingWindow?.dismiss() }
+    }
     DisposableEffect(player) {
         val lifecycle = (hostActivity as? ComponentActivity)?.lifecycle
         val observer = LifecycleEventObserver { _, event ->
@@ -532,14 +597,10 @@ internal fun Media3VideoPlayer(
                     if (inPictureInPicture) {
                         // The floating window keeps playing; nothing to do.
                     } else if (autoMini && !miniMode && !pictureInPictureMode && player.playWhenReady) {
-                        // Auto mini window: keep playing in the floating window
-                        // and fall back to the in-app window when the platform
-                        // has no picture-in-picture support.
-                        if (onEnterPictureInPicture()) {
-                            pictureInPictureRequested = true
-                        } else {
-                            onMiniModeChange(true)
-                        }
+                        // Auto mini window: keep playing in the app's floating
+                        // window (with the overlay permission) or fall back to
+                        // picture-in-picture / the in-app window.
+                        showFloatingWindow()
                     } else if (pauseOnBackground && player.playWhenReady) {
                         pausedForBackground = true
                         player.pause()
@@ -761,6 +822,12 @@ internal fun Media3VideoPlayer(
         }
         refreshControls()
     }
+
+    /**
+     * Shows the app's own floating window (needs the "display over other apps"
+     * permission). Falls back to picture-in-picture when the permission is not
+     * granted or the window cannot be added.
+     */
 
     fun cycleMode() {
         mode = (mode + 1) % 4
@@ -1102,15 +1169,7 @@ internal fun Media3VideoPlayer(
             ) {
                 IconButton(onClick = {
                     refreshControls()
-                    // The system picture-in-picture window is the only way to
-                    // float above other apps; it shows the same floating
-                    // window controls. Devices without PiP use the in-app
-                    // fallback window.
-                    if (onEnterPictureInPicture()) {
-                        pictureInPictureRequested = true
-                    } else {
-                        onMiniModeChange(true)
-                    }
+                    showFloatingWindow()
                 }) {
                     Icon(HtmlPipIcon, appText("小窗", english), tint = Color.White, modifier = Modifier.size(25.dp))
                 }

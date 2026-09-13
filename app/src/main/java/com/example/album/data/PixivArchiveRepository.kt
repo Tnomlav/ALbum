@@ -250,6 +250,106 @@ class PixivArchiveRepository(private val context: Context) {
     }
 
     suspend fun loadLibrary(fallbackDefaultItems: List<MediaItem>): PixivLibrarySnapshot = withContext(Dispatchers.IO) {
+        val snapshot = buildLibrary(fallbackDefaultItems)
+        runCatching { writeLibraryCache(snapshot) }
+        snapshot
+    }
+
+    /**
+     * Last built snapshot. SAF tree walks are slow (one IPC per directory), so
+     * the page shows this immediately while a fresh walk runs in the
+     * background.
+     */
+    fun loadCachedLibrary(): PixivLibrarySnapshot? = runCatching {
+        val file = java.io.File(context.filesDir, LIBRARY_CACHE_FILE)
+        if (!file.isFile) return@runCatching null
+        val root = org.json.JSONObject(file.readText())
+        if (root.optString("key") != libraryCacheKey()) return@runCatching null
+        val items = root.optJSONArray("items")?.let { array ->
+            (0 until array.length()).mapNotNull { index ->
+                val entry = array.optJSONObject(index) ?: return@mapNotNull null
+                val uri = entry.optString("uri").takeIf { it.isNotBlank() }?.let(Uri::parse) ?: return@mapNotNull null
+                MediaItem(
+                    id = entry.optLong("id"),
+                    uri = uri,
+                    name = entry.optString("name"),
+                    folder = entry.optString("folder"),
+                    dateTaken = entry.optLong("dateTaken"),
+                    mimeType = entry.optString("mimeType"),
+                    relativePath = entry.optString("relativePath").takeIf { it.isNotBlank() },
+                    size = entry.optLong("size"),
+                    dateModified = entry.optLong("dateModified"),
+                    duration = entry.optLong("duration"),
+                    width = entry.optInt("width"),
+                    height = entry.optInt("height"),
+                    isVideo = entry.optBoolean("isVideo"),
+                    isDocument = entry.optBoolean("isDocument")
+                )
+            }
+        }.orEmpty()
+        if (items.isEmpty()) return@runCatching null
+        PixivLibrarySnapshot(
+            items = items,
+            tagsByUri = emptyMap(),
+            folderNames = root.optJSONArray("folders")?.let { array ->
+                (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }.toSet()
+            }.orEmpty(),
+            sourceFolderName = root.optString("sourceFolderName", "Pixiv"),
+            sourceConfigured = root.optBoolean("sourceConfigured"),
+            targetConfigured = root.optBoolean("targetConfigured")
+        )
+    }.getOrNull()
+
+    private fun libraryCacheKey(): String {
+        val preferences = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
+        val showHiddenMedia = context.getSharedPreferences("album_settings", Context.MODE_PRIVATE)
+            .getBoolean("show_hidden_media", false)
+        return listOf(
+            preferences.getString("source_uri", "").orEmpty(),
+            preferences.getString("target_uri", "").orEmpty(),
+            showHiddenMedia.toString()
+        ).joinToString("|")
+    }
+
+    private fun writeLibraryCache(snapshot: PixivLibrarySnapshot) {
+        if (snapshot.items.isEmpty()) return
+        val array = org.json.JSONArray()
+        snapshot.items.forEach { item ->
+            array.put(
+                org.json.JSONObject()
+                    .put("id", item.id)
+                    .put("uri", item.uri.toString())
+                    .put("name", item.name)
+                    .put("folder", item.folder)
+                    .put("dateTaken", item.dateTaken)
+                    .put("mimeType", item.mimeType)
+                    .put("relativePath", item.relativePath.orEmpty())
+                    .put("size", item.size)
+                    .put("dateModified", item.dateModified)
+                    .put("duration", item.duration)
+                    .put("width", item.width)
+                    .put("height", item.height)
+                    .put("isVideo", item.isVideo)
+                    .put("isDocument", item.isDocument)
+            )
+        }
+        val root = org.json.JSONObject()
+            .put("key", libraryCacheKey())
+            .put("items", array)
+            .put("folders", org.json.JSONArray(snapshot.folderNames.toList()))
+            .put("sourceFolderName", snapshot.sourceFolderName)
+            .put("sourceConfigured", snapshot.sourceConfigured)
+            .put("targetConfigured", snapshot.targetConfigured)
+        val file = java.io.File(context.filesDir, LIBRARY_CACHE_FILE)
+        val temporary = java.io.File(context.filesDir, "$LIBRARY_CACHE_FILE.tmp")
+        temporary.writeText(root.toString())
+        if (!temporary.renameTo(file)) {
+            file.writeText(root.toString())
+            temporary.delete()
+        }
+    }
+
+    private suspend fun buildLibrary(fallbackDefaultItems: List<MediaItem>): PixivLibrarySnapshot = withContext(Dispatchers.IO) {
         val preferences = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
         val showHiddenMedia = context.getSharedPreferences("album_settings", Context.MODE_PRIVATE)
             .getBoolean("show_hidden_media", false)
@@ -1144,6 +1244,7 @@ private val COMMON_PIXIV_FILENAME = Regex(
 )
 private const val PROGRESS_UPDATE_INTERVAL_MS = 120L
 private const val PIXIV_METADATA_CONCURRENCY = 3
+private const val LIBRARY_CACHE_FILE = "pixiv_library_cache.json"
 internal fun parsePixivFilename(filename: String): Pair<String, Int>? {
     val strict = STRICT_PIXIV_FILENAME.matchEntire(filename)
     if (strict != null) return strict.groupValues[1] to (strict.groupValues[2].toIntOrNull() ?: 0)

@@ -1,5 +1,17 @@
 # Album Changelog
 
+## v1.1.65 - 2026-09-13 (local signed build)
+
+- Pixiv page opens instantly from a cached snapshot (items, folders, settings) and refreshes in the background, so the slow SAF tree walk no longer blocks the page.
+- The mini window is now the app's own floating window, drawn through the "display over other apps" permission: our buttons, drag to move, corner drag to resize, and no system picture-in-picture control layer. Picture-in-picture and the in-app window remain as fallbacks when the permission is not granted.
+- The photo and video libraries are merged into one page with a large top-left Albums/Videos switch that replaces the title; the bottom-bar icon and label follow the selected library. The separate Videos tab is gone.
+- The wallpaper manager entry was removed from the album/video page menus (it stays in the new Tools page).
+- The Tools page no longer shows the favourite star and gained a Pixiv entry.
+- The Tools slideshow entry opens a slideshow queue page (persisted like the wallpaper queue); images are added from the multi-select menu and the queue can be played or cleared.
+- APK: `app/release/app-release.apk` (arm64-v8a split)
+- SHA-256: `D7EDFBC16AA9FC2ECA7BB86C0523DBA0185E0A8821A43F814714205193387F65`
+- Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug` and `assembleRelease` passed; the release build was installed and launched on the emulator. The phone was disconnected, so on-device checks are still pending.
+
 ## v1.1.64 - 2026-09-13 (local signed build)
 
 - Every multi-select now happens inside the list that is already on screen (media and folders), so positions never change and the current sort order is respected.
