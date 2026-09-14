@@ -153,6 +153,18 @@ class MediaLibraryState(context: Context) {
         loading = true
         refreshError = null
         try {
+            // Show the previous snapshot immediately; MediaStore queries on a
+            // large library can take seconds.
+            if (images.isEmpty() && videos.isEmpty() && localImages.isEmpty() && localVideos.isEmpty()) {
+                withContext(Dispatchers.IO) { com.example.album.data.MediaSnapshotStore.load(appContext) }?.let { cached ->
+                    allImages = cached.images
+                    allVideos = cached.videos
+                    localImages = cached.localImages
+                    localVideos = cached.localVideos
+                    images = cached.images
+                    videos = cached.videos
+                }
+            }
             val canReadImages = granted && hasImageReadAccess(appContext)
             val canReadVideos = granted && hasVideoReadAccess(appContext)
             imagePermissionGranted = canReadImages
@@ -243,6 +255,17 @@ class MediaLibraryState(context: Context) {
             images = prepared.visibleImages
             videos = prepared.visibleVideos
             excludedMedia = prepared.excluded
+            withContext(Dispatchers.IO) {
+                com.example.album.data.MediaSnapshotStore.save(
+                    appContext,
+                    com.example.album.data.MediaSnapshotStore.Snapshot(
+                        images = prepared.images,
+                        videos = prepared.videos,
+                        localImages = prepared.localImages,
+                        localVideos = prepared.localVideos
+                    )
+                )
+            }
             if (scheduleThumbnailOptimization) {
                 ThumbnailRepository.scheduleBackgroundOptimization(
                     appContext,

@@ -1,5 +1,20 @@
 # Album Changelog
 
+## v1.1.66 - 2026-09-14 (local signed build)
+
+- The main media library now shows the previous snapshot immediately (same approach as the Pixiv page) and replaces it with the fresh MediaStore scan in the background.
+- The photo/video switch on the Albums and Timeline pages is now a single prominent control: a switch mark plus the current state in the theme colour, placed at the top-left where the title used to be.
+- The Tools page opens the Pixiv page without adding a Pixiv tab to the bottom bar.
+- Menus no longer start a slideshow directly: the Slideshow entry adds the selection to the slideshow queue.
+- The slideshow queue page gained the wallpaper-manager style menu (columns, layout, sort) and its action plays the queue through the normal image viewer: swiping, preview controls and editing all work, previewing pauses the slideshow and returning to full screen resumes it.
+- Adding a new setting, "long-press to reorder Tools components", which enables drag reordering of the Tools page entries.
+- Images: full screen now paints the background black (white stays for the preview state), and swiping to another photo no longer leaves full screen - only a single tap toggles the preview.
+- Swiping in the viewer keeps the page underneath on the photo/video being viewed, so closing returns to that item instead of the one first opened.
+- Restoring a search after leaving a folder now applies the query in the same frame, removing the flash of the unfiltered list.
+- APK: `app/release/app-release.apk` (arm64-v8a split)
+- SHA-256: `CFB1E8FB70843F6E4DC65F4D49972DF38519DAF2010DAB99E07B384E61AD4B21`
+- Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug` and `assembleRelease` passed. Items 2 (Media3 AVI/MPEG-PS demuxers), 8 (search deletion scroll) and the multi-select/viewer items still need on-device verification.
+
 ## v1.1.65 - 2026-09-13 (local signed build)
 
 - Pixiv page opens instantly from a cached snapshot (items, folders, settings) and refreshes in the background, so the slow SAF tree walk no longer blocks the page.

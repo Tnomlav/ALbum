@@ -87,6 +87,7 @@ fun SettingsScreen(
     onThemeModeChange: (String) -> Unit,
     onThemeColorChange: (String) -> Unit,
     onNavReorderChange: (Boolean) -> Unit,
+    onToolsReorderChange: (Boolean) -> Unit = {},
     onPixivTabEnabledChange: (Boolean) -> Unit,
     onRetentionChange: (Int) -> Unit,
     onDefaultSortChange: (String) -> Unit,
@@ -120,6 +121,7 @@ fun SettingsScreen(
         mutableStateOf(ThemeAccent.fromStored(preferences.getString("theme_color", null)))
     }
     var navReorder by remember { mutableStateOf(preferences.getBoolean("nav_reorder", false)) }
+    var toolsReorder by remember { mutableStateOf(preferences.getBoolean("tools_reorder", false)) }
     var pixivTabEnabled by remember { mutableStateOf(preferences.getBoolean("pixiv_tab_enabled", false)) }
     var recycleBin by remember { mutableStateOf(preferences.getBoolean("recycle_bin", true)) }
     var mediaManagement by remember {
@@ -259,6 +261,7 @@ fun SettingsScreen(
         } }
         item { ToggleRow("下拉刷新", "在支持扫描的页面顶部下拉触发扫描", pullRefresh) { setBoolean("pull_refresh", it) { pullRefresh = it } } }
         item { ToggleRow("长按移动底栏图标", "开启后可长按并拖动底栏图标调整顺序", navReorder) { setBoolean("nav_reorder", it) { navReorder = it; onNavReorderChange(it) } } }
+        item { ToggleRow("长按移动工具箱组件", "开启后可长按并拖动工具箱内的条目调整顺序", toolsReorder) { setBoolean("tools_reorder", it) { toolsReorder = it; onToolsReorderChange(it) } } }
         item {
             ToggleRow("显示 Pixiv 底栏页面", "将 Pixiv 文件夹作为独立页面显示在底栏", pixivTabEnabled) { enabled ->
                 setBoolean("pixiv_tab_enabled", enabled) {

@@ -118,44 +118,33 @@ fun VaultTopBar(
                     Text(title, modifier = Modifier.weight(1f), fontSize = 16.sp, maxLines = 1)
                 }
             } else if (titleSwitch != null && titleSwitch.isNotEmpty()) {
-                // Prominent page-type switch: replaces the plain title text so
-                // switching between the photo and video libraries is the first
-                // thing the user sees.
+                // Prominent page-type switch: a switch mark plus the current
+                // state, painted with the theme colour so it reads as the main
+                // control of the page.
+                val index = selectedSearchMode.coerceIn(titleSwitch.indices)
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = .14f))
+                        .clickable { onTitleSwitchChange((index + 1) % titleSwitch.size) }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val index = selectedSearchMode.coerceIn(titleSwitch.indices)
-                    titleSwitch.forEachIndexed { position, label ->
-                        val selected = position == index
-                        Box(
-                            modifier = Modifier
-                                .height(38.dp)
-                                .then(
-                                    if (selected) Modifier
-                                        .shadow(2.dp, RoundedCornerShape(7.dp))
-                                        .clip(RoundedCornerShape(7.dp))
-                                        .background(MaterialTheme.colorScheme.surface)
-                                    else Modifier
-                                )
-                                .clickable { onTitleSwitchChange(position) }
-                                .padding(horizontal = 14.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                label,
-                                fontSize = 15.sp,
-                                fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.SemiBold else androidx.compose.ui.text.font.FontWeight.Normal,
-                                color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
-                    }
+                    Icon(
+                        Icons.Outlined.SwapHoriz,
+                        contentDescription = appText("切换图片和视频", english),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.height(20.dp)
+                    )
+                    Text(
+                        titleSwitch[index],
+                        fontSize = 16.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
             } else {
                 Row(

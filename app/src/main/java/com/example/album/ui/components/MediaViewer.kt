@@ -236,7 +236,9 @@ fun MediaViewer(
     onWallpaper: ((MediaItem) -> Unit)? = null,
     pictureInPictureMode: Boolean = false,
     onEnterPictureInPicture: () -> Boolean = { false },
-    onAutoEnterPictureInPictureChange: (Boolean, Int, Int) -> Unit = { _, _, _ -> }
+    onAutoEnterPictureInPictureChange: (Boolean, Int, Int) -> Unit = { _, _, _ -> },
+    slideshowActive: Boolean = false,
+    slideshowIntervalMs: Long = 3_000L
 ) {
     val context = LocalContext.current
     val showRenameExtension = remember { context.getSharedPreferences("album_settings", android.content.Context.MODE_PRIVATE).getBoolean("rename_show_extension", false) }
@@ -376,7 +378,20 @@ fun MediaViewer(
     LaunchedEffect(current.uri) {
         imageScale = 1f
         imageOffset = Offset.Zero
-        imageControlsVisible = true
+        // Swiping to the next image must not leave full screen: only a single
+        // tap toggles the preview controls.
+    }
+
+    // Slideshow playback uses this same viewer: it advances only while the
+    // full-screen (controls hidden) state is active, so opening the preview
+    // pauses it and closing the preview resumes.
+    LaunchedEffect(slideshowActive, imageControlsVisible, currentIndex, viewerItems.size, current.uri) {
+        if (!slideshowActive || current.isVideo || imageControlsVisible || viewerItems.size <= 1) return@LaunchedEffect
+        delay(slideshowIntervalMs.coerceAtLeast(500L))
+        viewerDirection = 1
+        val next = if (currentIndex >= viewerItems.lastIndex) 0 else currentIndex + 1
+        currentIndex = next
+        onItemChanged(viewerItems[next])
     }
 
     // Keep the window metrics stable while the viewer controls fade in/out.
@@ -406,6 +421,7 @@ fun MediaViewer(
         Surface(
             Modifier.fillMaxSize(),
             color = when {
+                !current.isVideo && !imageControlsVisible -> Color.Black
                 !current.isVideo -> Color.White.copy(alpha = viewerBackgroundAlpha.value)
                 videoMiniMode -> Color.Transparent
                 else -> Color.Black
@@ -529,7 +545,7 @@ fun MediaViewer(
                                 scaleY = imageScale
                                 translationX = imageOffset.x
                                 translationY = imageOffset.y
-                            }.background(Color.White)
+                            }.background(if (imageControlsVisible) Color.White else Color.Black)
                         ) {
                             MediaThumbnail(
                                 shown,
@@ -537,7 +553,7 @@ fun MediaViewer(
                                 requestedSize = 360,
                                 showVideoMark = false,
                                 contentScale = ContentScale.Fit,
-                                backgroundColor = Color.White,
+                                backgroundColor = if (imageControlsVisible) Color.White else Color.Black,
                                 animateGif = true
                             )
                             run {

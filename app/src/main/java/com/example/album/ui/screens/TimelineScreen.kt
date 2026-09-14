@@ -91,6 +91,8 @@ fun TimelineScreen(
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
     onFirstVisibleMediaChanged: (String?) -> Unit = {},
     onVisibleScopeChanged: (List<MediaItem>) -> Unit = {},
+    scrollToUri: String? = null,
+    scrollToToken: Long = 0L,
     onClearQuery: () -> Unit = {}
 ) {
     val refreshing = loading || scanning
@@ -168,7 +170,9 @@ fun TimelineScreen(
             initialFirstVisibleItem = initialFirstVisibleItem,
             initialFirstVisibleOffset = initialFirstVisibleOffset,
             onScrollPositionChanged = onScrollPositionChanged,
-            onFirstVisibleMediaChanged = onFirstVisibleMediaChanged
+            onFirstVisibleMediaChanged = onFirstVisibleMediaChanged,
+            scrollToUri = scrollToUri,
+            scrollToToken = scrollToToken
         )
         return
     }
@@ -195,7 +199,9 @@ fun TimelineScreen(
         initialFirstVisibleItem = initialFirstVisibleItem,
         initialFirstVisibleOffset = initialFirstVisibleOffset,
         onScrollPositionChanged = onScrollPositionChanged,
-        onFirstVisibleMediaChanged = onFirstVisibleMediaChanged
+        onFirstVisibleMediaChanged = onFirstVisibleMediaChanged,
+        scrollToUri = scrollToUri,
+        scrollToToken = scrollToToken
     )
     return
 }
@@ -223,7 +229,9 @@ private fun OptimizedTimelineGrid(
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
-    onFirstVisibleMediaChanged: (String?) -> Unit = {}
+    onFirstVisibleMediaChanged: (String?) -> Unit = {},
+    scrollToUri: String? = null,
+    scrollToToken: Long = 0L
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current
@@ -234,6 +242,20 @@ private fun OptimizedTimelineGrid(
         initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
         initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
     )
+    LaunchedEffect(scrollToToken) {
+        val uri = scrollToUri ?: return@LaunchedEffect
+        if (uri.isBlank()) return@LaunchedEffect
+        var index = 1
+        groupedDates.forEach { group ->
+            index += 1
+            val position = group.value.indexOfFirst { it.uri.toString() == uri }
+            if (position >= 0) {
+                state.scrollToItem(index + position)
+                return@LaunchedEffect
+            }
+            index += group.value.size
+        }
+    }
     LaunchedEffect(state, groupedDates) {
         snapshotFlow {
             val firstKey = state.layoutInfo.visibleItemsInfo
@@ -399,7 +421,9 @@ private fun AdaptiveTimeline(
     initialFirstVisibleItem: Int = 0,
     initialFirstVisibleOffset: Int = 0,
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
-    onFirstVisibleMediaChanged: (String?) -> Unit = {}
+    onFirstVisibleMediaChanged: (String?) -> Unit = {},
+    scrollToUri: String? = null,
+    scrollToToken: Long = 0L
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current
@@ -408,6 +432,20 @@ private fun AdaptiveTimeline(
         initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
         initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
     )
+    LaunchedEffect(scrollToToken) {
+        val uri = scrollToUri ?: return@LaunchedEffect
+        if (uri.isBlank()) return@LaunchedEffect
+        var index = 1
+        groupedDates.forEach { group ->
+            index += 1
+            val position = group.value.indexOfFirst { it.uri.toString() == uri }
+            if (position >= 0) {
+                state.scrollToItem(index + position)
+                return@LaunchedEffect
+            }
+            index += group.value.size
+        }
+    }
     LaunchedEffect(state, groupedDates) {
         snapshotFlow {
             val firstKey = state.layoutInfo.visibleItemsInfo

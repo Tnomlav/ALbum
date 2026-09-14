@@ -39,6 +39,7 @@ import com.example.album.ui.components.MediaThumbnail
 fun SlideshowQueueScreen(
     items: List<MediaItem>,
     columns: Int = 4,
+    layout: com.example.album.ui.MediaLayout = com.example.album.ui.MediaLayout.Grid,
     onOpenMedia: (MediaItem) -> Unit,
     onRemove: (MediaItem) -> Unit
 ) {
@@ -53,7 +54,11 @@ fun SlideshowQueueScreen(
         return
     }
     LazyVerticalGrid(
-        columns = GridCells.Fixed(columns.coerceIn(1, 6)),
+        columns = if (layout == com.example.album.ui.MediaLayout.Adaptive) {
+            GridCells.Adaptive(96.dp)
+        } else {
+            GridCells.Fixed(columns.coerceIn(1, 6))
+        },
         contentPadding = PaddingValues(horizontal = 7.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
