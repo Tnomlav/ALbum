@@ -282,7 +282,6 @@ fun VaultTopBar(
                         )
                     }
                 }
-                actionContent()
             } else {
                 // Keep the actions anchored to the right when a search is
                 // suspended after back navigation.
@@ -295,19 +294,25 @@ fun VaultTopBar(
                         Icon(Icons.Outlined.Search, contentDescription = appText("搜索", english))
                     }
                 }
-                // Keep the favorite filter (or the page action) available when
-                // a search is suspended. The normal page hides the search field
-                // in that state, but hiding this action makes favorites appear
-                // lost and drops the slideshow queue's play button.
-                actionContent()
             }
-            Box {
-                IconButton(
-                    onClick = { menuExpanded = true },
-                    modifier = Modifier.height(48.dp).width(if (searchModeLabels.isNotEmpty()) 44.dp else 48.dp)
-                ) {
-                    Icon(Icons.Outlined.MoreVert, contentDescription = appText("更多操作", english))
-                }
+            // The page action and the overflow menu form one trailing group
+            // with a fixed gap and a fixed button size, so the action lands on
+            // the same spot on every page. The slideshow play button used to
+            // sit a whole button width away from the wallpaper page's apply
+            // button because the row spacing and the menu width changed with
+            // the search state.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                actionContent()
+                Box {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier.height(48.dp).width(48.dp)
+                    ) {
+                        Icon(Icons.Outlined.MoreVert, contentDescription = appText("更多操作", english))
+                    }
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
@@ -323,6 +328,7 @@ fun VaultTopBar(
                             }
                         )
                     }
+                }
                 }
             }
             Spacer(Modifier.height(1.dp))

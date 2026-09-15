@@ -306,8 +306,11 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
         if (scrollRequest != null && scrollRequest.token > 0L) {
             val count = gridState.layoutInfo.totalItemsCount
             if (count > 0) {
+                val anchored = scrollRequest.key
+                    ?.let { key -> albums.indexOfFirst { it.name == key } }
+                    ?.takeIf { it >= 0 }
                 gridState.scrollToItem(
-                    scrollRequest.index.coerceIn(0, count - 1),
+                    (anchored ?: scrollRequest.index).coerceIn(0, count - 1),
                     scrollRequest.offset.coerceAtLeast(0)
                 )
             }
@@ -464,8 +467,11 @@ private fun FolderGrid(
         if (scrollRequest != null && scrollRequest.token > 0L) {
             val count = gridState.layoutInfo.totalItemsCount
             if (count > 0) {
+                val anchored = scrollRequest.key
+                    ?.let { key -> album.items.indexOfFirst { it.uri.toString() == key } }
+                    ?.takeIf { it >= 0 }
                 gridState.scrollToItem(
-                    scrollRequest.index.coerceIn(0, count - 1),
+                    (anchored ?: scrollRequest.index).coerceIn(0, count - 1),
                     scrollRequest.offset.coerceAtLeast(0)
                 )
             }
@@ -618,8 +624,11 @@ private fun AdaptiveFolderGrid(
         if (scrollRequest != null && scrollRequest.token > 0L) {
             val count = state.layoutInfo.totalItemsCount
             if (count > 0) {
+                val anchored = scrollRequest.key
+                    ?.let { key -> album.items.indexOfFirst { it.uri.toString() == key } }
+                    ?.takeIf { it >= 0 }
                 state.scrollToItem(
-                    scrollRequest.index.coerceIn(0, count - 1),
+                    (anchored ?: scrollRequest.index).coerceIn(0, count - 1),
                     scrollRequest.offset.coerceAtLeast(0)
                 )
             }

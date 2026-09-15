@@ -589,6 +589,18 @@ fun AlbumApp(
         }
         val stillActive = appliedKind?.let { WallpaperAppliedStore.isWallpaperActive(context, it) } == true
         val queuePresent = wallpaperQueueUris.isNotEmpty()
+        // Keep a backup of the applied queue even when it was applied before
+        // the backup existed: without one a dropped live wallpaper (a package
+        // replacement does that on some launchers) cannot be restored.
+        if (appliedKind != null && queuePresent) {
+            val ordered = wallpaperQueueOrder.filter { it in wallpaperQueueUris }
+                .ifEmpty { wallpaperQueueUris.toList() }
+            withContext(Dispatchers.IO) {
+                if (WallpaperBackup.load(context) == null) {
+                    WallpaperBackup.save(context, appliedKind, ordered)
+                }
+            }
+        }
         if (stillActive && queuePresent) return@LaunchedEffect
         // Only offer the restore once per installed version so deliberately
         // changing the wallpaper is not fought on every launch.
@@ -656,6 +668,10 @@ fun AlbumApp(
     var searchPageOpenForTab by remember { mutableStateOf<MainTab?>(null) }
     var searchReturnItem by remember { mutableIntStateOf(0) }
     var searchReturnOffset by remember { mutableIntStateOf(0) }
+    // Name of the folder the search list was showing when a folder was opened,
+    // so closing the folder comes back to that folder instead of an index that
+    // a deletion may have invalidated.
+    var searchReturnAnchorFolder by remember { mutableStateOf<String?>(null) }
     var selectionMediaFirstVisibleItem by remember { mutableIntStateOf(0) }
     var selectionMediaFirstVisibleOffset by remember { mutableIntStateOf(0) }
     var timelineFirstVisibleItem by remember { mutableIntStateOf(0) }
@@ -708,7 +724,8 @@ fun AlbumApp(
         pageScrollRequest = com.example.album.ui.PageScrollRequest(
             if (selectingFolders) albumFirstVisibleItem else selectionMediaFirstVisibleItem,
             if (selectingFolders) albumFirstVisibleOffset else selectionMediaFirstVisibleOffset,
-            System.nanoTime()
+            System.nanoTime(),
+            key = if (selectingFolders) selectionAnchorFolder else selectionAnchorUri
         )
     }
     var selectionRenameItem by remember { mutableStateOf<MediaItem?>(null) }
@@ -724,6 +741,7 @@ fun AlbumApp(
     var toolsReorderEnabled by remember { mutableStateOf(albumSettings.getBoolean("tools_reorder", false)) }
     var scrollToTopToken by remember { mutableLongStateOf(0L) }
     var searchReturnAlbumFirstVisibleItem by remember { mutableIntStateOf(0) }
+    var searchReturnAlbumFirstVisibleOffset by remember { mutableIntStateOf(0) }
     var searchReturnMediaFirstVisibleItem by remember { mutableIntStateOf(0) }
     var toolsOrder by remember {
         mutableStateOf(
@@ -1296,6 +1314,15 @@ fun AlbumApp(
         // list and it lands near the end.
         albumFirstVisibleItem = searchReturnAlbumFirstVisibleItem
         selectionMediaFirstVisibleItem = searchReturnMediaFirstVisibleItem
+        // Anchor on the folder that was on screen: an index saved before the
+        // folder was opened can be past the end of the list once files were
+        // deleted inside it, which dropped the search page at the bottom.
+        pageScrollRequest = com.example.album.ui.PageScrollRequest(
+            searchReturnAlbumFirstVisibleItem,
+            searchReturnAlbumFirstVisibleOffset,
+            System.nanoTime(),
+            key = searchReturnAnchorFolder
+        )
         // Restore the search text and its applied form in the same snapshot:
         // the 500 ms debounce used for typing made the page flash the
         // unfiltered list (and its old scroll position) before searching again.
@@ -1319,6 +1346,8 @@ fun AlbumApp(
                 // closes. A search the user already left must not re-open.
                 folderReturnQuery = if (searchOpen) query.takeIf { it.isNotBlank() } else null
                 searchReturnAlbumFirstVisibleItem = albumFirstVisibleItem
+                searchReturnAlbumFirstVisibleOffset = albumFirstVisibleOffset
+                searchReturnAnchorFolder = selectionAnchorFolder
                 searchReturnMediaFirstVisibleItem = selectionMediaFirstVisibleItem
                 folderBackStack = listOf(folder)
             } else {

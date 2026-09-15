@@ -11,5 +11,13 @@ package com.example.album.ui
 data class PageScrollRequest(
     val index: Int,
     val offset: Int,
-    val token: Long
+    val token: Long,
+    /**
+     * Item to anchor on, when the grid can find it: the folder name for a
+     * folder grid and the media URI for a media grid. Using the item instead
+     * of the raw index keeps the page in place when the list shrinks (a delete
+     * used to clamp the stored index to the new end and drop the user at the
+     * bottom).
+     */
+    val key: String? = null
 )

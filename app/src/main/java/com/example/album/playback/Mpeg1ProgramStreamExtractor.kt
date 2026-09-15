@@ -13,6 +13,7 @@ import androidx.media3.extractor.ExtractorOutput
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.PositionHolder
 import androidx.media3.extractor.SeekMap
+import androidx.media3.extractor.SeekPoint
 import androidx.media3.extractor.ts.Ac3Reader
 import androidx.media3.extractor.ts.ElementaryStreamReader
 import androidx.media3.extractor.ts.H262Reader
@@ -48,6 +49,12 @@ internal class Mpeg1ProgramStreamExtractor : Extractor {
     private var seekMapOutput: Boolean = false
     private var tracksEnded: Boolean = false
     private var lastTrackPosition: Long = 0L
+    private var durationRead: Boolean = false
+    private var durationScanning: Boolean = false
+    private var durationUs: Long = C.TIME_UNSET
+    private var firstScr: Long = -1L
+    private var lastScr: Long = -1L
+    private var fileLength: Long = C.LENGTH_UNSET.toLong()
 
     override fun init(output: ExtractorOutput) {
         this.output = output
@@ -55,7 +62,74 @@ internal class Mpeg1ProgramStreamExtractor : Extractor {
         seekMapOutput = false
         tracksEnded = false
         lastTrackPosition = 0L
+        durationRead = false
+        durationScanning = false
+        durationUs = C.TIME_UNSET
+        firstScr = -1L
+        lastScr = -1L
+        fileLength = C.LENGTH_UNSET.toLong()
     }
+
+    /**
+     * Estimates the duration from the clock reference of the first and the last
+     * pack header. Without it the player reports no length at all, which is
+     * what made these files show `00:00` in the controls.
+     *
+     * The scan jumps to the tail of the file, looks for the last pack header
+     * there and then seeks back to the beginning.
+     */
+    @Throws(IOException::class)
+    private fun readDuration(input: ExtractorInput, seekPosition: PositionHolder): Int {
+        val length = input.getLength()
+        if (length == C.LENGTH_UNSET.toLong() || length <= 0L) {
+            durationRead = true
+            return Extractor.RESULT_CONTINUE
+        }
+        fileLength = length
+        if (!durationScanning) {
+            val data = scratch.data
+            input.resetPeekPosition()
+            if (input.peekFully(data, 0, PACK_HEADER_SIZE, /* allowEndOfInput= */ true) &&
+                isMpeg1PackHeader(data)
+            ) {
+                firstScr = readScr(data)
+            }
+            input.resetPeekPosition()
+            durationScanning = true
+            seekPosition.position = (length - DURATION_SEARCH_LENGTH).coerceAtLeast(0L)
+            return Extractor.RESULT_SEEK
+        }
+        val data = scratch.data
+        // The tail is pulled in one go and searched in memory: walking it one
+        // byte at a time through the extractor input costs a round trip per
+        // byte and is far slower than the scan itself.
+        val tailLength = minOf(DURATION_SEARCH_LENGTH, length).toInt()
+        val tail = ByteArray(tailLength)
+        runCatching { input.readFully(tail, 0, tailLength) }
+        var offset = 0
+        while (offset + PACK_HEADER_SIZE <= tail.size) {
+            if (isMpeg1PackHeader(tail, offset)) {
+                lastScr = readScr(tail, offset)
+                offset += PACK_HEADER_SIZE
+            } else {
+                offset++
+            }
+        }
+        if (firstScr >= 0L && lastScr > firstScr) {
+            durationUs = (lastScr - firstScr) * 1_000_000L / SCR_TICKS_PER_SECOND
+        }
+        durationRead = true
+        seekPosition.position = 0L
+        return Extractor.RESULT_SEEK
+    }
+
+    /** Reads the 33 bit clock reference of an MPEG-1 pack header. */
+    private fun readScr(data: ByteArray, offset: Int = 0): Long =
+        ((data[offset + 4].toLong() and 0x0E) shl 29) or
+            ((data[offset + 5].toLong() and 0xFF) shl 22) or
+            ((data[offset + 6].toLong() and 0xFE) shl 14) or
+            ((data[offset + 7].toLong() and 0xFF) shl 7) or
+            ((data[offset + 8].toLong() and 0xFE) shr 1)
 
     override fun sniff(input: ExtractorInput): Boolean {
         val data = scratch.data
@@ -66,10 +140,22 @@ internal class Mpeg1ProgramStreamExtractor : Extractor {
     @Throws(IOException::class)
     override fun read(input: ExtractorInput, seekPosition: PositionHolder): Int {
         val extractorOutput = output ?: return Extractor.RESULT_END_OF_INPUT
+        if (!durationRead) {
+            val result = readDuration(input, seekPosition)
+            if (result != Extractor.RESULT_CONTINUE) return result
+        }
         if (!seekMapOutput) {
-            // Pack headers of this generation carry no usable index, so the
-            // stream is reported as unseekable instead of guessing offsets.
-            extractorOutput.seekMap(SeekMap.Unseekable(C.TIME_UNSET))
+            // Pack headers of this generation carry no index, but the clock
+            // references at the ends of the file give the length, and the mux
+            // rate of a program stream is constant, so the byte position for a
+            // timestamp can be interpolated over the file length.
+            extractorOutput.seekMap(
+                if (durationUs > 0 && fileLength > 0) {
+                    LinearSeekMap(durationUs, fileLength)
+                } else {
+                    SeekMap.Unseekable(durationUs)
+                }
+            )
             seekMapOutput = true
         }
 
@@ -119,8 +205,13 @@ internal class Mpeg1ProgramStreamExtractor : Extractor {
     }
 
     override fun seek(position: Long, timeUs: Long) {
-        if (position != 0L) return
-        timestampAdjuster.reset(0L)
+        // A seek lands on an interpolated byte position, which is not a packet
+        // boundary, so parsing resynchronises on the next start code. The
+        // timestamp adjuster has to follow the new timeline for the resumed
+        // presentation timestamps to stay in order.
+        if (timestampAdjuster.getTimestampOffsetUs() == C.TIME_UNSET) {
+            timestampAdjuster.reset(timeUs)
+        }
         for (index in 0 until pesReaders.size()) {
             pesReaders.valueAt(index).seek()
         }
@@ -285,6 +376,12 @@ internal class Mpeg1ProgramStreamExtractor : Extractor {
         return (data[4].toInt() and 0xF0) == 0x20
     }
 
+    private fun isMpeg1PackHeader(data: ByteArray, offset: Int): Boolean {
+        if (data[offset].toInt() != 0x00 || data[offset + 1].toInt() != 0x00) return false
+        if (data[offset + 2].toInt() != 0x01 || (data[offset + 3].toInt() and 0xFF) != 0xBA) return false
+        return (data[offset + 4].toInt() and 0xF0) == 0x20
+    }
+
     /** Parses one PES packet header and hands the payload to a reader. */
     private class PesReader(private val payloadReader: ElementaryStreamReader) {
         fun seek() {
@@ -304,9 +401,32 @@ internal class Mpeg1ProgramStreamExtractor : Extractor {
         }
     }
 
+    /**
+     * Constant bit rate seek map: a program stream interleaves its packets at
+     * a fixed rate, so a timestamp maps linearly onto a byte position.
+     */
+    private class LinearSeekMap(
+        private val durationUs: Long,
+        private val length: Long
+    ) : SeekMap {
+        override fun isSeekable(): Boolean = true
+
+        override fun getDurationUs(): Long = durationUs
+
+        override fun getSeekPoints(timeUs: Long): SeekMap.SeekPoints {
+            val target = timeUs.coerceIn(0L, durationUs)
+            val position = if (durationUs > 0L) target * length / durationUs else 0L
+            return SeekMap.SeekPoints(
+                SeekPoint(target, position.coerceIn(0L, length))
+            )
+        }
+    }
+
     private companion object {
         const val PACK_HEADER_SIZE = 12
         const val START_CODE_PREFIX = 0x000001
+        const val DURATION_SEARCH_LENGTH = 256L * 1024L
+        const val SCR_TICKS_PER_SECOND = 90_000L
 
         const val PACK_START_CODE = 0x000001BA.toInt()
         const val SYSTEM_HEADER_START_CODE = 0x000001BB.toInt()

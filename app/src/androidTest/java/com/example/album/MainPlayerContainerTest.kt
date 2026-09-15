@@ -62,7 +62,8 @@ class MainPlayerContainerTest {
     private data class OpenResult(
         val ready: Boolean,
         val videoMimeTypes: List<String>,
-        val hasSupportedVideoTrack: Boolean
+        val hasSupportedVideoTrack: Boolean,
+        val durationMs: Long
     )
 
     private fun openSample(name: String): OpenResult {
@@ -114,7 +115,12 @@ class MainPlayerContainerTest {
                         val support = group.getTrackSupport(index)
                         support != C.FORMAT_UNSUPPORTED_TYPE && support != C.FORMAT_UNSUPPORTED_SUBTYPE
                     }
-                }
+                },
+                durationMs = if (becameReady) {
+                    var duration = 0L
+                    instrumentation.runOnMainSync { duration = player.duration }
+                    duration
+                } else 0L
             )
             println(
                 "AlbumTest: $name -> $result groups=" +

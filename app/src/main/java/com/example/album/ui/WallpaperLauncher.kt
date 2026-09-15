@@ -77,7 +77,7 @@ object WallpaperImportCoordinator {
         total: Int,
         english: Boolean,
         work: suspend (suspend (Int) -> Unit) -> ImportResult<T>,
-        onSuccess: (T) -> Unit,
+        onSuccess: suspend (T) -> Unit,
         failureMessage: String
     ): Boolean {
         synchronized(lock) {
@@ -168,6 +168,7 @@ fun setStaticWallpaper(context: Context, items: List<MediaItem>, english: Boolea
                 WallpaperAppliedStore.KIND_STATIC,
                 imageItems.map { it.uri.toString() }
             )
+            applySystemWallpaperFromQueue(context, it)
             openStaticWallpaperSettings(context, english)
         }
     )
@@ -234,6 +235,7 @@ fun setDynamicWallpaper(context: Context, items: List<MediaItem>, english: Boole
                 WallpaperAppliedStore.KIND_DYNAMIC,
                 videoItems.map { it.uri.toString() }
             )
+            applySystemWallpaperFromVideoQueue(context, it)
             openDynamicWallpaperSettings(context, english)
         }
     )
@@ -429,6 +431,70 @@ private fun cleanupUnusedWallpaperArtifacts(context: Context) {
         if (isWallpaperArtifact && !keep) file.deleteRecursively()
     }
 }
+
+/**
+ * Also hands the picture that is on screen to the system as an ordinary
+ * (static) wallpaper.
+ *
+ * The queue itself is drawn by the live wallpaper service, but a launcher can
+ * drop a live wallpaper when the package is replaced. In that case the system
+ * falls back to this bitmap instead of the stock wallpaper, so the image the
+ * user applied is still there after an update; binding the live wallpaper
+ * again simply puts the rotating queue back on top of it.
+ */
+private suspend fun applySystemWallpaperFromQueue(context: Context, directory: File) {
+    withContext(Dispatchers.IO) {
+        runCatching {
+            // Setting a still image replaces a bound live wallpaper, so this
+            // only runs when our live wallpaper is not the current one (the
+            // first apply, or the restore after an update dropped it).
+            if (liveWallpaperActive(context)) return@runCatching
+            val preferences = context.getSharedPreferences("album_preferences", Context.MODE_PRIVATE)
+            val names = readQueueNames(preferences.getString("static_wallpaper_queue", null))
+            if (names.isEmpty()) return@runCatching
+            val index = preferences.getInt("static_wallpaper_index", 0).coerceIn(names.indices)
+            val file = File(directory, names[index]).takeIf { it.isFile } ?: return@runCatching
+            val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath) ?: return@runCatching
+            bitmap.density = android.graphics.Bitmap.DENSITY_NONE
+            WallpaperManager.getInstance(context)
+                .setBitmap(bitmap, null, true, WallpaperManager.FLAG_SYSTEM)
+            bitmap.recycle()
+        }
+    }
+}
+
+/**
+ * Same fallback as [applySystemWallpaperFromQueue] for video wallpapers: the
+ * first frame of the queued clip is handed to the system, so a dropped live
+ * wallpaper leaves a still of the clip instead of the stock wallpaper.
+ */
+private suspend fun applySystemWallpaperFromVideoQueue(context: Context, directory: File) {
+    withContext(Dispatchers.IO) {
+        runCatching {
+            if (liveWallpaperActive(context)) return@runCatching
+            val preferences = context.getSharedPreferences("album_preferences", Context.MODE_PRIVATE)
+            val names = readQueueNames(preferences.getString("live_wallpaper_queue", null))
+            val file = names.firstNotNullOfOrNull { name ->
+                File(directory, name).takeIf { it.isFile }
+            } ?: return@runCatching
+            val retriever = MediaMetadataRetriever()
+            val frame = try {
+                retriever.setDataSource(file.absolutePath)
+                retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            } finally {
+                runCatching { retriever.release() }
+            } ?: return@runCatching
+            frame.density = android.graphics.Bitmap.DENSITY_NONE
+            WallpaperManager.getInstance(context)
+                .setBitmap(frame, null, true, WallpaperManager.FLAG_SYSTEM)
+            frame.recycle()
+        }
+    }
+}
+
+private fun liveWallpaperActive(context: Context): Boolean =
+    WallpaperAppliedStore.isWallpaperActive(context, WallpaperAppliedStore.KIND_STATIC) ||
+        WallpaperAppliedStore.isWallpaperActive(context, WallpaperAppliedStore.KIND_DYNAMIC)
 
 private fun openStaticWallpaperSettings(context: Context, english: Boolean) {
     // The queue was just rewritten, so a running static wallpaper must reload
