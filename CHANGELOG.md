@@ -1,6 +1,6 @@
 # Album Changelog
 
-## v1.1.68 - 2026-09-15 (local signed build)
+## v1.1.69 - 2026-09-15 (local signed build)
 
 - AVI and MPEG program streams are back in the main player. Media3's own AVI extractor and MPEG-2 program stream extractor handle `.avi`, `.divx`, `.xvid` and MPEG-2 `.mpg`/`.mpeg`/`.vob` files, and a new extractor parses MPEG-1 program streams, whose pack and PES headers (0xFF stuffing, buffer scale and size, `0010` clock reference and PTS/DTS) Media3 cannot read at all.
 - Because of that, `.mpg`/`.avi` files no longer fall through to "audio only on a black screen", and the special-case routing that sent them straight to the compatible player is gone. Files whose codec the device really cannot decode are detected from the reported tracks and hand over to the compatible player by themselves.
@@ -8,7 +8,7 @@
 - The tag index is only rebuilt when a full walk finishes, so the partial snapshots do not restart the (expensive) tag index build while the page is still filling in.
 - New instrumentation test `MainPlayerContainerTest` opens an AVI and an MPEG program stream with the exact player configuration the app builds and asserts the expected tracks are demuxed. It skips itself when the sample files are not pushed to the device (the commands are in the test's KDoc).
 - APK: `app/release/app-release.apk` (arm64-v8a split)
-- SHA-256: `54F07E406602E4935D458EBD0811E405C84C86CDCBE7577A619E4FE23BF03CDF`
+- SHA-256: `E52ABB141D307240D6D23F6ADE874B33A8EE4CB1EE5F508883F3CBA43C8D1CED`
 - Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug` and `assembleRelease` passed. On the emulator `MainPlayerContainerTest` demuxes the AVI (Xvid, `video/mp4v-es`) and both an MPEG-2 and an MPEG-1 program stream (`video/mpeg2` + `audio/mpeg-L2`); the emulator has no MPEG-2 decoder, so MPEG playback itself still needs a real device to confirm. The P page loading change only ran through compilation and review - confirming it needs a device with a Pixiv archive.
 
 ## v1.1.67 - 2026-09-15 (local signed build)
