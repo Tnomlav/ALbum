@@ -55,6 +55,41 @@ import com.example.album.ui.theme.VaultDimens
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
 
+/** Prominent page-type switch: a switch mark plus the current state. */
+@Composable
+private fun TitleSwitchMark(
+    labels: List<String>,
+    selected: Int,
+    onChange: (Int) -> Unit,
+    english: Boolean
+) {
+    val index = selected.coerceIn(labels.indices)
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = .14f))
+            .clickable { onChange((index + 1) % labels.size) }
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Outlined.SwapHoriz,
+            contentDescription = appText("切换", english),
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.height(17.dp)
+        )
+        Text(
+            labels[index],
+            fontSize = 14.sp,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
 @Composable
 fun VaultTopBar(
     title: String,
@@ -124,37 +159,19 @@ fun VaultTopBar(
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = appText("返回相册", english))
                 }
                 if (!searchEnabled) {
-                    Text(title, modifier = Modifier.weight(1f), fontSize = 16.sp, maxLines = 1)
+                    // Pages with a back arrow still want their type switch
+                    // (static/live on the wallpaper manager); only the plain
+                    // pages fall back to the title text.
+                    Box(Modifier.weight(1f)) {
+                        if (titleSwitch != null && titleSwitch.isNotEmpty()) {
+                            TitleSwitchMark(titleSwitch, selectedSearchMode, onTitleSwitchChange, english)
+                        } else {
+                            Text(title, fontSize = 16.sp, maxLines = 1)
+                        }
+                    }
                 }
             } else if (titleSwitch != null && titleSwitch.isNotEmpty()) {
-                // Prominent page-type switch: a switch mark plus the current
-                // state, painted with the theme colour so it reads as the main
-                // control of the page.
-                val index = selectedSearchMode.coerceIn(titleSwitch.indices)
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = .14f))
-                        .clickable { onTitleSwitchChange((index + 1) % titleSwitch.size) }
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Outlined.SwapHoriz,
-                        contentDescription = appText("切换图片和视频", english),
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.height(17.dp)
-                    )
-                    Text(
-                        titleSwitch[index],
-                        fontSize = 14.sp,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        softWrap = false
-                    )
-                }
+                TitleSwitchMark(titleSwitch, selectedSearchMode, onTitleSwitchChange, english)
             } else {
                 Row(
                     modifier = Modifier.widthIn(min = 48.dp).then(

@@ -82,6 +82,64 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import java.util.Calendar
 
+/**
+ * Every slideshow option in one sheet: the queue page reaches it from its menu,
+ * and the viewer's own menu writes the same preferences.
+ */
+@Composable
+fun VaultSlideshowSettingsSheet(onDismiss: () -> Unit) {
+    val english = LocalAppEnglish.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val preferences = remember {
+        context.getSharedPreferences("album_settings", android.content.Context.MODE_PRIVATE)
+    }
+    var interval by remember { mutableStateOf(preferences.getString("slideshow_interval", "3秒") ?: "3秒") }
+    var animation by remember { mutableStateOf(preferences.getString("slideshow_animation", "自然") ?: "自然") }
+    var random by remember { mutableStateOf(preferences.getBoolean("random_slideshow", false)) }
+    val intervals = (1..10).map { "${it}秒" }
+    val animations = listOf("自然", "淡入淡出", "滑动")
+    VaultBottomSheet(appText("幻灯片设置", english), onDismiss) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable {
+                    val next = intervals[(intervals.indexOf(interval).coerceAtLeast(0) + 1) % intervals.size]
+                    interval = next
+                    preferences.edit().putString("slideshow_interval", next).apply()
+                }.padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(appText("幻灯片播放间隔", english), Modifier.weight(1f), fontSize = 15.sp)
+                Text(interval, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+            }
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable {
+                    val next = animations[(animations.indexOf(animation).coerceAtLeast(0) + 1) % animations.size]
+                    animation = next
+                    preferences.edit().putString("slideshow_animation", next).apply()
+                }.padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(appText("幻灯片播放动画", english), Modifier.weight(1f), fontSize = 15.sp)
+                Text(appText(animation, english), color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+            }
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable {
+                    random = !random
+                    preferences.edit().putBoolean("random_slideshow", random).apply()
+                }.padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(appText("幻灯片随机播放", english), Modifier.weight(1f), fontSize = 15.sp)
+                Text(
+                    appText(if (random) "开启" else "关闭", english),
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 14.sp
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun VaultOptionSheet(
     title: String,

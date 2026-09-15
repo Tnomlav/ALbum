@@ -151,6 +151,7 @@ import com.example.album.ui.components.VaultApplyChoiceSheet
 import com.example.album.ui.components.VaultSortChoiceSheet
 import com.example.album.ui.components.VaultSortWheelSheet
 import com.example.album.ui.components.VaultLayoutWheelSheet
+import com.example.album.ui.components.VaultSlideshowSettingsSheet
 import com.example.album.ui.components.VaultWheelChoiceSheet
 import com.example.album.ui.components.VaultDateSheet
 import com.example.album.ui.components.VaultTextInputDialog
@@ -275,23 +276,27 @@ private fun ToolsScreen(
     onStartSlideshow: () -> Unit,
     onOpenPixiv: () -> Unit,
     reorderEnabled: Boolean = false,
-    order: List<String> = listOf("archive", "wallpaper", "cleanup", "slideshow", "pixiv"),
+    order: List<String> = listOf("wallpaper", "cleanup", "slideshow", "pixiv"),
     onOrderChange: (List<String>) -> Unit = {}
 ) {
-    val entries = remember(order) {
+    // Entries are looked up per id: a stored order can still contain the removed
+    // "archive" id, and indexing the filtered list would have shown the wrong
+    // label for every entry after it.
+    val entryById = remember(order, english) {
         order.mapNotNull { id ->
-            when (id) {
-                "archive" -> Triple(Icons.Outlined.Archive, appText("Pixiv 文件归档", english), appText("扫描并整理 Pixiv 图片到画师目录", english))
+            val entry = when (id) {
                 "wallpaper" -> Triple(Icons.Outlined.Wallpaper, appText("壁纸队列", english), appText("管理静态与动态壁纸队列并应用", english))
                 "cleanup" -> Triple(Icons.Outlined.CleaningServices, appText("文件清理", english), appText("重复图片、回收站与排除文件夹", english))
                 "slideshow" -> Triple(Icons.Outlined.Slideshow, appText("幻灯片播放", english), appText("管理幻灯片队列并开始播放", english))
-                "pixiv" -> Triple(Icons.Outlined.Collections, appText("Pixiv 页面", english), appText("进入 Pixiv 归档浏览与标签搜索", english))
+                // The Pixiv page keeps the archive entry's icon and wording:
+                // the archive itself is opened from inside that page.
+                "pixiv" -> Triple(Icons.Outlined.Archive, appText("Pixiv 文件归档", english), appText("扫描并整理 Pixiv 图片到画师目录", english))
                 else -> null
             }
-        }
+            entry?.let { id to it }
+        }.toMap()
     }
     val actions = mapOf(
-        "archive" to onOpenArchive,
         "wallpaper" to onOpenWallpaper,
         "cleanup" to onOpenCleanup,
         "slideshow" to onStartSlideshow,
@@ -304,7 +309,7 @@ private fun ToolsScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         order.forEachIndexed { index, id ->
-            val entry = entries.getOrNull(order.indexOf(id)) ?: return@forEachIndexed
+            val entry = entryById[id] ?: return@forEachIndexed
             // The drag state has to follow the entry, not the slot: without a
             // key a swap moved the rows but left the offset behind, which is
             // why the drag looked like it was not following the finger.
@@ -647,6 +652,24 @@ fun AlbumApp(
         all.filter { it.uri.toString() in slideshowQueueUris }
             .sortedBy { positions[it.uri.toString()] ?: Int.MAX_VALUE }
     } }
+    // The queue page and the slideshow itself both use this list; the play
+    // button used to start playback from the unsorted queue, which made every
+    // sort option look broken.
+    val slideshowQueueSorted by remember {
+        derivedStateOf {
+            val sorted = when (slideshowQueueSort) {
+                MediaSort.Name -> slideshowQueueMedia.sortedBy { it.name.lowercase() }
+                MediaSort.Size -> slideshowQueueMedia.sortedBy { it.size }
+                MediaSort.Duration -> slideshowQueueMedia.sortedBy { it.duration }
+                else -> slideshowQueueMedia.sortedBy { it.dateTaken }
+            }
+            if (slideshowQueueSortDirection == SortDirection.Descending) sorted.reversed() else sorted
+        }
+    }
+    var slideshowQueueFolderMode by rememberSaveable { mutableStateOf(false) }
+    var slideshowQueueFolderLayout by rememberSaveable { mutableStateOf(MediaLayout.Grid) }
+    var slideshowQueueOpenedFolder by rememberSaveable { mutableStateOf<String?>(null) }
+    var showSlideshowSettings by remember { mutableStateOf(false) }
     var suspendedSearchQuery by rememberSaveable { mutableStateOf<String?>(null) }
     var searchOpen by rememberSaveable { mutableStateOf(true) }
     LaunchedEffect(selectionMode) {
@@ -951,15 +974,25 @@ fun AlbumApp(
     }
     fun requestPixivReload() {
         pixivReloadJob?.cancel()
-        pixivReloadJob = scope.launch { reloadPixivPage() }
+        pixivReloadJob = scope.launch {
+            // Triggers often arrive together (a library refresh plus an explicit
+            // request); the short wait collapses them into one SAF walk instead
+            // of cancelling and restarting a walk that just started.
+            delay(350L)
+            reloadPixivPage()
+        }
     }
-    LaunchedEffect(selectedTab, pixivTabEnabled, pixivRefreshKey, cleanupOpen, defaultPixivImages) {
+    LaunchedEffect(pixivTabEnabled, pixivRefreshKey, cleanupOpen, defaultPixivImages) {
         // Include archived artist folders in the P page; Pixiv itself is
-        // pinned separately below so it remains the first folder. selectedTab
-        // is part of the key because entering the page for the first time only
-        // changes the tab: without it the page stayed empty until a manual
-        // refresh.
-        if (selectedTab == MainTab.Pixiv) requestPixivReload()
+        // pinned separately below so it remains the first folder. This walks
+        // the SAF trees, so it is driven by the explicit refresh, by a change
+        // in the local library, and by the first visit only.
+        requestPixivReload()
+    }
+    LaunchedEffect(selectedTab) {
+        // Entering the page again must not start another walk: the snapshot
+        // that is already loaded stays on screen until the user refreshes.
+        if (selectedTab == MainTab.Pixiv && pixivLibraryImages == null) requestPixivReload()
     }
     val needsFolderSearchIndex by remember {
         derivedStateOf {
@@ -1457,7 +1490,13 @@ fun AlbumApp(
     BackHandler(enabled = appBackEnabled) {
         when {
             transferRequest != null -> transferRequest = null
-            slideshowQueueOpen -> slideshowQueueOpen = false
+            slideshowQueueOpen -> {
+                if (slideshowQueueFolderMode && slideshowQueueOpenedFolder != null) {
+                    slideshowQueueOpenedFolder = null
+                } else {
+                    slideshowQueueOpen = false
+                }
+            }
             wallpaperManagerOpen && wallpaperSelectionMode -> {
                 wallpaperSelectionMode = false
                 wallpaperSelectedUris = emptySet()
@@ -2044,18 +2083,17 @@ fun AlbumApp(
             onArchiveComplete = { completed, failed ->
                 observerRefreshJob[0]?.cancel()
                 archiveMediaRefreshPending = false
-                archiveMediaRefreshing = true
-                try {
-                    // Refresh while the archive page is temporarily locked so
-                    // the next user action does not pay this cost.
-                    library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
-                    // Reload directly after the media index and SAF target
-                    // folders are current, so new folders and their ordering
-                    // appear on the P page immediately.
-                    pixivReloadJob?.cancel()
-                    reloadPixivPage()
-                } finally {
-                    archiveMediaRefreshing = false
+                // Re-read the library in the background: the archive page is
+                // released straight away, and the P page walk is then started
+                // once (the reload requests are debounced) with the refreshed
+                // media index already in place.
+                scope.launch {
+                    try {
+                        library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
+                    } finally {
+                        archiveMediaRefreshing = false
+                        pixivRefreshKey++
+                    }
                 }
                 Toast.makeText(
                     context,
@@ -2228,6 +2266,7 @@ fun AlbumApp(
                 favoriteVisible = false,
                 onFavoriteClick = {},
                 menuItems = listOf(
+                    appText("设置", english),
                     appText("列数", english),
                     appText("排布方式", english),
                     appText("排序方式", english),
@@ -2235,6 +2274,7 @@ fun AlbumApp(
                 ),
                 onMenuItemClick = { action ->
                     when (action) {
+                        appText("设置", english) -> showSlideshowSettings = true
                         appText("列数", english) -> showSlideshowColumnDialog = true
                         appText("排布方式", english) -> showSlideshowLayoutDialog = true
                         appText("排序方式", english) -> showSlideshowSortDialog = true
@@ -2245,13 +2285,19 @@ fun AlbumApp(
                         }
                     }
                 },
-                onBack = { slideshowQueueOpen = false },
+                onBack = {
+                    if (slideshowQueueFolderMode && slideshowQueueOpenedFolder != null) {
+                        slideshowQueueOpenedFolder = null
+                    } else {
+                        slideshowQueueOpen = false
+                    }
+                },
                 actionLabel = appText("播放", english),
                 actionEnabled = slideshowQueueMedia.isNotEmpty(),
                 actionCapsule = true,
                 actionStartPadding = 10.dp,
                 onActionClick = {
-                    val items = slideshowQueueMedia.filterNot { it.isVideo }
+                    val items = slideshowQueueSorted.filterNot { it.isVideo }
                     if (items.isNotEmpty()) {
                         selectionSlideshow = items
                         // Play through the normal image viewer so the
@@ -2260,20 +2306,19 @@ fun AlbumApp(
                         viewerScope = items
                         viewerMedia = items.first()
                         selectedMedia = items.first()
-                        slideshowQueueOpen = false
+                        // The queue page stays open behind the slideshow: the
+                        // back gesture has to return to the queue, not to the
+                        // Tools page it was started from.
                     }
                 },
                 chromeAlpha = pageChromeAlpha
             ) else if (wallpaperManagerOpen) VaultTopBar(
                 title = if (english) "Wallpaper manager" else "壁纸管理",
-                query = wallpaperQuery,
-                searchEnabled = true,
-                onQueryChange = {
-                    wallpaperQuery = it
-                    wallpaperSelectionMode = it.isNotBlank()
-                    if (it.isBlank()) wallpaperSelectedUris = emptySet()
-                    if (it.isBlank()) wallpaperSelectionOrder = emptyList()
-                },
+                query = "",
+                // The manager only manages the queue now: media is added from
+                // the multi-select menu, so the search field is gone.
+                searchEnabled = false,
+                onQueryChange = {},
                 favoriteActive = false,
                 onFavoriteClick = {},
                 menuItems = listOf(
@@ -2308,13 +2353,18 @@ fun AlbumApp(
                     wallpaperSelectedUris = emptySet()
                     wallpaperSelectionOrder = emptyList()
                 },
-                searchPlaceholder = appText("搜索文件夹、图片名称", english),
-                searchModeLabels = listOf(
-                    if (english) "Static" else "静态",
-                    if (english) "Live" else "动态"
-                ),
+                // Static/live moved to the title switch, matching the other
+                // pages now that the search field is gone.
+                searchModeLabels = emptyList(),
                 selectedSearchMode = if (wallpaperShowVideos) 1 else 0,
-                onSearchModeChange = {
+                // Inside a queue folder the bar shows the folder name instead.
+                titleSwitch = if (wallpaperOpenedFolder == null) {
+                    listOf(
+                        if (english) "Static" else "静态",
+                        if (english) "Live" else "动态"
+                    )
+                } else null,
+                onTitleSwitchChange = {
                     wallpaperShowVideos = it == 1
                     wallpaperSelectedUris = emptySet()
                     wallpaperSelectionOrder = emptyList()
@@ -2324,25 +2374,18 @@ fun AlbumApp(
                     if (progress == null) appText("中止", english)
                     else if (english) "Cancel ${progress.completed}/${progress.total}" else "中止 ${progress.completed}/${progress.total}"
                 } else when {
-                    wallpaperQuery.isNotBlank() -> appText("确认", english)
                     wallpaperSelectionMode -> appText("清除", english)
                     wallpaperQueueIsApplied -> appText("重新应用", english)
                     else -> appText("应用", english)
                 },
-                actionEnabled = if (wallpaperImportRunning) true else if (wallpaperSelectionMode || wallpaperQuery.isNotBlank()) {
+                actionEnabled = if (wallpaperImportRunning) true else if (wallpaperSelectionMode) {
                     wallpaperSelectedUris.isNotEmpty()
                 } else true,
-                actionCapsule = wallpaperQuery.isBlank(),
+                actionCapsule = true,
                 actionStartPadding = 10.dp,
                 onActionClick = {
                     if (wallpaperImportRunning) {
                         WallpaperImportCoordinator.cancel()
-                    } else if (wallpaperQuery.isNotBlank()) {
-                        addToWallpaperQueue(wallpaperSearchMedia.filter { it.uri.toString() in wallpaperSelectedUris })
-                        wallpaperQuery = ""
-                        wallpaperSelectionMode = false
-                        wallpaperSelectedUris = emptySet()
-                        wallpaperSelectionOrder = emptyList()
                     } else if (wallpaperSelectionMode) {
                         wallpaperSelectedUris.forEach { uri ->
                             wallpaperQueueMedia.firstOrNull { it.uri.toString() == uri }?.let(::removeFromWallpaperQueue)
@@ -2560,28 +2603,31 @@ fun AlbumApp(
                 } else if (tab == MainTab.Timeline) {
                     if (appLanguage == "English") "Search names and dates" else "搜索${if (timelineShowsVideos) "视频" else "图片"}名称、日期"
                 } else null,
-                searchModeLabels = when (tab) {
-                    MainTab.Pixiv -> listOf(if (appLanguage == "English") "Artist" else "画师", "Tag")
-                    else -> emptyList()
-                },
+                // Every page switch lives in the title area (the same mark plus
+                // current state as the photo/video pages); none of them sit
+                // inside the search field any more.
+                searchModeLabels = emptyList(),
                 selectedSearchMode = when {
-                    tab == MainTab.Timeline && timelineShowsVideos -> 1
-                    tab == MainTab.Timeline -> 0
+                    tab == MainTab.Timeline -> if (timelineShowsVideos) 1 else 0
                     tab == MainTab.Albums -> if (albumShowsVideos) 1 else 0
-                    pixivSearchMode == PixivSearchMode.Artist -> 0
-                    else -> 1
+                    tab == MainTab.Pixiv -> if (pixivSearchMode == PixivSearchMode.Tag) 1 else 0
+                    else -> 0
                 },
-                titleSwitch = if (tab == MainTab.Albums) {
-                    listOf(
+                titleSwitch = when (tab) {
+                    MainTab.Albums,
+                    MainTab.Timeline -> listOf(
                         if (english) "Pictures" else "图片",
                         if (english) "Videos" else "视频"
                     )
-                } else if (tab == MainTab.Timeline) {
-                    listOf(
-                        if (english) "Pictures" else "图片",
-                        if (english) "Videos" else "视频"
-                    )
-                } else null,
+                    // Inside an artist folder the bar shows the folder name.
+                    MainTab.Pixiv -> if (openedFolder == null) {
+                        listOf(
+                            if (english) "Artist" else "画师",
+                            "Tag"
+                        )
+                    } else null
+                    else -> null
+                },
                 onTitleSwitchChange = { index ->
                     if (tab == MainTab.Albums) {
                         val showVideos = index == 1
@@ -2598,6 +2644,9 @@ fun AlbumApp(
                             query = ""
                             timelineJumpDate = null
                         }
+                    } else if (tab == MainTab.Pixiv) {
+                        val mode = if (index == 0) PixivSearchMode.Artist else PixivSearchMode.Tag
+                        if (mode != pixivSearchMode) pixivSearchMode = mode
                     }
                 },
                 onSearchModeChange = { index ->
@@ -2728,7 +2777,37 @@ fun AlbumApp(
                                 indication = null
                             ) {
                             if (android.os.SystemClock.elapsedRealtime() < suppressNavClickUntil) return@clickable
-                            if (tab == selectedTab) scrollToTopToken = System.nanoTime() else selectMainTab(tab)
+                            if (tab != selectedTab) {
+                                selectMainTab(tab)
+                                return@clickable
+                            }
+                            val atTop = when (tab) {
+                                MainTab.Timeline ->
+                                    timelineFirstVisibleItem <= 0 && timelineFirstVisibleOffset <= 0
+                                MainTab.Albums, MainTab.Videos, MainTab.Pixiv ->
+                                    albumFirstVisibleItem <= 0 && albumFirstVisibleOffset <= 0
+                                else -> true
+                            }
+                            if (!atTop) {
+                                // Reset the stored position as well: any grid
+                                // that is recreated later starts at the top,
+                                // so the jump happens in one step.
+                                if (tab == MainTab.Timeline) {
+                                    timelineFirstVisibleItem = 0
+                                    timelineFirstVisibleOffset = 0
+                                } else {
+                                    albumFirstVisibleItem = 0
+                                    albumFirstVisibleOffset = 0
+                                }
+                                scrollToTopToken = System.nanoTime()
+                            } else {
+                                // Already at the top: a second tap refreshes.
+                                when (tab) {
+                                    MainTab.Pixiv -> requestPixivReload()
+                                    MainTab.Albums, MainTab.Videos, MainTab.Timeline -> refreshLibrary()
+                                    else -> Unit
+                                }
+                            }
                         },
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
@@ -3274,22 +3353,23 @@ fun AlbumApp(
                         .background(MaterialTheme.colorScheme.surface)
                 ) {
                     SlideshowQueueScreen(
-                        items = remember(
-                            slideshowQueueMedia,
-                            slideshowQueueSort,
-                            slideshowQueueSortDirection
-                        ) {
-                            val sorted = when (slideshowQueueSort) {
-                                MediaSort.Name -> slideshowQueueMedia.sortedBy { it.name.lowercase() }
-                                MediaSort.Size -> slideshowQueueMedia.sortedBy { it.size }
-                                MediaSort.Duration -> slideshowQueueMedia.sortedBy { it.duration }
-                                else -> slideshowQueueMedia.sortedBy { it.dateTaken }
-                            }
-                            if (slideshowQueueSortDirection == SortDirection.Descending) sorted.reversed() else sorted
-                        },
+                        items = slideshowQueueSorted,
                         columns = slideshowQueueColumns,
-                        layout = slideshowQueueLayout,
-                        onOpenMedia = ::openMedia,
+                        layout = if (slideshowQueueFolderMode) slideshowQueueFolderLayout else slideshowQueueLayout,
+                        folderMode = slideshowQueueFolderMode,
+                        openedFolder = slideshowQueueOpenedFolder,
+                        onOpenFolder = { folder -> slideshowQueueOpenedFolder = folder },
+                        onCloseFolder = { slideshowQueueOpenedFolder = null },
+                        // Opening a picture from the queue is the same thing as
+                        // playing the slideshow: the viewer then runs in
+                        // slideshow mode, so tapping the screen enters the
+                        // preview page with the playback still attached.
+                        onOpenMedia = { item ->
+                            val slides = slideshowQueueSorted
+                            selectionSlideshow = slides
+                            viewerScope = slides
+                            openMedia(item)
+                        },
                         onRemove = { item ->
                             val key = item.uri.toString()
                             val uris = slideshowQueueUris - key
@@ -3318,7 +3398,7 @@ fun AlbumApp(
                     WallpaperManagerScreen(
                         queuedMedia = wallpaperQueueMedia.filter { it.isVideo == wallpaperShowVideos },
                         searchMedia = wallpaperSearchMedia,
-                        query = wallpaperQuery,
+                        query = "",
                         selectionMode = wallpaperSelectionMode,
                         selectedUris = wallpaperSelectedUris,
                         selectionOrder = wallpaperSelectionOrder,
@@ -3488,6 +3568,9 @@ fun AlbumApp(
             onDismiss = { showWallpaperSettings = false }
         )
     }
+    if (showSlideshowSettings) {
+        VaultSlideshowSettingsSheet(onDismiss = { showSlideshowSettings = false })
+    }
     if (showSlideshowColumnDialog) {
         val options = (1..6).map { if (english) "$it columns" else "$it 列" }
         VaultWheelChoiceSheet(
@@ -3502,14 +3585,31 @@ fun AlbumApp(
         )
     }
     if (showSlideshowLayoutDialog) {
-        val options = MediaLayout.entries.map { appText(it.label, english) }
-        VaultWheelChoiceSheet(
+        // Same two wheels as the wallpaper manager: the first picks the
+        // surface (media ≈ timeline, folder ≈ album page), the second its
+        // layout.
+        val scopes = listOf(appText("媒体", english), appText("文件夹", english))
+        val layouts = MediaLayout.entries.map { appText(it.label, english) }
+        VaultLayoutWheelSheet(
             title = appText("排布方式", english),
-            options = options,
-            selected = appText(slideshowQueueLayout.label, english),
+            scopes = scopes,
+            layouts = layouts,
+            selectedScope = if (slideshowQueueFolderMode) scopes.last() else scopes.first(),
+            layoutForScope = { scope ->
+                val layout = if (scope == scopes.first()) slideshowQueueLayout else slideshowQueueFolderLayout
+                appText(layout.label, english)
+            },
             onDismiss = { showSlideshowLayoutDialog = false },
-            onApply = { label ->
-                slideshowQueueLayout = MediaLayout.entries[options.indexOf(label).coerceAtLeast(0)]
+            onApply = { scope, layout ->
+                val selected = MediaLayout.entries[layouts.indexOf(layout).coerceAtLeast(0)]
+                if (scope == scopes.first()) {
+                    slideshowQueueFolderMode = false
+                    slideshowQueueLayout = selected
+                } else {
+                    slideshowQueueFolderMode = true
+                    slideshowQueueFolderLayout = selected
+                    slideshowQueueOpenedFolder = null
+                }
                 showSlideshowLayoutDialog = false
             }
         )

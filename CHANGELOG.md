@@ -1,5 +1,18 @@
 # Album Changelog
 
+## v1.1.86 - 2026-09-16 (local signed build)
+
+- The P page no longer starts a SAF walk every time it is opened: entering it again keeps the snapshot that is already loaded, and a walk only starts on the first visit, on an explicit refresh, or when the local library changes. Reload requests are debounced so a library refresh and an explicit request no longer cancel and restart a walk that just began.
+- Finishing an archive releases the archive page straight away and re-reads the library in the background, then reloads the P page once with the refreshed index in place.
+- The P page's artist/Tag switch is now the same mark-and-current-state control as the photo/video pages, in the same place (top left, theme colour); it is only replaced by the folder name inside a folder.
+- Tools has one Pixiv entry again: the separate "文件归档" entry is gone and the P page entry uses the archive's icon and wording. Entries are looked up by id, so a stored order that still lists the removed entry no longer shifts every label.
+- Slideshow: the system back gesture returns to the queue page (starting playback no longer closes it), tapping a picture in the queue opens it in slideshow mode, the queue menu gained 设置 with every slideshow option (interval, animation, shuffle), 自适应 now really is the masonry layout used by the timeline, 排布方式 gained the media/folder scope choice, playback follows the chosen sort (it used to play the unsorted queue, which made every sort look broken), and the empty message is just "幻灯片队列为空".
+- The wallpaper page lost its search field: media is added from the multi-select menu, and static/live moved to the same title switch as the other pages (it also shows on pages that have a back arrow now).
+- Tapping the bottom bar icon of the current page jumps to the top in one step instead of animating up in two, and tapping it again while already at the top refreshes that page.
+- APK: `app/release/app-release.apk` (arm64-v8a split)
+- SHA-256: `008465E1CF3C00E424AAB4787EAE95C1D6AB53151BB3F381ED8116588BA589DB`
+- Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug` and `assembleRelease` passed. On the test phone the Tools page, the P page switch, the wallpaper page without a search field, the slideshow settings sheet and the shortened empty message were all checked.
+
 ## v1.1.84 - 2026-09-16 (local signed build)
 
 - The picture a static wallpaper queue is showing is now also handed to the system as an ordinary wallpaper (before the live wallpaper is bound), so a package replacement that drops the live wallpaper leaves the user's image on screen instead of the stock wallpaper. The still image is only written when no Album live wallpaper is bound, because setting one replaces the other. Video queues get the first frame of the clip as the same fallback.
