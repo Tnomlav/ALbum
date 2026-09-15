@@ -47,8 +47,6 @@ internal class Mpeg1ProgramStreamExtractor : Extractor {
     private var output: ExtractorOutput? = null
     private var seekMapOutput: Boolean = false
     private var tracksEnded: Boolean = false
-    private var foundVideo: Boolean = false
-    private var foundAudio: Boolean = false
     private var lastTrackPosition: Long = 0L
 
     override fun init(output: ExtractorOutput) {
@@ -56,8 +54,6 @@ internal class Mpeg1ProgramStreamExtractor : Extractor {
         pesReaders.clear()
         seekMapOutput = false
         tracksEnded = false
-        foundVideo = false
-        foundAudio = false
         lastTrackPosition = 0L
     }
 
@@ -228,11 +224,6 @@ internal class Mpeg1ProgramStreamExtractor : Extractor {
             (streamId and 0xF0) == VIDEO_STREAM -> H262Reader(MimeTypes.VIDEO_PS)
             else -> return null
         }
-        when {
-            (streamId and 0xF0) == VIDEO_STREAM -> foundVideo = true
-            (streamId and 0xE0) == AUDIO_STREAM -> foundAudio = true
-            else -> foundAudio = true
-        }
         lastTrackPosition = position
         elementaryStreamReader.createTracks(
             extractorOutput,
@@ -255,7 +246,10 @@ internal class Mpeg1ProgramStreamExtractor : Extractor {
      */
     private fun maybeEndTracks(extractorOutput: ExtractorOutput, position: Long) {
         if (tracksEnded) return
-        if (foundAudio && foundVideo && position > lastTrackPosition + TRACK_SEARCH_LENGTH) {
+        // Once the streams have been seen the track list can be closed. The
+        // audio/video flags are only informational: a silent clip still has to
+        // publish its single video track.
+        if (pesReaders.size() > 0 && position > lastTrackPosition + TRACK_SEARCH_LENGTH) {
             endTracks(extractorOutput)
         } else if (position > MAX_TRACK_SEARCH_LENGTH) {
             endTracks(extractorOutput)
