@@ -94,6 +94,7 @@ fun TimelineScreen(
     scrollToUri: String? = null,
     scrollToToken: Long = 0L,
     scrollToTopToken: Long = 0L,
+    scrollRequest: com.example.album.ui.PageScrollRequest? = null,
     onClearQuery: () -> Unit = {}
 ) {
     val refreshing = loading || scanning
@@ -173,7 +174,9 @@ fun TimelineScreen(
             onScrollPositionChanged = onScrollPositionChanged,
             onFirstVisibleMediaChanged = onFirstVisibleMediaChanged,
             scrollToUri = scrollToUri,
-            scrollToToken = scrollToToken
+            scrollToToken = scrollToToken,
+            scrollToTopToken = scrollToTopToken,
+            scrollRequest = scrollRequest
         )
         return
     }
@@ -202,7 +205,9 @@ fun TimelineScreen(
         onScrollPositionChanged = onScrollPositionChanged,
         onFirstVisibleMediaChanged = onFirstVisibleMediaChanged,
         scrollToUri = scrollToUri,
-        scrollToToken = scrollToToken
+        scrollToToken = scrollToToken,
+        scrollToTopToken = scrollToTopToken,
+        scrollRequest = scrollRequest
     )
     return
 }
@@ -233,7 +238,8 @@ private fun OptimizedTimelineGrid(
     onFirstVisibleMediaChanged: (String?) -> Unit = {},
     scrollToUri: String? = null,
     scrollToToken: Long = 0L,
-    scrollToTopToken: Long = 0L
+    scrollToTopToken: Long = 0L,
+    scrollRequest: com.example.album.ui.PageScrollRequest? = null
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current
@@ -244,6 +250,17 @@ private fun OptimizedTimelineGrid(
         initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
         initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
     )
+    LaunchedEffect(scrollRequest) {
+        if (scrollRequest != null && scrollRequest.token > 0L) {
+            val count = state.layoutInfo.totalItemsCount
+            if (count > 0) {
+                state.scrollToItem(
+                    scrollRequest.index.coerceIn(0, count - 1),
+                    scrollRequest.offset.coerceAtLeast(0)
+                )
+            }
+        }
+    }
     LaunchedEffect(scrollToToken) {
         val uri = scrollToUri ?: return@LaunchedEffect
         if (uri.isBlank()) return@LaunchedEffect
@@ -429,7 +446,8 @@ private fun AdaptiveTimeline(
     onFirstVisibleMediaChanged: (String?) -> Unit = {},
     scrollToUri: String? = null,
     scrollToToken: Long = 0L,
-    scrollToTopToken: Long = 0L
+    scrollToTopToken: Long = 0L,
+    scrollRequest: com.example.album.ui.PageScrollRequest? = null
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current
@@ -438,6 +456,20 @@ private fun AdaptiveTimeline(
         initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
         initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
     )
+    LaunchedEffect(scrollToTopToken) {
+        if (scrollToTopToken > 0L) state.animateScrollToItem(0)
+    }
+    LaunchedEffect(scrollRequest) {
+        if (scrollRequest != null && scrollRequest.token > 0L) {
+            val count = state.layoutInfo.totalItemsCount
+            if (count > 0) {
+                state.scrollToItem(
+                    scrollRequest.index.coerceIn(0, count - 1),
+                    scrollRequest.offset.coerceAtLeast(0)
+                )
+            }
+        }
+    }
     LaunchedEffect(scrollToToken) {
         val uri = scrollToUri ?: return@LaunchedEffect
         if (uri.isBlank()) return@LaunchedEffect

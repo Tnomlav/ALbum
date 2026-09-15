@@ -305,25 +305,30 @@ private fun ToolsScreen(
     ) {
         order.forEachIndexed { index, id ->
             val entry = entries.getOrNull(order.indexOf(id)) ?: return@forEachIndexed
-            ReorderableToolEntry(
-                icon = entry.first,
-                title = entry.second,
-                subtitle = entry.third,
-                reorderEnabled = reorderEnabled,
-                onMoveUp = {
-                    if (index > 0 && index - 1 < order.size) {
-                        val updated = order.toMutableList().apply { add(index - 1, removeAt(index)) }
-                        onOrderChange(updated)
-                    }
-                },
-                onMoveDown = {
-                    if (index < order.lastIndex) {
-                        val updated = order.toMutableList().apply { add(index + 1, removeAt(index)) }
-                        onOrderChange(updated)
-                    }
-                },
-                onClick = actions[id] ?: {}
-            )
+            // The drag state has to follow the entry, not the slot: without a
+            // key a swap moved the rows but left the offset behind, which is
+            // why the drag looked like it was not following the finger.
+            key(id) {
+                ReorderableToolEntry(
+                    icon = entry.first,
+                    title = entry.second,
+                    subtitle = entry.third,
+                    reorderEnabled = reorderEnabled,
+                    onMoveUp = {
+                        if (index > 0 && index - 1 < order.size) {
+                            val updated = order.toMutableList().apply { add(index - 1, removeAt(index)) }
+                            onOrderChange(updated)
+                        }
+                    },
+                    onMoveDown = {
+                        if (index < order.lastIndex) {
+                            val updated = order.toMutableList().apply { add(index + 1, removeAt(index)) }
+                            onOrderChange(updated)
+                        }
+                    },
+                    onClick = actions[id] ?: {}
+                )
+            }
         }
     }
 }
@@ -340,12 +345,21 @@ private fun ReorderableToolEntry(
 ) {
     var dragOffset by remember { mutableStateOf(0f) }
     var dragging by remember { mutableStateOf(false) }
+    var rowStep by remember { mutableFloatStateOf(0f) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val entrySpacing = with(density) { 8.dp.toPx() }
     Box(
         Modifier
             .fillMaxWidth()
+            .onSizeChanged { size ->
+                // One row plus the Column's spacing: the distance the entry
+                // really travels when it swaps with its neighbour.
+                if (size.height > 0) rowStep = size.height + entrySpacing
+            }
             .graphicsLayer { translationY = dragOffset; if (dragging) scaleX = 1.02f; scaleY = 1.02f }
-            .pointerInput(reorderEnabled) {
+            .pointerInput(reorderEnabled, rowStep) {
                 if (!reorderEnabled) return@pointerInput
+                val step = rowStep.takeIf { it > 0f } ?: with(density) { 72.dp.toPx() }
                 detectDragGesturesAfterLongPress(
                     onDragStart = { dragging = true },
                     onDragEnd = { dragging = false; dragOffset = 0f },
@@ -354,12 +368,11 @@ private fun ReorderableToolEntry(
                         change.consume()
                         dragOffset += amount.y
                         // Keep the row under the finger: when it swaps with a
-                        // neighbour the offset is reduced by one row instead of
-                        // being reset, so the drag stays continuous.
-                        val rowStep = 72f
-                        if (dragOffset > rowStep) { dragOffset -= rowStep; onMoveDown() }
-                        if (dragOffset < -rowStep) { dragOffset += rowStep; onMoveUp() }
-                        dragOffset = dragOffset.coerceIn(-rowStep * 1.4f, rowStep * 1.4f)
+                        // neighbour the offset is reduced by exactly the height
+                        // it moved, so the drag stays continuous and never
+                        // drifts away from the finger.
+                        while (dragOffset > step) { dragOffset -= step; onMoveDown() }
+                        while (dragOffset < -step) { dragOffset += step; onMoveUp() }
                     }
                 )
             }
@@ -637,10 +650,17 @@ fun AlbumApp(
     var selectionFolderFirstVisibleOffset by remember { mutableIntStateOf(0) }
     var albumFirstVisibleItem by remember { mutableIntStateOf(0) }
     var albumFirstVisibleOffset by remember { mutableIntStateOf(0) }
+    // Where the page was before the search page opened, so leaving the search
+    // page returns there instead of somewhere the filtered list clamped to.
+    var pageScrollRequest by remember { mutableStateOf<com.example.album.ui.PageScrollRequest?>(null) }
+    var searchPageOpenForTab by remember { mutableStateOf<MainTab?>(null) }
+    var searchReturnItem by remember { mutableIntStateOf(0) }
+    var searchReturnOffset by remember { mutableIntStateOf(0) }
     var selectionMediaFirstVisibleItem by remember { mutableIntStateOf(0) }
     var selectionMediaFirstVisibleOffset by remember { mutableIntStateOf(0) }
     var timelineFirstVisibleItem by remember { mutableIntStateOf(0) }
     var timelineFirstVisibleOffset by remember { mutableIntStateOf(0) }
+
     var folderScope by remember { mutableStateOf<List<MediaItem>?>(null) }
     // The list the current page displays, so the viewer pages through the same
     // order (and the same filters) the user sees.
@@ -650,6 +670,47 @@ fun AlbumApp(
     var wallpaperReturnTab by remember { mutableStateOf<MainTab?>(null) }
     var wallpaperReturnFolder by remember { mutableStateOf<String?>(null) }
     var openedFolder by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Entering the search page puts the (much shorter) result list at the top,
+    // and leaving it returns to the position the page had before searching
+    // instead of wherever the filtered list clamped to.
+    LaunchedEffect(appliedQuery, selectedTab, openedFolder) {
+        val searching = appliedQuery.isNotBlank() &&
+            openedFolder == null &&
+            (selectedTab == MainTab.Albums || selectedTab == MainTab.Videos || selectedTab == MainTab.Timeline)
+        if (searching && searchPageOpenForTab == null) {
+            searchPageOpenForTab = selectedTab
+            val onTimeline = selectedTab == MainTab.Timeline
+            searchReturnItem = if (onTimeline) timelineFirstVisibleItem else albumFirstVisibleItem
+            searchReturnOffset = if (onTimeline) timelineFirstVisibleOffset else albumFirstVisibleOffset
+            pageScrollRequest = com.example.album.ui.PageScrollRequest(0, 0, System.nanoTime())
+        } else if (!searching && searchPageOpenForTab != null) {
+            searchPageOpenForTab = null
+            pageScrollRequest = com.example.album.ui.PageScrollRequest(
+                searchReturnItem,
+                searchReturnOffset,
+                System.nanoTime()
+            )
+        }
+    }
+    // The request is a one shot: drop it again so switching to another page
+    // later cannot replay a scroll that belonged to the previous one.
+    LaunchedEffect(pageScrollRequest) {
+        if (pageScrollRequest != null) {
+            delay(600L)
+            pageScrollRequest = null
+        }
+    }
+
+    // Deleting shortens the list under the grid, which would otherwise clamp to
+    // the new end and leave the user at the bottom of the page.
+    fun requestPageRestoreAfterDelete() {
+        pageScrollRequest = com.example.album.ui.PageScrollRequest(
+            if (selectingFolders) albumFirstVisibleItem else selectionMediaFirstVisibleItem,
+            if (selectingFolders) albumFirstVisibleOffset else selectionMediaFirstVisibleOffset,
+            System.nanoTime()
+        )
+    }
     var selectionRenameItem by remember { mutableStateOf<MediaItem?>(null) }
     var selectionRenameFolder by remember { mutableStateOf<String?>(null) }
     var selectionRenameText by remember { mutableStateOf("") }
@@ -874,10 +935,13 @@ fun AlbumApp(
         pixivReloadJob?.cancel()
         pixivReloadJob = scope.launch { reloadPixivPage() }
     }
-    LaunchedEffect(pixivTabEnabled, pixivRefreshKey, cleanupOpen, defaultPixivImages) {
+    LaunchedEffect(selectedTab, pixivTabEnabled, pixivRefreshKey, cleanupOpen, defaultPixivImages) {
         // Include archived artist folders in the P page; Pixiv itself is
-        // pinned separately below so it remains the first folder.
-        requestPixivReload()
+        // pinned separately below so it remains the first folder. selectedTab
+        // is part of the key because entering the page for the first time only
+        // changes the tab: without it the page stayed empty until a manual
+        // refresh.
+        if (selectedTab == MainTab.Pixiv) requestPixivReload()
     }
     val needsFolderSearchIndex by remember {
         derivedStateOf {
@@ -1326,11 +1390,12 @@ fun AlbumApp(
             searchOpen = false
             return
         }
-        suspendedSearchQuery = query
+        // Leaving the search page forgets the search: the field is cleared and
+        // the next tap starts a new one. Remembering the text made the page
+        // restore an old query the user had already left.
+        suspendedSearchQuery = null
         query = ""
         appliedQuery = ""
-        // Keep the draft visible in the always-expanded home search field,
-        // while removing it from the active filter until search resumes.
         searchOpen = false
     }
 
@@ -1420,6 +1485,7 @@ fun AlbumApp(
             pixivArchiveSession.removeRecords(deletedUris intersect pixivArchivePendingDeleteUris)
             pixivArchivePendingDeleteUris -= deletedUris
             if (pendingDeletes.any { it.uri == selectedMedia?.uri }) selectedMedia = null
+            requestPageRestoreAfterDelete()
             selectedUris = emptySet()
             selectionMode = false
         } else if (pendingRecycleIds.isNotEmpty()) {
@@ -1439,6 +1505,7 @@ fun AlbumApp(
             }
             pixivArchivePendingDeleteUris -= deletedUris
             if (pendingDeletes.any { it.uri == selectedMedia?.uri }) selectedMedia = null
+            requestPageRestoreAfterDelete()
             selectedUris = emptySet()
             selectionMode = false
         } else if (pendingRecycleIds.isNotEmpty()) {
@@ -1610,6 +1677,7 @@ fun AlbumApp(
                 val failedEntries = staged.filter { it.sourceUri in failedUris }.mapTo(mutableSetOf()) { it.id }
                 if (failedEntries.isNotEmpty()) library.discardRecycle(failedEntries)
                 if (deletable.any { it.uri == selectedMedia?.uri && it.uri.toString() !in failedUris }) selectedMedia = null
+                requestPageRestoreAfterDelete()
                 selectedUris = emptySet()
                 selectionMode = false
                 pixivArchivePendingDeleteUris = emptySet()
@@ -1643,6 +1711,17 @@ fun AlbumApp(
                 MediaScanResult.PermissionRequired -> requestPermission()
                 MediaScanResult.NotRequested -> Unit
             }
+        }
+    }
+
+    // Pull to refresh only re-reads MediaStore. The full storage walk behind
+    // "扫描刷新" touches every file in DCIM/Pictures/Movies/Downloads and made
+    // every pull feel slow even when nothing had changed; the system media
+    // provider already indexes new files, so the walk stays on the menu entry.
+    val refreshLibrary: () -> Unit = {
+        scope.launch {
+            library.refresh(library.permissionGranted)
+            if (selectedTab == MainTab.Pixiv) pixivRefreshKey++
         }
     }
 
@@ -2821,6 +2900,7 @@ fun AlbumApp(
                     scrollToTopToken = scrollToTopToken,
                     scrollToUri = viewerScrollUri,
                     scrollToToken = viewerScrollToken,
+                    scrollRequest = pageScrollRequest,
                     onVisibleScopeChanged = { scope -> pageScope = scope; folderScope = scope },
                     onFirstVisibleFolderChanged = { selectionAnchorFolder = it },
                     onMediaScrollPositionChanged = { index, offset ->
@@ -2854,7 +2934,7 @@ fun AlbumApp(
                         selectedFolders = selectedFolders + albums.map { it.name }
                     },
                     onAlbumSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
-                    onRefresh = { requestMediaScan(false) },
+                    onRefresh = { refreshLibrary() },
                     openedFolder = openedFolder,
                     onOpenedFolderChange = { folder -> if (folder != null && selectionMode && selectingFolders) { selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder } else openFolder(folder) },
                     sharedElementEnabled = tab == selectedTab,
@@ -2898,6 +2978,7 @@ fun AlbumApp(
                     scrollToTopToken = scrollToTopToken,
                     scrollToUri = viewerScrollUri,
                     scrollToToken = viewerScrollToken,
+                    scrollRequest = pageScrollRequest,
                     onVisibleScopeChanged = { scope -> pageScope = scope; folderScope = scope },
                     onFirstVisibleFolderChanged = { selectionAnchorFolder = it },
                     onMediaScrollPositionChanged = { index, offset ->
@@ -2931,7 +3012,7 @@ fun AlbumApp(
                         selectedFolders = selectedFolders + albums.map { it.name }
                     },
                     onAlbumSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
-                    onRefresh = { requestMediaScan(false) },
+                    onRefresh = { refreshLibrary() },
                     openedFolder = openedFolder,
                     onOpenedFolderChange = { folder -> if (folder != null && selectionMode && selectingFolders) { selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder } else openFolder(folder) },
                     sharedElementEnabled = tab == selectedTab,
@@ -2963,6 +3044,7 @@ fun AlbumApp(
                     scrollToTopToken = scrollToTopToken,
                     scrollToUri = viewerScrollUri,
                     scrollToToken = viewerScrollToken,
+                    scrollRequest = pageScrollRequest,
                     onScrollPositionChanged = { index, offset ->
                         timelineFirstVisibleItem = index
                         timelineFirstVisibleOffset = offset
@@ -2988,7 +3070,7 @@ fun AlbumApp(
                     },
                     onSelectionGestureStartMedia = { pressed -> selectionGestureActive = true; freezeSelectionSort(); selectingFolders = false; selectedUris = selectedUris + pressed.uri.toString() },
                     onSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
-                    onRefresh = { requestMediaScan(false) },
+                    onRefresh = { refreshLibrary() },
                     sharedElementEnabled = tab == selectedTab,
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,
@@ -3062,6 +3144,7 @@ fun AlbumApp(
                     scrollToTopToken = scrollToTopToken,
                     scrollToUri = viewerScrollUri,
                     scrollToToken = viewerScrollToken,
+                    scrollRequest = pageScrollRequest,
                     onVisibleScopeChanged = { scope -> pageScope = scope; folderScope = scope },
                     favoriteUris = favoriteUris,
                     showFavoriteBadge = showFavoriteBadge,

@@ -1,5 +1,19 @@
 # Album Changelog
 
+## v1.1.79 - 2026-09-16 (local signed build)
+
+- MPG/AVI now really reach the main player. The player no longer probes the platform extractor before starting (that probe sent AVI/MPEG files straight to the compatible player whenever the platform reported a codec the codec list did not offer back), and the "no playable video" guard was fixed: it used `Tracks.Group.isTrackSupported`, which only turns true once the renderer has already handled the track, so a perfectly playable AVI was judged undecodable at the first track report.
+- MPEG-4 Part 2 video (DivX/Xvid/FMP4 in AVI) now prefers the software decoder, because AVI carries no codec specific data and several hardware decoders refuse to start without it.
+- Decoders hidden behind the vendor "special-codec" feature are now offered to the player when the regular list is empty. On the test phone the MPEG-2 decoder is marked that way, so MPEG-1/2 `.mpg` files used to be reported as "no decoder" and fell back; they now play in the main player.
+- The slideshow queue has its play button back. The top bar only rendered its action capsule on pages with a search field, and the slideshow queue hides the search field, so the button never appeared.
+- Tapping the bottom-bar icon of the page you are already on scrolls to the top again: the folder grid never received the scroll token, and the Timeline did not forward it to either of its grids.
+- The search page starts at the top instead of somewhere in the middle of the clamped list, and leaving it clears the field (the entered query is no longer remembered) and returns to the position the page had before searching. Deleting inside the search page re-anchors the page instead of dropping to the bottom.
+- Tools drag follows the finger: the drag state is bound to the entry (`key`) instead of the slot, and the row height is measured instead of the previous hard-coded 72 px, which was roughly a third of a real row.
+- The P page loads on first entry (the reload effect now also keys on the selected tab) and pull-to-refresh only re-reads MediaStore, while the full storage walk stays on the "扫描刷新" menu entry, so pulling no longer waits for a complete DCIM/Pictures/Movies/Downloads scan.
+- APK: `app/release/app-release.apk` (arm64-v8a split)
+- SHA-256: `B434613D95B9AF8792027A4E511CAD8AD6FB7A7F4EDC3915618D79C728803E92`
+- Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug`, `assembleRelease` and the `MainPlayerContainerTest` instrumentation test passed. On the test phone an MPEG-1 `.mpg` from the user's library now opens in the main player, while DivX AVIs are still handed over because the device's only MPEG-4 decoder fails on them at decode time.
+
 ## v1.1.69 - 2026-09-15 (local signed build)
 
 - AVI and MPEG program streams are back in the main player. Media3's own AVI extractor and MPEG-2 program stream extractor handle `.avi`, `.divx`, `.xvid` and MPEG-2 `.mpg`/`.mpeg`/`.vob` files, and a new extractor parses MPEG-1 program streams, whose pack and PES headers (0xFF stuffing, buffer scale and size, `0010` clock reference and PTS/DTS) Media3 cannot read at all.

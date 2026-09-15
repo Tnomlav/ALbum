@@ -165,6 +165,60 @@ fun VaultTopBar(
                     }
                 }
             }
+            // The page action (a capsule like the wallpaper page's apply
+            // button, or the favourite filter when there is no action) belongs
+            // to every page, not only to pages that show a search field. The
+            // slideshow queue hides the search field and lost its play button
+            // because of that.
+            val actionContent: @Composable () -> Unit = {
+                if (actionLabel != null && onActionClick != null) {
+                    if (actionCapsule) {
+                        Box(
+                            modifier = Modifier
+                                .padding(start = actionStartPadding)
+                                .height(34.dp)
+                                .widthIn(min = 48.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(
+                                    if (actionEnabled) actionColor.copy(alpha = if (destructiveAction) .14f else .12f)
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)
+                                )
+                                .clickable(enabled = actionEnabled, onClick = onActionClick)
+                                .padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                actionLabel,
+                                color = if (actionEnabled) actionColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    } else {
+                        Text(
+                            actionLabel,
+                            modifier = Modifier.padding(start = actionStartPadding).height(48.dp).widthIn(min = 44.dp)
+                                .clickable(enabled = actionEnabled, onClick = onActionClick),
+                            color = if (actionEnabled) actionColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                } else if (favoriteVisible) {
+                    IconButton(
+                        onClick = onFavoriteClick,
+                        modifier = Modifier.height(48.dp).width(if (searchModeLabels.isNotEmpty()) 44.dp else 48.dp)
+                    ) {
+                        Icon(
+                            if (favoriteActive) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                            contentDescription = appText(if (favoriteActive) "显示全部" else "仅显示收藏", english),
+                            tint = if (favoriteActive) androidx.compose.ui.graphics.Color(0xFFFFD60A) else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
             if (searchEnabled) {
                 Row(
                     modifier = Modifier.weight(1f).height(48.dp)
@@ -228,53 +282,7 @@ fun VaultTopBar(
                         )
                     }
                 }
-                if (actionLabel != null && onActionClick != null) {
-                    if (actionCapsule) {
-                        Box(
-                            modifier = Modifier
-                                .padding(start = actionStartPadding)
-                                .height(34.dp)
-                                .widthIn(min = 48.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(
-                                    if (actionEnabled) actionColor.copy(alpha = if (destructiveAction) .14f else .12f)
-                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f)
-                                )
-                                .clickable(enabled = actionEnabled, onClick = onActionClick)
-                                .padding(horizontal = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                actionLabel,
-                                color = if (actionEnabled) actionColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
-                    } else {
-                        Text(
-                            actionLabel,
-                            modifier = Modifier.padding(start = actionStartPadding).height(48.dp).widthIn(min = 44.dp)
-                                .clickable(enabled = actionEnabled, onClick = onActionClick),
-                            color = if (actionEnabled) actionColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                } else {
-                    if (favoriteVisible) IconButton(
-                        onClick = onFavoriteClick,
-                        modifier = Modifier.height(48.dp).width(if (searchModeLabels.isNotEmpty()) 44.dp else 48.dp)
-                    ) {
-                        Icon(
-                            if (favoriteActive) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                            contentDescription = appText(if (favoriteActive) "显示全部" else "仅显示收藏", english),
-                            tint = if (favoriteActive) androidx.compose.ui.graphics.Color(0xFFFFD60A) else MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
+                actionContent()
             } else {
                 // Keep the actions anchored to the right when a search is
                 // suspended after back navigation.
@@ -287,19 +295,11 @@ fun VaultTopBar(
                         Icon(Icons.Outlined.Search, contentDescription = appText("搜索", english))
                     }
                 }
-                // Keep the favorite filter available when a search is
-                // suspended. The normal page hides the search field in that
-                // state, but hiding this action makes favorites appear lost.
-                if (favoriteVisible) IconButton(
-                    onClick = onFavoriteClick,
-                    modifier = Modifier.height(48.dp).width(48.dp)
-                ) {
-                    Icon(
-                        if (favoriteActive) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                        contentDescription = appText(if (favoriteActive) "显示全部" else "仅显示收藏", english),
-                        tint = if (favoriteActive) androidx.compose.ui.graphics.Color(0xFFFFD60A) else MaterialTheme.colorScheme.onSurface
-                    )
-                }
+                // Keep the favorite filter (or the page action) available when
+                // a search is suspended. The normal page hides the search field
+                // in that state, but hiding this action makes favorites appear
+                // lost and drops the slideshow queue's play button.
+                actionContent()
             }
             Box {
                 IconButton(

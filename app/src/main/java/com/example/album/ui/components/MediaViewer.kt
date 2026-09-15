@@ -283,17 +283,13 @@ fun MediaViewer(
         label = "viewer-image-background"
     )
     var videoMiniMode by remember { mutableStateOf(false) }
-    // Start on the Media3 player (so its brightness/volume state is not torn
-    // down by a probe) and only switch to LibVLC when the format or the
-    // platform decoder requires it.
+    // The main player always gets the first chance. Probing the platform
+    // extractor first used to send AVI/MPEG files straight to LibVLC on phones
+    // whose MediaExtractor reports a codec the codec list does not offer back,
+    // even though Media3's own extractors and the device decoders handle the
+    // file perfectly well.
     var useVlcPlayer by remember(current.uri) {
         mutableStateOf(current.isVideo && requiresVlcPlayback(current))
-    }
-    LaunchedEffect(current.uri) {
-        if (!current.isVideo) return@LaunchedEffect
-        if (!requiresVlcPlayback(current) && platformLacksVideoDecoder(context, current)) {
-            useVlcPlayer = true
-        }
     }
     // Formats/codecs the platform player cannot handle are replayed with the
     // bundled LibVLC player.

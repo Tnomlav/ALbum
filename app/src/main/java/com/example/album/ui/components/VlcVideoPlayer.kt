@@ -83,45 +83,6 @@ import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
 
 /**
- * True when the platform has no decoder for the video track (or cannot even
- * parse the container). Such files are played with LibVLC instead.
- *
- * A container the platform extractors cannot parse is *not* a reason to skip
- * the main player: Media3 ships its own AVI and MPEG-PS extractors, so those
- * files are demuxed by ExoPlayer even though `MediaExtractor` refuses them.
- * Only a container that parses fine but has no available video decoder is
- * routed to LibVLC up front.
- */
-internal suspend fun platformLacksVideoDecoder(context: Context, item: MediaItem): Boolean =
-    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        runCatching {
-            val extractor = android.media.MediaExtractor()
-            try {
-                val descriptor = context.contentResolver.openFileDescriptor(item.uri, "r")
-                if (descriptor != null) {
-                    descriptor.use { extractor.setDataSource(it.fileDescriptor) }
-                } else {
-                    extractor.setDataSource(context, item.uri, null)
-                }
-                for (index in 0 until extractor.trackCount) {
-                    val format = extractor.getTrackFormat(index)
-                    val mime = format.getString(android.media.MediaFormat.KEY_MIME) ?: continue
-                    if (!mime.startsWith("video/")) continue
-                    val decoder = android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS)
-                        .findDecoderForFormat(format)
-                    if (decoder == null) return@runCatching true
-                }
-                // Audio-only items (or items whose container the platform cannot
-                // parse at all) still get the main player first; it either plays
-                // them or reports an error that switches to LibVLC.
-                false
-            } finally {
-                runCatching { extractor.release() }
-            }
-        }.getOrDefault(false)
-    }
-
-/**
  * Containers that neither Media3 nor the Android platform extractors can
  * demux. They are routed to the bundled LibVLC player.
  *

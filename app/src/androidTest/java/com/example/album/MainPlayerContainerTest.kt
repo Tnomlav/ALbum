@@ -110,7 +110,10 @@ class MainPlayerContainerTest {
                     group.getTrackFormat(0).sampleMimeType
                 },
                 hasSupportedVideoTrack = videoGroups.any { group ->
-                    (0 until group.length).any { group.isTrackSupported(it) }
+                    (0 until group.length).any { index ->
+                        val support = group.getTrackSupport(index)
+                        support != C.FORMAT_UNSUPPORTED_TYPE && support != C.FORMAT_UNSUPPORTED_SUBTYPE
+                    }
                 }
             )
             println(
@@ -118,7 +121,8 @@ class MainPlayerContainerTest {
                     reported.groups.joinToString { group ->
                         "type=${group.type} length=${group.length} " +
                             "mime=${group.getTrackFormat(0).sampleMimeType} " +
-                            "supported=${(0 until group.length).any { group.isTrackSupported(it) }}"
+                            "support=${(0 until group.length).joinToString(",") { group.getTrackSupport(it).toString() }} " +
+                            "fmt=${group.getTrackFormat(0)}"
                     }
             )
             return result
