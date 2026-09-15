@@ -238,7 +238,13 @@ fun MediaViewer(
     onEnterPictureInPicture: () -> Boolean = { false },
     onAutoEnterPictureInPictureChange: (Boolean, Int, Int) -> Unit = { _, _, _ -> },
     slideshowActive: Boolean = false,
-    slideshowIntervalMs: Long = 3_000L
+    slideshowIntervalMs: Long = 3_000L,
+    /**
+     * Open straight into the immersive full-screen page. The slideshow's play
+     * button uses this so playback starts immediately; opening a picture from
+     * the queue keeps the normal preview first.
+     */
+    startImmersive: Boolean = false
 ) {
     val context = LocalContext.current
     val showRenameExtension = remember { context.getSharedPreferences("album_settings", android.content.Context.MODE_PRIVATE).getBoolean("rename_show_extension", false) }
@@ -274,7 +280,7 @@ fun MediaViewer(
     var imageScale by remember { mutableFloatStateOf(1f) }
     var imageOffset by remember { mutableStateOf(Offset.Zero) }
     var imageViewport by remember { mutableStateOf(IntSize.Zero) }
-    var imageControlsVisible by remember { mutableStateOf(true) }
+    var imageControlsVisible by remember { mutableStateOf(!startImmersive) }
     // Fade the background with the same timing as the controls so entering and
     // leaving full screen never looks out of step.
     val imageFullScreenBackground by androidx.compose.animation.animateColorAsState(

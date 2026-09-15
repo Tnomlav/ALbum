@@ -117,6 +117,12 @@ fun VaultTopBar(
     chromeAlpha: Float = 1f
     ,
     titleSwitch: List<String>? = null,
+    /**
+     * Render the page-type switch with the trailing actions instead of at the
+     * leading edge. The P page's switch drives its search field, so it belongs
+     * on that side of the bar.
+     */
+    titleSwitchAtEnd: Boolean = false,
     onTitleSwitchChange: (Int) -> Unit = {}
 ) {
     val english = LocalAppEnglish.current
@@ -170,7 +176,7 @@ fun VaultTopBar(
                         }
                     }
                 }
-            } else if (titleSwitch != null && titleSwitch.isNotEmpty()) {
+            } else if (titleSwitch != null && titleSwitch.isNotEmpty() && !titleSwitchAtEnd) {
                 TitleSwitchMark(titleSwitch, selectedSearchMode, onTitleSwitchChange, english)
             } else {
                 Row(
@@ -331,6 +337,11 @@ fun VaultTopBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
+                if (titleSwitch != null && titleSwitch.isNotEmpty() && titleSwitchAtEnd) {
+                    Box(Modifier.padding(end = 6.dp)) {
+                        TitleSwitchMark(titleSwitch, selectedSearchMode, onTitleSwitchChange, english)
+                    }
+                }
                 actionContent()
                 Box {
                     IconButton(

@@ -1,5 +1,15 @@
 # Album Changelog
 
+## v1.1.87 - 2026-09-16 (local signed build)
+
+- The P page's artist/Tag switch moved to the right side of the bar, next to the favourite and overflow buttons, where the search it controls lives; the page keeps its "Pixiv" title on the left.
+- The slideshow's play button now opens the viewer straight into full screen, so playback starts immediately. Opening a picture from the queue still goes to the preview page first, and tapping it enters full screen and starts the slideshow there.
+- The slideshow settings dialog is now the same shape as the wallpaper settings sheet: an AlertDialog with 幻灯片设置 as its title, value rows that open the wheel sheet (interval, animation), a switch for shuffle, and 应用 / 取消 buttons.
+- Tapping the bottom bar icon of the current page refreshes when the page is already at the top; "at the top" is now tracked per visible grid (the folder list and the grid inside a folder), which is why the refresh never fired before, and a short toast makes the refresh visible.
+- APK: `app/release/app-release.apk` (arm64-v8a split)
+- SHA-256: `ADBC62CF65E3395EEAB152FB9018B63DC0239082E2779D304EE98D28EA3B70E6`
+- Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug` and `assembleRelease` passed. On the emulator the P page switch now sits at x=936..1034 (was x=169..267) with the title on the left, and the slideshow settings dialog renders with the shared dialog components.
+
 ## v1.1.86 - 2026-09-16 (local signed build)
 
 - The P page no longer starts a SAF walk every time it is opened: entering it again keeps the snapshot that is already loaded, and a walk only starts on the first visit, on an explicit refresh, or when the local library changes. Reload requests are debounced so a library refresh and an explicit request no longer cancel and restart a walk that just began.

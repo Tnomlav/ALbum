@@ -255,7 +255,7 @@ private fun RowScope.TypeChoice(label: String, selected: Boolean, onClick: () ->
 }
 
 @Composable
-private fun SettingChoiceRow(label: String, value: String, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun SettingChoiceRow(label: String, value: String, enabled: Boolean = true, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -291,7 +291,7 @@ private fun soundLabel(sound: WallpaperSound, english: Boolean): String = when (
 }
 
 @Composable
-private fun ChoiceDialog(
+internal fun ChoiceDialog(
     title: String,
     options: List<String>,
     selectedIndex: Int,
@@ -366,7 +366,7 @@ private fun FrequencyDialog(
 }
 
 @Composable
-private fun SettingSwitch(label: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
+internal fun SettingSwitch(label: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, modifier = Modifier.weight(1f), fontSize = 13.sp, color = if (enabled) androidx.compose.material3.MaterialTheme.colorScheme.onSurface else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f))
         Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)

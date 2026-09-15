@@ -151,7 +151,7 @@ import com.example.album.ui.components.VaultApplyChoiceSheet
 import com.example.album.ui.components.VaultSortChoiceSheet
 import com.example.album.ui.components.VaultSortWheelSheet
 import com.example.album.ui.components.VaultLayoutWheelSheet
-import com.example.album.ui.components.VaultSlideshowSettingsSheet
+import com.example.album.ui.screens.SlideshowSettingsSheet
 import com.example.album.ui.components.VaultWheelChoiceSheet
 import com.example.album.ui.components.VaultDateSheet
 import com.example.album.ui.components.VaultTextInputDialog
@@ -669,6 +669,9 @@ fun AlbumApp(
     var slideshowQueueFolderMode by rememberSaveable { mutableStateOf(false) }
     var slideshowQueueFolderLayout by rememberSaveable { mutableStateOf(MediaLayout.Grid) }
     var slideshowQueueOpenedFolder by rememberSaveable { mutableStateOf<String?>(null) }
+    // True while the slideshow was started from the play button: the viewer
+    // then opens in full screen and begins playing immediately.
+    var slideshowStartImmersive by remember { mutableStateOf(false) }
     var showSlideshowSettings by remember { mutableStateOf(false) }
     var suspendedSearchQuery by rememberSaveable { mutableStateOf<String?>(null) }
     var searchOpen by rememberSaveable { mutableStateOf(true) }
@@ -699,6 +702,11 @@ fun AlbumApp(
     var selectionMediaFirstVisibleOffset by remember { mutableIntStateOf(0) }
     var timelineFirstVisibleItem by remember { mutableIntStateOf(0) }
     var timelineFirstVisibleOffset by remember { mutableIntStateOf(0) }
+    // Whether the page that is on screen is scrolled to its very top. Tracked
+    // per page (and per grid inside a folder), because a stored index from the
+    // folder list says nothing about the media grid that is actually visible.
+    var albumPageAtTop by remember { mutableStateOf(true) }
+    var timelinePageAtTop by remember { mutableStateOf(true) }
 
     var folderScope by remember { mutableStateOf<List<MediaItem>?>(null) }
     // The list the current page displays, so the viewer pages through the same
@@ -2306,6 +2314,7 @@ fun AlbumApp(
                         viewerScope = items
                         viewerMedia = items.first()
                         selectedMedia = items.first()
+                        slideshowStartImmersive = true
                         // The queue page stays open behind the slideshow: the
                         // back gesture has to return to the queue, not to the
                         // Tools page it was started from.
@@ -2628,6 +2637,9 @@ fun AlbumApp(
                     } else null
                     else -> null
                 },
+                // The P page's switch controls its search, so it sits with the
+                // trailing actions instead of at the leading edge.
+                titleSwitchAtEnd = tab == MainTab.Pixiv,
                 onTitleSwitchChange = { index ->
                     if (tab == MainTab.Albums) {
                         val showVideos = index == 1
@@ -2782,10 +2794,8 @@ fun AlbumApp(
                                 return@clickable
                             }
                             val atTop = when (tab) {
-                                MainTab.Timeline ->
-                                    timelineFirstVisibleItem <= 0 && timelineFirstVisibleOffset <= 0
-                                MainTab.Albums, MainTab.Videos, MainTab.Pixiv ->
-                                    albumFirstVisibleItem <= 0 && albumFirstVisibleOffset <= 0
+                                MainTab.Timeline -> timelinePageAtTop
+                                MainTab.Albums, MainTab.Videos, MainTab.Pixiv -> albumPageAtTop
                                 else -> true
                             }
                             if (!atTop) {
@@ -2803,8 +2813,25 @@ fun AlbumApp(
                             } else {
                                 // Already at the top: a second tap refreshes.
                                 when (tab) {
-                                    MainTab.Pixiv -> requestPixivReload()
-                                    MainTab.Albums, MainTab.Videos, MainTab.Timeline -> refreshLibrary()
+                                    MainTab.Pixiv -> {
+                                        Toast.makeText(
+                                            context,
+                                            appText("正在刷新 P 页", english),
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        requestPixivReload()
+                                    }
+                                    MainTab.Albums, MainTab.Videos, MainTab.Timeline -> {
+                                        // Without a visible hint this refresh is
+                                        // indistinguishable from nothing
+                                        // happening on a full library.
+                                        Toast.makeText(
+                                            context,
+                                            appText("正在刷新媒体库", english),
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        refreshLibrary()
+                                    }
                                     else -> Unit
                                 }
                             }
@@ -3001,6 +3028,7 @@ fun AlbumApp(
                         albumFirstVisibleOffset = offset
                         selectionFolderFirstVisibleItem = index
                         selectionFolderFirstVisibleOffset = offset
+                        albumPageAtTop = index <= 0 && offset <= 0
                     },
                     initialMediaFirstVisibleItem = selectionMediaFirstVisibleItem,
                     initialMediaFirstVisibleOffset = selectionMediaFirstVisibleOffset,
@@ -3014,6 +3042,7 @@ fun AlbumApp(
                     onMediaScrollPositionChanged = { index, offset ->
                         selectionMediaFirstVisibleItem = index
                         selectionMediaFirstVisibleOffset = offset
+                        albumPageAtTop = index <= 0 && offset <= 0
                     },
                     onRequestPermission = requestPermission,
                     onOpenMedia = { item -> if (selectionMode) { val key = item.uri.toString(); selectedUris = if (key in selectedUris) selectedUris - key else selectedUris + key } else openMedia(item) },
@@ -3158,6 +3187,7 @@ fun AlbumApp(
                         timelineFirstVisibleOffset = offset
                         selectionMediaFirstVisibleItem = index
                         selectionMediaFirstVisibleOffset = offset
+                        timelinePageAtTop = index <= 0 && offset <= 0
                     },
                     jumpToDate = timelineJumpDate,
                     onJumpConsumed = { timelineJumpDate = null },
@@ -3368,6 +3398,7 @@ fun AlbumApp(
                             val slides = slideshowQueueSorted
                             selectionSlideshow = slides
                             viewerScope = slides
+                            slideshowStartImmersive = false
                             openMedia(item)
                         },
                         onRemove = { item ->
@@ -3456,6 +3487,10 @@ fun AlbumApp(
                             items = viewerItems,
                             slideshowActive = selectionSlideshow.isNotEmpty(),
                             slideshowIntervalMs = (albumSettings.getString("slideshow_interval", "3秒")?.filter(Char::isDigit)?.toLongOrNull() ?: 3L) * 1000L,
+                            // The play button starts in full screen, so the
+                            // slideshow runs right away; opening a picture from
+                            // the queue keeps the preview page first.
+                            startImmersive = slideshowStartImmersive && selectionSlideshow.isNotEmpty(),
                             useSharedElementTransition = true,
                             playbackResumeRequest = viewerPlaybackResume?.takeIf { it.uri == viewerItem.uri.toString() },
                             onPlaybackResumeConsumed = { requestId ->
@@ -3471,6 +3506,7 @@ fun AlbumApp(
                             onClose = {
                                 selectedMedia = null
                                 selectionSlideshow = emptyList()
+                                slideshowStartImmersive = false
                                 // Keep the viewer and source key composed for
                                 // the full shared-element return animation.
                                 scope.launch {
@@ -3569,7 +3605,10 @@ fun AlbumApp(
         )
     }
     if (showSlideshowSettings) {
-        VaultSlideshowSettingsSheet(onDismiss = { showSlideshowSettings = false })
+        SlideshowSettingsSheet(
+            preferences = albumSettings,
+            onDismiss = { showSlideshowSettings = false }
+        )
     }
     if (showSlideshowColumnDialog) {
         val options = (1..6).map { if (english) "$it columns" else "$it 列" }
