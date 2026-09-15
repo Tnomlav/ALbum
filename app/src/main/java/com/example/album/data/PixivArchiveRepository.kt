@@ -249,8 +249,19 @@ class PixivArchiveRepository(private val context: Context) {
         }.getOrDefault(false)
     }
 
-    suspend fun loadLibrary(fallbackDefaultItems: List<MediaItem>): PixivLibrarySnapshot = withContext(Dispatchers.IO) {
-        val snapshot = buildLibrary(fallbackDefaultItems)
+    /**
+     * Rebuilds the Pixiv library.
+     *
+     * Walking a SAF tree costs one IPC round trip per directory, so a large
+     * archive can take several seconds. [onProgress] is invoked with partial
+     * snapshots (throttled) while the walk runs, which lets the P page show
+     * folders as soon as they are read instead of waiting for the whole tree.
+     */
+    suspend fun loadLibrary(
+        fallbackDefaultItems: List<MediaItem>,
+        onProgress: (PixivLibrarySnapshot) -> Unit = {}
+    ): PixivLibrarySnapshot = withContext(Dispatchers.IO) {
+        val snapshot = buildLibrary(fallbackDefaultItems, onProgress)
         runCatching { writeLibraryCache(snapshot) }
         snapshot
     }
@@ -349,67 +360,103 @@ class PixivArchiveRepository(private val context: Context) {
         }
     }
 
-    private suspend fun buildLibrary(fallbackDefaultItems: List<MediaItem>): PixivLibrarySnapshot = withContext(Dispatchers.IO) {
+    private suspend fun buildLibrary(
+        fallbackDefaultItems: List<MediaItem>,
+        onProgress: (PixivLibrarySnapshot) -> Unit = {}
+    ): PixivLibrarySnapshot = withContext(Dispatchers.IO) {
         val preferences = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
         val showHiddenMedia = context.getSharedPreferences("album_settings", Context.MODE_PRIVATE)
             .getBoolean("show_hidden_media", false)
         val sourceUri = preferences.getString("source_uri", null)?.let(Uri::parse)
         val targetUri = preferences.getString("target_uri", null)?.let(Uri::parse)
         val tagsByUri = mutableMapOf<String, List<String>>()
-        val sourceFolderName = sourceUri
-            ?.let { treeDocumentFile(it)?.name?.takeIf(String::isNotBlank) }
-            ?: "Pixiv"
-        val defaultItems = sourceUri?.let { uri ->
-                treeDocumentFile(uri)?.let { root ->
-                buildList {
-                    collectLibraryImages(
-                        root,
-                        sourceFolderName,
-                        this,
-                        tagsByUri,
-                        loadTags = false,
-                        showHiddenMedia = showHiddenMedia
-                    )
-                }
-            }
-        } ?: fallbackDefaultItems.map { item ->
-            item.copy(folder = sourceFolderName)
+        val sourceRoot = sourceUri?.let { treeDocumentFile(it) }
+        val targetRoot = targetUri?.let { treeDocumentFile(it) }
+        val sourceFolderName = sourceRoot?.name?.takeIf(String::isNotBlank) ?: "Pixiv"
+        val artistFolders = runCatching { targetRoot?.listFiles() }.getOrNull().orEmpty()
+            .filter { it.isDirectory }
+        val archivedFolderNames = artistFolders
+            .mapNotNull { it.name?.takeIf(String::isNotBlank) }
+            .toSet()
+        val folderNames = setOf(sourceFolderName) + archivedFolderNames
+
+        val archivedItems = mutableListOf<MediaItem>()
+        val archivedLock = Any()
+        var lastPublishedAt = 0L
+
+        fun snapshotOf(source: List<MediaItem>): PixivLibrarySnapshot {
+            val archived = synchronized(archivedLock) { archivedItems.toList() }
+            val archivedUris = archived.mapTo(hashSetOf()) { it.uri.toString() }
+            return PixivLibrarySnapshot(
+                items = (source.filterNot { it.uri.toString() in archivedUris } + archived)
+                    .distinctBy { it.uri.toString() },
+                tagsByUri = tagsByUri,
+                folderNames = folderNames,
+                sourceFolderName = sourceFolderName,
+                sourceConfigured = sourceUri != null,
+                targetConfigured = targetUri != null
+            )
         }
-        val archivedItems = targetUri?.let { uri ->
-            treeDocumentFile(uri)?.let { root ->
-                buildList {
-                    runCatching { root.listFiles() }.getOrDefault(emptyArray())
-                        .filter { it.isDirectory }
-                        .forEach { artistFolder ->
-                            val artistName = artistFolder.name?.takeIf { it.isNotBlank() } ?: return@forEach
+
+        fun publish(source: List<MediaItem>, force: Boolean = false) {
+            val now = SystemClock.elapsedRealtime()
+            if (!force && now - lastPublishedAt < LIBRARY_PROGRESS_INTERVAL_MS) return
+            lastPublishedAt = now
+            onProgress(snapshotOf(source))
+        }
+
+        val sourceItems: List<MediaItem>
+        if (sourceRoot != null) {
+            val collected = mutableListOf<MediaItem>()
+            // The folder list is known before a single file is read, so it can
+            // be handed to the page immediately; the items follow as they are
+            // discovered.
+            publish(collected, force = true)
+            collectLibraryImages(
+                sourceRoot,
+                sourceFolderName,
+                collected,
+                tagsByUri,
+                loadTags = false,
+                showHiddenMedia = showHiddenMedia,
+                onCollected = { publish(collected) }
+            )
+            sourceItems = collected.toList()
+        } else {
+            sourceItems = fallbackDefaultItems.map { item -> item.copy(folder = sourceFolderName) }
+        }
+        publish(sourceItems, force = true)
+
+        if (artistFolders.isNotEmpty()) {
+            // Artist folders are independent trees. Walking them one by one was
+            // the main reason a large archive took so long to appear, so a few
+            // are read at the same time. The permit count stays low because
+            // every directory lookup is a binder call into the provider.
+            coroutineScope {
+                val semaphore = Semaphore(LIBRARY_ARCHIVE_CONCURRENCY)
+                artistFolders.map { artistFolder ->
+                    async {
+                        semaphore.withPermit {
+                            val artistName = artistFolder.name?.takeIf { it.isNotBlank() }
+                                ?: return@withPermit
+                            val collected = mutableListOf<MediaItem>()
                             collectLibraryImages(
                                 artistFolder,
                                 artistName,
-                                this,
+                                collected,
                                 tagsByUri,
                                 loadTags = false,
                                 showHiddenMedia = showHiddenMedia
                             )
+                            if (collected.isEmpty()) return@withPermit
+                            synchronized(archivedLock) { archivedItems.addAll(collected) }
+                            publish(sourceItems)
                         }
-                }
+                    }
+                }.awaitAll()
             }
-        }.orEmpty()
-        val archivedFolderNames = targetUri?.let { uri ->
-            treeDocumentFile(uri)?.listFiles().orEmpty()
-                .filter { it.isDirectory }
-                .mapNotNull { it.name?.takeIf(String::isNotBlank) }
-                .toSet()
-        }.orEmpty()
-        val archivedUris = archivedItems.mapTo(hashSetOf()) { it.uri.toString() }
-        PixivLibrarySnapshot(
-            items = (defaultItems.filterNot { it.uri.toString() in archivedUris } + archivedItems)
-                .distinctBy { it.uri.toString() },
-            tagsByUri = tagsByUri,
-            folderNames = setOf(sourceFolderName) + archivedFolderNames,
-            sourceFolderName = sourceFolderName,
-            sourceConfigured = sourceUri != null,
-            targetConfigured = targetUri != null
-        )
+        }
+        snapshotOf(sourceItems).also { publish(sourceItems, force = true) }
     }
 
     suspend fun scan(
@@ -715,7 +762,8 @@ class PixivArchiveRepository(private val context: Context) {
         tagsByUri: MutableMap<String, List<String>>,
         siblingSidecars: Map<String, DocumentFile> = emptyMap(),
         loadTags: Boolean = true,
-        showHiddenMedia: Boolean = false
+        showHiddenMedia: Boolean = false,
+        onCollected: (() -> Unit)? = null
     ) {
         // SAF can expose MediaStore trashed files with their physical
         // ".trashed-*" name. Pixiv's library is loaded separately from the
@@ -728,8 +776,12 @@ class PixivArchiveRepository(private val context: Context) {
                 .associateBy { it.name.orEmpty() }
             children.filterNot { it.name.orEmpty().endsWith(".pixiv.json", ignoreCase = true) }
                 .forEach { child ->
-                    collectLibraryImages(child, folderName, output, tagsByUri, sidecars, loadTags, showHiddenMedia)
+                    collectLibraryImages(
+                        child, folderName, output, tagsByUri, sidecars, loadTags, showHiddenMedia, onCollected
+                    )
                 }
+            // Empty directories would otherwise never report progress.
+            onCollected?.invoke()
             return
         }
         val mime = file.type ?: context.contentResolver.getType(file.uri).orEmpty()
@@ -747,6 +799,7 @@ class PixivArchiveRepository(private val context: Context) {
             isDocument = true
         )
         output += item
+        onCollected?.invoke()
         if (loadTags) {
             val sidecar = siblingSidecars["${file.name}.pixiv.json"]
             sidecar?.let { archiveSidecarCache[item.uri.toString()] = it }
@@ -1245,6 +1298,16 @@ private val COMMON_PIXIV_FILENAME = Regex(
 private const val PROGRESS_UPDATE_INTERVAL_MS = 120L
 private const val PIXIV_METADATA_CONCURRENCY = 3
 private const val LIBRARY_CACHE_FILE = "pixiv_library_cache.json"
+
+/** How often the P page is handed a partial snapshot while the tree is read. */
+private const val LIBRARY_PROGRESS_INTERVAL_MS = 250L
+
+/**
+ * How many archived artist folders are walked at the same time. Each directory
+ * listing is a binder round trip, so a small number already hides the latency
+ * without flooding the document provider.
+ */
+private const val LIBRARY_ARCHIVE_CONCURRENCY = 4
 internal fun parsePixivFilename(filename: String): Pair<String, Int>? {
     val strict = STRICT_PIXIV_FILENAME.matchEntire(filename)
     if (strict != null) return strict.groupValues[1] to (strict.groupValues[2].toIntOrNull() ?: 0)

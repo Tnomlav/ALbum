@@ -118,12 +118,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem.Builder
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.example.album.data.MediaItem
 import com.example.album.playback.MediaPlaybackService
+import com.example.album.playback.albumExtractorsFactory
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appSeekText
 import com.example.album.ui.appText
@@ -137,6 +140,20 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.min
+
+/**
+ * True when the player reported at least one video track the device can
+ * actually decode.
+ *
+ * Media3's AVI and MPEG-PS extractors silently drop a stream they cannot
+ * describe, and a demuxed-but-undecodable track stays unsupported. Both cases
+ * have to be spotted here, otherwise the viewer would show a black screen.
+ */
+private fun Tracks.hasPlayableVideo(): Boolean =
+    groups.any { group ->
+        group.type == androidx.media3.common.C.TRACK_TYPE_VIDEO &&
+            (0 until group.length).any { group.isTrackSupported(it) }
+    }
 
 private fun frameAlignedPosition(player: ExoPlayer, requestedPositionMs: Long): Long {
     val duration = player.duration.takeIf { it > 0L }
@@ -500,8 +517,19 @@ internal fun Media3VideoPlayer(
         }
     }
     val playbackErrorCallback by rememberUpdatedState(onPlaybackError)
+    // The listener below outlives a single recomposition, so it reads the
+    // current item through a state holder instead of a captured value.
+    val fallbackProbeItem by rememberUpdatedState(current)
+    // Only one hand-over per item: the decoder probe, the track listener and
+    // the watchdog below can all notice the same unsupported codec.
+    var compatFallbackRequested by remember(videos) { mutableStateOf(false) }
     val player = remember(videos) {
         ExoPlayer.Builder(context, DefaultRenderersFactory(context).setEnableDecoderFallback(true))
+            // MPEG-1 program streams need the extra extractor; everything else
+            // keeps using the Media3 defaults.
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(context, albumExtractorsFactory())
+            )
             .build().apply {
                 setSeekParameters(SeekParameters.EXACT)
                 // Register the error listener before prepare(): decoder
@@ -510,7 +538,30 @@ internal fun Media3VideoPlayer(
                 addListener(object : Player.Listener {
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         android.util.Log.i("AlbumVlcFallback", "ExoPlayer error: ${error.errorCodeName}")
-                        playbackErrorCallback()
+                        if (!compatFallbackRequested) {
+                            compatFallbackRequested = true
+                            playbackErrorCallback()
+                        }
+                    }
+
+                    override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                        // Media3's AVI/MPEG-PS extractors drop a stream they
+                        // cannot describe instead of failing, so a file with
+                        // an unsupported codec would otherwise play as a black
+                        // screen with audio only.
+                        val item = fallbackProbeItem
+                        if (!usesMedia3LegacyContainer(item)) return
+                        if (tracks.groups.isEmpty() && playbackState != Player.STATE_READY) return
+                        if (!tracks.hasPlayableVideo()) {
+                            android.util.Log.i(
+                                "AlbumVlcFallback",
+                                "no video track decoded for ${item.name}"
+                            )
+                            if (!compatFallbackRequested) {
+                                compatFallbackRequested = true
+                                playbackErrorCallback()
+                            }
+                        }
                     }
                 })
                 val items = videos.map { item ->
@@ -529,6 +580,23 @@ internal fun Media3VideoPlayer(
     // already arrived. Keep the latest requested item independently so rapid
     // navigation does not repeatedly calculate from a stale player index.
     var requestedIndex by remember(player) { mutableIntStateOf(currentIndex) }
+
+    LaunchedEffect(current.uri) {
+        compatFallbackRequested = false
+        if (!current.isVideo || !usesMedia3LegacyContainer(current)) return@LaunchedEffect
+        // AVI/MPEG-PS files that Media3 opens but cannot describe produce no
+        // track at all: the player would sit on a black screen forever, so
+        // give it a moment and then hand the file to LibVLC.
+        delay(4_000L)
+        if (compatFallbackRequested) return@LaunchedEffect
+        if (player.currentTracks.hasPlayableVideo()) return@LaunchedEffect
+        android.util.Log.i(
+            "AlbumVlcFallback",
+            "legacy container without a readable video track: ${current.name}"
+        )
+        compatFallbackRequested = true
+        playbackErrorCallback()
+    }
 
     fun showFloatingWindow() {
         if (floatingWindow?.isShowing == true) return

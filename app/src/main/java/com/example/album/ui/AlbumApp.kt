@@ -186,6 +186,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.yield
+import kotlinx.coroutines.channels.Channel
 import kotlin.coroutines.coroutineContext
 import kotlin.math.roundToInt
 
@@ -677,6 +678,9 @@ fun AlbumApp(
     var pixivFolderNames by remember { mutableStateOf(setOf("Pixiv")) }
     var pixivSourceFolderName by remember { mutableStateOf("Pixiv") }
     var pixivTagsByUri by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
+    // Bumped only when a full walk finishes. Partial snapshots during the walk
+    // update the grid but must not restart the (expensive) tag index build.
+    var pixivLibraryVersion by remember { mutableIntStateOf(0) }
     var pixivTagsLoading by remember { mutableStateOf(false) }
     var pixivPageRefreshing by remember { mutableStateOf(false) }
     var pixivRefreshKey by remember { mutableIntStateOf(0) }
@@ -833,14 +837,35 @@ fun AlbumApp(
                     pixivLibraryImages = cached.items
                     pixivFolderNames = cached.folderNames
                     pixivSourceFolderName = cached.sourceFolderName
+                    pixivLibraryVersion++
                 }
             }
-            val snapshot = pixivRepository.loadLibrary(defaultPixivImages)
+            // A full SAF walk can take several seconds. Partial snapshots are
+            // streamed through a conflated channel so folders appear as soon as
+            // they are read instead of all at the end.
+            val progress = Channel<com.example.album.data.PixivLibrarySnapshot>(Channel.CONFLATED)
+            val progressJob = scope.launch {
+                for (partial in progress) {
+                    if (generation != pixivReloadGeneration) break
+                    pixivLibraryImages = partial.items
+                    pixivFolderNames = partial.folderNames
+                    pixivSourceFolderName = partial.sourceFolderName
+                }
+            }
+            val snapshot = try {
+                pixivRepository.loadLibrary(defaultPixivImages) { partial ->
+                    progress.trySend(partial)
+                }
+            } finally {
+                progress.close()
+                progressJob.cancel()
+            }
             if (generation != pixivReloadGeneration) return
             pixivLibraryImages = snapshot.items
             pixivTagsByUri = snapshot.tagsByUri
             pixivFolderNames = snapshot.folderNames
             pixivSourceFolderName = snapshot.sourceFolderName
+            pixivLibraryVersion++
         } finally {
             if (generation == pixivReloadGeneration) pixivPageRefreshing = false
         }
@@ -875,10 +900,12 @@ fun AlbumApp(
         val allowedFolders = pixivFolderNames + pixivSourceFolderName
         pixivImages.filter { it.folder in allowedFolders }
     } }
-    LaunchedEffect(pixivSearchMode, pixivImages) {
+    LaunchedEffect(pixivSearchMode, pixivLibraryVersion, favoriteFilter) {
         // Load the tag index once for the current Pixiv library. Searching is
         // local filtering; tying this job to every keystroke cancels the
         // full read repeatedly on large archives and can leave no results.
+        // The key is the completed-walk version, not the image list, so the
+        // partial snapshots streamed while walking do not rebuild the index.
         if (pixivSearchMode == PixivSearchMode.Tag) {
             pixivTagsLoading = true
             try {

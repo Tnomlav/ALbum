@@ -85,6 +85,12 @@ import org.videolan.libvlc.util.VLCVideoLayout
 /**
  * True when the platform has no decoder for the video track (or cannot even
  * parse the container). Such files are played with LibVLC instead.
+ *
+ * A container the platform extractors cannot parse is *not* a reason to skip
+ * the main player: Media3 ships its own AVI and MPEG-PS extractors, so those
+ * files are demuxed by ExoPlayer even though `MediaExtractor` refuses them.
+ * Only a container that parses fine but has no available video decoder is
+ * routed to LibVLC up front.
  */
 internal suspend fun platformLacksVideoDecoder(context: Context, item: MediaItem): Boolean =
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -97,46 +103,72 @@ internal suspend fun platformLacksVideoDecoder(context: Context, item: MediaItem
                 } else {
                     extractor.setDataSource(context, item.uri, null)
                 }
-                var hasVideoTrack = false
                 for (index in 0 until extractor.trackCount) {
                     val format = extractor.getTrackFormat(index)
                     val mime = format.getString(android.media.MediaFormat.KEY_MIME) ?: continue
                     if (!mime.startsWith("video/")) continue
-                    hasVideoTrack = true
                     val decoder = android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS)
                         .findDecoderForFormat(format)
                     if (decoder == null) return@runCatching true
                 }
-                !hasVideoTrack
+                // Audio-only items (or items whose container the platform cannot
+                // parse at all) still get the main player first; it either plays
+                // them or reports an error that switches to LibVLC.
+                false
             } finally {
                 runCatching { extractor.release() }
             }
-        }.getOrDefault(true)
+        }.getOrDefault(false)
     }
 
 /**
- * Containers that the Android platform extractors (and therefore Media3)
- * cannot demux. They are routed to the bundled LibVLC player instead.
+ * Containers that neither Media3 nor the Android platform extractors can
+ * demux. They are routed to the bundled LibVLC player.
+ *
+ * AVI (RIFF) and MPEG-PS (.mpg/.mpeg/.vob/...) used to be listed here, but
+ * Media3's `AviExtractor` and `PsExtractor` read those containers, so they now
+ * play in the main player and only fall back to LibVLC if the codec inside is
+ * unsupported.
  */
 internal fun requiresVlcPlayback(item: MediaItem): Boolean {
     val mime = item.mimeType.lowercase()
     val name = item.name.lowercase()
     if (mime.startsWith("audio/")) return false
     val extensions = listOf(
-        ".avi", ".divx", ".xvid", ".wmv", ".asf", ".rmvb", ".rm",
-        ".mpg", ".mpeg", ".mpe", ".m1v", ".m2v", ".mpv", ".vob", ".ogm"
+        ".wmv", ".asf", ".rmvb", ".rm", ".ogm"
     )
+    return mime.contains("x-ms-wmv") ||
+        mime.contains("x-ms-asf") ||
+        mime.contains("vnd.rn-realmedia") ||
+        extensions.any { name.endsWith(it) }
+}
+
+/**
+ * Containers that Media3 demuxes with its own extractors (AVI, MPEG-PS)
+ * instead of the platform ones. ExoPlayer happily opens those files, but when
+ * the codec inside is unsupported it reports no error at all and stalls on a
+ * black screen, so the main player watches for a missing video track and hands
+ * these files to LibVLC.
+ */
+internal fun usesMedia3LegacyContainer(item: MediaItem): Boolean {
+    val mime = item.mimeType.lowercase()
+    if (mime.startsWith("audio/")) return false
+    val name = item.name.lowercase()
     return mime.contains("avi") ||
         mime.contains("x-msvideo") ||
         mime.contains("msvideo") ||
         mime.contains("divx") ||
-        mime.contains("x-ms-wmv") ||
-        mime.contains("x-ms-asf") ||
-        mime.contains("mpeg") ||
-        mime.contains("mp2p") ||
-        mime.contains("mp2t") ||
-        mime.contains("vnd.rn-realmedia") ||
-        extensions.any { name.endsWith(it) }
+        mime == "video/mp2p" ||
+        name.endsWith(".avi") ||
+        name.endsWith(".divx") ||
+        name.endsWith(".xvid") ||
+        name.endsWith(".mpg") ||
+        name.endsWith(".mpeg") ||
+        name.endsWith(".mpe") ||
+        name.endsWith(".m1v") ||
+        name.endsWith(".m2v") ||
+        name.endsWith(".mpv") ||
+        name.endsWith(".vob")
 }
 
 /**
