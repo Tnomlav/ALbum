@@ -352,8 +352,13 @@ private fun ReorderableToolEntry(
                     onDrag = { change, amount ->
                         change.consume()
                         dragOffset += amount.y
-                        if (dragOffset > 56f) { dragOffset = 0f; onMoveDown() }
-                        if (dragOffset < -56f) { dragOffset = 0f; onMoveUp() }
+                        // Keep the row under the finger: when it swaps with a
+                        // neighbour the offset is reduced by one row instead of
+                        // being reset, so the drag stays continuous.
+                        val rowStep = 72f
+                        if (dragOffset > rowStep) { dragOffset -= rowStep; onMoveDown() }
+                        if (dragOffset < -rowStep) { dragOffset += rowStep; onMoveUp() }
+                        dragOffset = dragOffset.coerceIn(-rowStep * 1.4f, rowStep * 1.4f)
                     }
                 )
             }
@@ -655,6 +660,9 @@ fun AlbumApp(
     var folderReturnQuery by rememberSaveable { mutableStateOf<String?>(null) }
     var navReorderEnabled by remember { mutableStateOf(albumSettings.getBoolean("nav_reorder", false)) }
     var toolsReorderEnabled by remember { mutableStateOf(albumSettings.getBoolean("tools_reorder", false)) }
+    var scrollToTopToken by remember { mutableLongStateOf(0L) }
+    var searchReturnAlbumFirstVisibleItem by remember { mutableIntStateOf(0) }
+    var searchReturnMediaFirstVisibleItem by remember { mutableIntStateOf(0) }
     var toolsOrder by remember {
         mutableStateOf(
             albumSettings.getString("tools_order", null)
@@ -1192,6 +1200,11 @@ fun AlbumApp(
     }
 
     fun closeFolder() {
+        // Restore the scroll position the search results had before the folder
+        // was opened; otherwise the folder's position leaks into the search
+        // list and it lands near the end.
+        albumFirstVisibleItem = searchReturnAlbumFirstVisibleItem
+        selectionMediaFirstVisibleItem = searchReturnMediaFirstVisibleItem
         // Restore the search text and its applied form in the same snapshot:
         // the 500 ms debounce used for typing made the page flash the
         // unfiltered list (and its old scroll position) before searching again.
@@ -1211,7 +1224,11 @@ fun AlbumApp(
             folderReturnQuery = null
         } else {
             if (openedFolder == null) {
-                folderReturnQuery = query.takeIf { it.isNotBlank() } ?: suspendedSearchQuery
+                // Only a search that is still open is restored when the folder
+                // closes. A search the user already left must not re-open.
+                folderReturnQuery = if (searchOpen) query.takeIf { it.isNotBlank() } else null
+                searchReturnAlbumFirstVisibleItem = albumFirstVisibleItem
+                searchReturnMediaFirstVisibleItem = selectionMediaFirstVisibleItem
                 folderBackStack = listOf(folder)
             } else {
                 val currentPath = folderBackStack.ifEmpty { listOfNotNull(openedFolder) }
@@ -2097,6 +2114,7 @@ fun AlbumApp(
                 actionLabel = appText("播放", english),
                 actionEnabled = slideshowQueueMedia.isNotEmpty(),
                 actionCapsule = true,
+                actionStartPadding = 10.dp,
                 onActionClick = {
                     val items = slideshowQueueMedia.filterNot { it.isVideo }
                     if (items.isNotEmpty()) {
@@ -2420,7 +2438,7 @@ fun AlbumApp(
                 },
                 titleSwitch = if (tab == MainTab.Albums) {
                     listOf(
-                        if (english) "Albums" else "相册",
+                        if (english) "Pictures" else "图片",
                         if (english) "Videos" else "视频"
                     )
                 } else if (tab == MainTab.Timeline) {
@@ -2575,7 +2593,7 @@ fun AlbumApp(
                                 indication = null
                             ) {
                             if (android.os.SystemClock.elapsedRealtime() < suppressNavClickUntil) return@clickable
-                            selectMainTab(tab)
+                            if (tab == selectedTab) scrollToTopToken = System.nanoTime() else selectMainTab(tab)
                         },
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
@@ -2773,6 +2791,7 @@ fun AlbumApp(
                     initialMediaFirstVisibleItem = selectionMediaFirstVisibleItem,
                     initialMediaFirstVisibleOffset = selectionMediaFirstVisibleOffset,
                     onFirstVisibleMediaChanged = { selectionAnchorUri = it },
+                    scrollToTopToken = scrollToTopToken,
                     scrollToUri = viewerScrollUri,
                     scrollToToken = viewerScrollToken,
                     onVisibleScopeChanged = { scope -> pageScope = scope; folderScope = scope },
@@ -2849,6 +2868,7 @@ fun AlbumApp(
                     initialMediaFirstVisibleItem = selectionMediaFirstVisibleItem,
                     initialMediaFirstVisibleOffset = selectionMediaFirstVisibleOffset,
                     onFirstVisibleMediaChanged = { selectionAnchorUri = it },
+                    scrollToTopToken = scrollToTopToken,
                     scrollToUri = viewerScrollUri,
                     scrollToToken = viewerScrollToken,
                     onVisibleScopeChanged = { scope -> pageScope = scope; folderScope = scope },
@@ -2913,6 +2933,7 @@ fun AlbumApp(
                     initialFirstVisibleOffset = selectionMediaFirstVisibleOffset,
                     onFirstVisibleMediaChanged = { selectionAnchorUri = it },
                     onVisibleScopeChanged = { pageScope = it },
+                    scrollToTopToken = scrollToTopToken,
                     scrollToUri = viewerScrollUri,
                     scrollToToken = viewerScrollToken,
                     onScrollPositionChanged = { index, offset ->
@@ -3011,6 +3032,7 @@ fun AlbumApp(
                     pinnedAlbumName = pixivSourceFolderName,
                     albumQueryMatchesItems = pixivSearchMode != PixivSearchMode.Artist,
                     flatMode = pixivSearchMode == PixivSearchMode.Tag && appliedQuery.isNotBlank(),
+                    scrollToTopToken = scrollToTopToken,
                     scrollToUri = viewerScrollUri,
                     scrollToToken = viewerScrollToken,
                     onVisibleScopeChanged = { scope -> pageScope = scope; folderScope = scope },

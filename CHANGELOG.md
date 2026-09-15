@@ -1,5 +1,18 @@
 # Album Changelog
 
+## v1.1.67 - 2026-09-15 (local signed build)
+
+- The photo/video switch is narrower, and the Albums page now reads 图片 / 视频.
+- Tapping the bottom-bar icon of the page you are already on scrolls that page back to the top.
+- The Tools reorder drag follows the finger (the offset is carried across swaps instead of being reset).
+- The slideshow queue uses the wallpaper page's capsule action button, labelled 播放.
+- Preview to full screen now fades the background and the controls together.
+- Closing a folder keeps the search results at the scroll position they had before the folder was opened, and a search the user already left is no longer restored when a folder closes.
+- The cleanup entry was removed from Settings (it stays in the Tools page).
+- APK: `app/release/app-release.apk` (arm64-v8a split)
+- SHA-256: `D6784974C7314B647138251C571CBD016943BF3870051D0B86C02ED88BC298A5`
+- Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug` and `assembleRelease` passed. The Media3 AVI/MPEG-PS demuxers (item 9) and the remaining Pixiv folder-load and search scroll refinements are still outstanding.
+
 ## v1.1.66 - 2026-09-14 (local signed build)
 
 - The main media library now shows the previous snapshot immediately (same approach as the Pixiv page) and replaces it with the fresh MediaStore scan in the background.

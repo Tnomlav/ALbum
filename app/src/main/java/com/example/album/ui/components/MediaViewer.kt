@@ -275,6 +275,13 @@ fun MediaViewer(
     var imageOffset by remember { mutableStateOf(Offset.Zero) }
     var imageViewport by remember { mutableStateOf(IntSize.Zero) }
     var imageControlsVisible by remember { mutableStateOf(true) }
+    // Fade the background with the same timing as the controls so entering and
+    // leaving full screen never looks out of step.
+    val imageFullScreenBackground by androidx.compose.animation.animateColorAsState(
+        if (imageControlsVisible) Color.White else Color.Black,
+        androidx.compose.animation.core.tween(220),
+        label = "viewer-image-background"
+    )
     var videoMiniMode by remember { mutableStateOf(false) }
     // Start on the Media3 player (so its brightness/volume state is not torn
     // down by a probe) and only switch to LibVLC when the format or the
@@ -421,7 +428,7 @@ fun MediaViewer(
         Surface(
             Modifier.fillMaxSize(),
             color = when {
-                !current.isVideo && !imageControlsVisible -> Color.Black
+                !current.isVideo && !imageControlsVisible -> imageFullScreenBackground
                 !current.isVideo -> Color.White.copy(alpha = viewerBackgroundAlpha.value)
                 videoMiniMode -> Color.Transparent
                 else -> Color.Black
@@ -545,7 +552,7 @@ fun MediaViewer(
                                 scaleY = imageScale
                                 translationX = imageOffset.x
                                 translationY = imageOffset.y
-                            }.background(if (imageControlsVisible) Color.White else Color.Black)
+                            }.background(imageFullScreenBackground)
                         ) {
                             MediaThumbnail(
                                 shown,
@@ -553,7 +560,7 @@ fun MediaViewer(
                                 requestedSize = 360,
                                 showVideoMark = false,
                                 contentScale = ContentScale.Fit,
-                                backgroundColor = if (imageControlsVisible) Color.White else Color.Black,
+                                backgroundColor = imageFullScreenBackground,
                                 animateGif = true
                             )
                             run {

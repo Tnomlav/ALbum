@@ -93,6 +93,7 @@ fun TimelineScreen(
     onVisibleScopeChanged: (List<MediaItem>) -> Unit = {},
     scrollToUri: String? = null,
     scrollToToken: Long = 0L,
+    scrollToTopToken: Long = 0L,
     onClearQuery: () -> Unit = {}
 ) {
     val refreshing = loading || scanning
@@ -231,7 +232,8 @@ private fun OptimizedTimelineGrid(
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
     onFirstVisibleMediaChanged: (String?) -> Unit = {},
     scrollToUri: String? = null,
-    scrollToToken: Long = 0L
+    scrollToToken: Long = 0L,
+    scrollToTopToken: Long = 0L
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current
@@ -255,6 +257,9 @@ private fun OptimizedTimelineGrid(
             }
             index += group.value.size
         }
+    }
+    LaunchedEffect(scrollToTopToken) {
+        if (scrollToTopToken > 0L) state.animateScrollToItem(0)
     }
     LaunchedEffect(state, groupedDates) {
         snapshotFlow {
@@ -423,7 +428,8 @@ private fun AdaptiveTimeline(
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
     onFirstVisibleMediaChanged: (String?) -> Unit = {},
     scrollToUri: String? = null,
-    scrollToToken: Long = 0L
+    scrollToToken: Long = 0L,
+    scrollToTopToken: Long = 0L
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current

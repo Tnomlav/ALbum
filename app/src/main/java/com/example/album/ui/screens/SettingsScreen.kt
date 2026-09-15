@@ -231,28 +231,6 @@ fun SettingsScreen(
     } }
     Box(Modifier.fillMaxWidth().statusBarsPadding()) {
     LazyColumn(modifier = Modifier.fillMaxWidth(), state = listState, contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
-        item {
-            Surface(
-                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp)
-                    .heightIn(min = VaultDimens.CleanupEntryMinHeight).clickable {
-                        onOpenCleanup()
-                    },
-                color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
-                shape = RoundedCornerShape(7.dp)
-            ) {
-                Row(Modifier.padding(horizontal = 14.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(7.dp)) {
-                        Icon(Icons.Outlined.CleaningServices, null, tint = Color.White, modifier = Modifier.padding(11.dp).size(24.dp))
-                    }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(settingsText("清理", isEnglish), fontWeight = FontWeight.SemiBold)
-                        Text(settingsText("查找重复图片、管理回收站和排除文件夹", isEnglish), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.primary)
-                }
-            }
-        }
-
         item { SettingsHeader("主题") }
         item { ValueRow("主题模式", if (isEnglish && themeMode == "自动") "System" else themeMode) { choose("主题模式", "theme_mode", listOf("自动", "浅色", "深色"), themeMode) { themeMode = it; onThemeModeChange(it) } } }
         item { ThemeColorRow(themeAccent.label) { showThemeColors = true } }

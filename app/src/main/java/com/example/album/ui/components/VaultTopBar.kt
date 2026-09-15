@@ -127,19 +127,19 @@ fun VaultTopBar(
                         .clip(RoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.primary.copy(alpha = .14f))
                         .clickable { onTitleSwitchChange((index + 1) % titleSwitch.size) }
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         Icons.Outlined.SwapHoriz,
                         contentDescription = appText("切换图片和视频", english),
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.height(20.dp)
+                        modifier = Modifier.height(17.dp)
                     )
                     Text(
                         titleSwitch[index],
-                        fontSize = 16.sp,
+                        fontSize = 14.sp,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,

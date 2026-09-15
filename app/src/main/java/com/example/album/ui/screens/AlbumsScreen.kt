@@ -122,6 +122,7 @@ fun AlbumsScreen(
     onVisibleScopeChanged: (List<MediaItem>?) -> Unit = {},
     scrollToUri: String? = null,
     scrollToToken: Long = 0L,
+    scrollToTopToken: Long = 0L,
     sharedElementEnabled: Boolean = true,
     onOpenPixivArchive: (() -> Unit)? = null,
     pinnedAlbumName: String? = null,
@@ -276,6 +277,7 @@ fun AlbumsScreen(
                     FolderGrid(shownAlbum, folderColumns, layout, refreshing = refreshing, onOpenMedia = onOpenMedia, onLongPressMedia = onLongPressMedia, onSelectionGestureStartMedia = onSelectionGestureStartMedia, onBatchSelectMedia = onBatchSelectMedia, onSelectionGestureEnd = onSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, onOpenPixivArchive = onOpenPixivArchive, favoriteUris = favoriteUris, showFavoriteBadge = showFavoriteBadge, selectionPreview = selectionPreview, selectedUris = selectedUris, initialFirstVisibleItem = initialMediaFirstVisibleItem, initialFirstVisibleOffset = initialMediaFirstVisibleOffset, onScrollPositionChanged = onMediaScrollPositionChanged,
                     scrollToUri = scrollToUri,
                     scrollToToken = scrollToToken,
+                    scrollToTopToken = scrollToTopToken,
                     onFirstVisibleMediaChanged = onFirstVisibleMediaChanged)
                 } else {
                     AlbumGrid(albums, albumColumns, refreshing = refreshing, onOpenAlbum = onOpenedFolderChange, onLongPressAlbum = onLongPressAlbum, onSelectionGestureStartAlbum = onSelectionGestureStartAlbum, onBatchSelectAlbums = onBatchSelectAlbums, onSelectionGestureEnd = onAlbumSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, favoriteUris = favoriteUris, selectionPreview = selectionPreview, selectedFolders = selectedFolders, initialFirstVisibleItem = initialAlbumFirstVisibleItem, initialFirstVisibleOffset = initialAlbumFirstVisibleOffset, onScrollPositionChanged = onAlbumScrollPositionChanged, onFirstVisibleFolderChanged = onFirstVisibleFolderChanged)
@@ -286,13 +288,16 @@ fun AlbumsScreen(
 }
 
 @Composable
-private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolean, onOpenAlbum: (String) -> Unit, onLongPressAlbum: (MediaAlbum, Int, Int) -> Unit, onSelectionGestureStartAlbum: ((MediaAlbum) -> Unit)?, onBatchSelectAlbums: (List<MediaAlbum>) -> Unit, onSelectionGestureEnd: () -> Unit, onRefresh: () -> Unit, sharedElementEnabled: Boolean = true, favoriteUris: Set<String> = emptySet(), selectionPreview: Boolean = false, selectedFolders: Set<String> = emptySet(), initialFirstVisibleItem: Int = 0, initialFirstVisibleOffset: Int = 0, onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }, onFirstVisibleFolderChanged: (String?) -> Unit = {}) {
+private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolean, onOpenAlbum: (String) -> Unit, onLongPressAlbum: (MediaAlbum, Int, Int) -> Unit, onSelectionGestureStartAlbum: ((MediaAlbum) -> Unit)?, onBatchSelectAlbums: (List<MediaAlbum>) -> Unit, onSelectionGestureEnd: () -> Unit, onRefresh: () -> Unit, sharedElementEnabled: Boolean = true, favoriteUris: Set<String> = emptySet(), selectionPreview: Boolean = false, selectedFolders: Set<String> = emptySet(), initialFirstVisibleItem: Int = 0, initialFirstVisibleOffset: Int = 0, onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }, onFirstVisibleFolderChanged: (String?) -> Unit = {}, scrollToTopToken: Long = 0L) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
     val gridState = rememberLazyGridState(
         initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
         initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
     )
+    LaunchedEffect(scrollToTopToken) {
+        if (scrollToTopToken > 0L) gridState.animateScrollToItem(0)
+    }
     LaunchedEffect(gridState) {
         snapshotFlow {
             val firstKey = gridState.layoutInfo.visibleItemsInfo.firstOrNull { info ->
@@ -427,7 +432,8 @@ private fun FolderGrid(
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
     onFirstVisibleMediaChanged: (String?) -> Unit = {},
     scrollToUri: String? = null,
-    scrollToToken: Long = 0L
+    scrollToToken: Long = 0L,
+    scrollToTopToken: Long = 0L
 ) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
@@ -435,6 +441,9 @@ private fun FolderGrid(
         initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
         initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
     )
+    LaunchedEffect(scrollToTopToken) {
+        if (scrollToTopToken > 0L) gridState.animateScrollToItem(0)
+    }
     LaunchedEffect(scrollToToken) {
         val uri = scrollToUri ?: return@LaunchedEffect
         val position = album.items.indexOfFirst { it.uri.toString() == uri }
@@ -485,7 +494,7 @@ private fun FolderGrid(
         }
     )
     if (layout == MediaLayout.Adaptive) {
-        AdaptiveFolderGrid(album, columns, refreshing, onOpenMedia, onLongPressMedia, onSelectionGestureStartMedia, onBatchSelectMedia, onSelectionGestureEnd, onRefresh, sharedElementEnabled, onOpenPixivArchive, favoriteUris, showFavoriteBadge, selectionPreview, selectedUris, initialFirstVisibleItem, initialFirstVisibleOffset, onScrollPositionChanged, onFirstVisibleMediaChanged, scrollToUri, scrollToToken)
+        AdaptiveFolderGrid(album, columns, refreshing, onOpenMedia, onLongPressMedia, onSelectionGestureStartMedia, onBatchSelectMedia, onSelectionGestureEnd, onRefresh, sharedElementEnabled, onOpenPixivArchive, favoriteUris, showFavoriteBadge, selectionPreview, selectedUris, initialFirstVisibleItem, initialFirstVisibleOffset, onScrollPositionChanged, onFirstVisibleMediaChanged, scrollToUri, scrollToToken, scrollToTopToken)
         return
     }
     Box(Modifier.fillMaxSize()) {
@@ -565,7 +574,8 @@ private fun AdaptiveFolderGrid(
     onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> },
     onFirstVisibleMediaChanged: (String?) -> Unit = {},
     scrollToUri: String? = null,
-    scrollToToken: Long = 0L
+    scrollToToken: Long = 0L,
+    scrollToTopToken: Long = 0L
 ) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
@@ -573,6 +583,9 @@ private fun AdaptiveFolderGrid(
         initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
         initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
     )
+    LaunchedEffect(scrollToTopToken) {
+        if (scrollToTopToken > 0L) state.animateScrollToItem(0)
+    }
     LaunchedEffect(scrollToToken) {
         val uri = scrollToUri ?: return@LaunchedEffect
         val position = album.items.indexOfFirst { it.uri.toString() == uri }
