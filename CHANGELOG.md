@@ -1,6 +1,6 @@
 # Album Changelog
 
-## v1.1.83 - 2026-09-16 (local signed build)
+## v1.1.84 - 2026-09-16 (local signed build)
 
 - The picture a static wallpaper queue is showing is now also handed to the system as an ordinary wallpaper (before the live wallpaper is bound), so a package replacement that drops the live wallpaper leaves the user's image on screen instead of the stock wallpaper. The still image is only written when no Album live wallpaper is bound, because setting one replaces the other. Video queues get the first frame of the clip as the same fallback.
 - The applied queue is now backed up on launch when the backup file is missing, so a queue applied before the backup existed can still be restored after an update.
@@ -8,8 +8,8 @@
 - The page action button sits in the same place on every page: the play button of the slideshow queue and the apply button of the wallpaper page now share one trailing group with a fixed gap and button size.
 - Deleting inside a search page keeps the page in place: the scroll restore anchors on the item (folder name or media URI) that was on screen instead of a stored index, so a shorter list no longer clamps it to the bottom. Closing a folder opened from a search anchors the same way.
 - APK: `app/release/app-release.apk` (arm64-v8a split)
-- SHA-256: `E7DB728F990723BF466C8B8BC36BBA7BAF5AF90C26977A81A77CD5BE050BFCE3`
-- Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug`, `assembleRelease` and the `MainPlayerContainerTest` instrumentation test passed. On the test phone the user's `.mpg` now shows `64:34` and a DivX `.avi` shows `30:33`, both in the main player.
+- SHA-256: `E99BF0225079A80F291CF9365B818D5F6F7DF72F4E7A33925CE068186171B7B4`
+- Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug`, `assembleRelease` and the `MainPlayerContainerTest` instrumentation test passed. On the test phone the user's `.mpg` shows `64:34` and a DivX `.avi` shows `30:33`, both in the main player, and the slideshow play button now sits at exactly the same position as the wallpaper page's apply button (both at x=1088..1184 with the same overflow button at x=1288..1384).
 
 ## v1.1.79 - 2026-09-16 (local signed build)
 

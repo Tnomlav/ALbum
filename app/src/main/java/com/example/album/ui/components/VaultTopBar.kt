@@ -107,7 +107,16 @@ fun VaultTopBar(
                 .height(VaultDimens.HeaderContentHeight).padding(start = VaultDimens.HeaderHorizontalPadding),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(
-                if (searchEnabled) 2.dp else VaultDimens.HeaderGap
+                // The trailing group (page action + overflow menu) is placed
+                // from the right edge, so the gap in front of it decides where
+                // the action lands. Pages with an action always use the tight
+                // gap, which puts the slideshow play button exactly where the
+                // wallpaper page's apply button sits.
+                if (searchEnabled || (actionLabel != null && onActionClick != null)) {
+                    2.dp
+                } else {
+                    VaultDimens.HeaderGap
+                }
             )
         ) {
             if (onBack != null) {
