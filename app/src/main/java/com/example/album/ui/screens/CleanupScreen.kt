@@ -943,7 +943,7 @@ private fun RecycleContent(
                     Text(if (english) "${entries.size} items" else "${entries.size} 项", fontSize = 17.sp, fontWeight = FontWeight.Medium)
                 }
                 if (entries.isEmpty()) {
-                    Text(if (english) "Items are kept for 60 days" else "项目保留60天", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    Text(if (english) "Nothing to restore" else "没有可还原的项目", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         CleanupCommand(if (selectedIds.isEmpty()) "全部还原" else "还原选中", onClick = onRestoreAll)
@@ -951,6 +951,18 @@ private fun RecycleContent(
                     }
                 }
             }
+        }
+        item {
+            Text(
+                if (english) {
+                    "Trash lives in the app's private storage. The retention period is set in Settings; uninstalling Album or clearing its data deletes everything still inside."
+                } else {
+                    "回收站保存在应用私有目录，保留期限在设置中调整；卸载 Album 或清除应用数据会删除其中仍在的文件。"
+                },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 2.dp, end = 2.dp, bottom = 10.dp)
+            )
         }
         if (entries.isEmpty()) {
             item { CleanupEmpty("回收站为空") }

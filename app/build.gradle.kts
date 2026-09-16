@@ -31,9 +31,10 @@ val albumUniversalApk = providers.gradleProperty("albumUniversalApk")
 android {
     namespace = "com.example.album"
     compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
+        // Compiling against 37 is what current AndroidX requires; targetSdk
+        // stays on 36 so the app does not silently opt into new runtime
+        // behaviour it has not been tested against.
+        version = release(37)
     }
 
     defaultConfig {
@@ -43,11 +44,14 @@ android {
         versionCode = releaseVersionCode
         versionName = releaseVersionName
         buildConfigField("String", "UPDATE_URL", "\"$escapedUpdateUrl\"")
-        // The app ships Simplified Chinese and English only; drop the other
-        // locales that come with AndroidX so the APK stops carrying them.
-        resourceConfigurations += listOf("en", "zh")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    androidResources {
+        // The app ships Simplified Chinese and English only; drop the other
+        // locales that come with AndroidX so the APK stops carrying them.
+        localeFilters += listOf("en", "zh")
     }
 
     buildTypes {
@@ -72,6 +76,18 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+    lint {
+        // The baseline locks in the warnings that existed when the review was
+        // written (mostly the UseKtx style hints). Anything new fails the
+        // build, so warnings cannot quietly pile up again.
+        baseline = file("lint-baseline.xml")
+        warningsAsErrors = true
+        abortOnError = true
+        checkReleaseBuilds = true
+        // Translation coverage is checked once the UI text moves into
+        // resources; today it would only report the two strings that exist.
+        disable += setOf("MissingTranslation")
     }
     dependenciesInfo {
         // Dependency metadata inside the APK is only used by Play; the local
@@ -142,6 +158,9 @@ dependencies {
     // AVI/other containers that the platform extractors cannot demux.
     implementation(libs.libvlc.all)
     testImplementation(libs.junit)
+    // Unit tests exercise the update-manifest parser, which uses org.json.
+    // The android.jar stubs throw on every call without this.
+    testImplementation(libs.org.json)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

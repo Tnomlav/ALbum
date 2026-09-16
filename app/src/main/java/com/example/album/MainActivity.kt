@@ -30,6 +30,7 @@ class MainActivity : ComponentActivity() {
     private var playbackResumeRequest by mutableStateOf<PlaybackResumeRequest?>(null)
     private var externalMediaUri by mutableStateOf<Uri?>(null)
     private var externalWallpaperUri by mutableStateOf<Uri?>(null)
+    private var externalSharedUris by mutableStateOf<List<Uri>>(emptyList())
     private var pictureInPictureMode by mutableStateOf(false)
     @Suppress("DEPRECATION")
     private val memoryCallbacks = object : ComponentCallbacks2 {
@@ -90,6 +91,7 @@ class MainActivity : ComponentActivity() {
         playbackResumeRequest = intent.toPlaybackResumeRequest()
         externalMediaUri = intent.toExternalMediaUri()
         externalWallpaperUri = intent.toExternalWallpaperUri()
+        externalSharedUris = intent.toSharedMediaUris()
         enableEdgeToEdge()
         setContent {
             val preferences = remember { getSharedPreferences("album_settings", MODE_PRIVATE) }
@@ -134,6 +136,8 @@ class MainActivity : ComponentActivity() {
                             playbackResumeRequest = playbackResumeRequest,
                             externalMediaUri = externalMediaUri,
                             externalWallpaperUri = externalWallpaperUri,
+                            externalSharedUris = externalSharedUris,
+                            onExternalShareConsumed = { externalSharedUris = emptyList() },
                             onPlaybackResumeConsumed = { requestId ->
                                 if (playbackResumeRequest?.requestId == requestId) {
                                     playbackResumeRequest = null
@@ -160,6 +164,38 @@ class MainActivity : ComponentActivity() {
         playbackResumeRequest = intent.toPlaybackResumeRequest()
         externalMediaUri = intent.toExternalMediaUri()
         externalWallpaperUri = intent.toExternalWallpaperUri()
+        externalSharedUris = intent.toSharedMediaUris()
+    }
+
+    /**
+     * Photos and videos sent through the system share sheet. They are handed to
+     * AlbumApp, which offers to copy them into a library folder.
+     */
+    @Suppress("DEPRECATION")
+    private fun Intent.toSharedMediaUris(): List<Uri> {
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return emptyList()
+        val fromExtras = when {
+            action == Intent.ACTION_SEND -> listOfNotNull(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    getParcelableExtra(Intent.EXTRA_STREAM)
+                }
+            )
+
+            else -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+            } else {
+                getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+            }
+        }
+        // Some senders only fill in the clip data.
+        val fromClip = clipData?.let { clip ->
+            (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
+        }.orEmpty()
+        return (fromExtras + fromClip)
+            .filter { it.scheme == "content" || it.scheme == "file" }
+            .distinct()
     }
 
     private fun Intent.toExternalMediaUri(): Uri? {

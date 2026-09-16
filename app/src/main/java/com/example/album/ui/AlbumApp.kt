@@ -133,6 +133,10 @@ import com.example.album.data.PixivArchiveRepository
 import com.example.album.data.WallpaperQueueState
 import com.example.album.data.WallpaperQueueStore
 import com.example.album.data.SlideshowQueueStore
+import com.example.album.data.decodeFavoriteKeys
+import com.example.album.data.encodeFavoriteKeys
+import com.example.album.data.repairFavoriteUris
+import com.example.album.data.toFavoriteCandidate
 import com.example.album.data.WallpaperAppliedStore
 import com.example.album.wallpaper.WallpaperBackup
 import com.example.album.data.TransferMode
@@ -421,6 +425,8 @@ fun AlbumApp(
     onAppLanguageChange: (String) -> Unit,
     externalMediaUri: Uri? = null,
     externalWallpaperUri: Uri? = null,
+    externalSharedUris: List<Uri> = emptyList(),
+    onExternalShareConsumed: () -> Unit = {},
     playbackResumeRequest: PlaybackResumeRequest? = null,
     onPlaybackResumeConsumed: (Long) -> Unit = {},
     pictureInPictureMode: Boolean = false,
@@ -527,6 +533,7 @@ fun AlbumApp(
     var showPixivArchiveInfo by remember { mutableStateOf(false) }
     var createFolderName by rememberSaveable { mutableStateOf("") }
     var favoriteUris by remember { mutableStateOf(preferences.getStringSet("favorites", emptySet()).orEmpty().toSet()) }
+    var favoriteKeys by remember { mutableStateOf(decodeFavoriteKeys(preferences.getString("favorite_keys", null))) }
     var wallpaperQueueLoaded by remember { mutableStateOf(false) }
     var wallpaperQueueUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var wallpaperQueueSaveJob by remember { mutableStateOf<Job?>(null) }
@@ -626,6 +633,25 @@ fun AlbumApp(
         val loaded = withContext(Dispatchers.IO) { SlideshowQueueStore.load(context) }
         slideshowQueueUris = loaded.uris
         slideshowQueueOrder = loaded.order
+    }
+    // Favorites are stored by URI, and a URI changes when a file is renamed,
+    // moved, or re-indexed by MediaStore. Every library scan records the
+    // identity of the favorites it can still see and re-points the ones whose
+    // URI changed, so the star does not silently disappear.
+    LaunchedEffect(library.images, library.videos, library.localImages, library.localVideos) {
+        val items = (library.images + library.videos + library.localImages + library.localVideos)
+            .distinctBy { it.uri.toString() }
+            .map { it.toFavoriteCandidate() }
+        if (items.isEmpty()) return@LaunchedEffect
+        val repaired = repairFavoriteUris(favoriteUris, favoriteKeys, items)
+        if (repaired.favorites != favoriteUris) {
+            favoriteUris = repaired.favorites
+            preferences.edit().putStringSet("favorites", repaired.favorites).apply()
+        }
+        if (repaired.keys != favoriteKeys) {
+            favoriteKeys = repaired.keys
+            preferences.edit().putString("favorite_keys", encodeFavoriteKeys(repaired.keys)).apply()
+        }
     }
     fun persistSlideshowQueue(uris: Set<String>, order: List<String>) {
         slideshowQueueSaveJob?.cancel()
@@ -1325,6 +1351,30 @@ fun AlbumApp(
         )
         if (externalItem.isVideo) setWallpaper(context, externalItem, english)
         else wallpaperCropItem = externalItem
+    }
+
+    // "Share to Album" from another app: offer to copy the shared photos and
+    // videos into a library folder through the normal destination screen.
+    LaunchedEffect(externalSharedUris) {
+        if (externalSharedUris.isEmpty()) return@LaunchedEffect
+        val items = withContext(Dispatchers.IO) {
+            externalSharedUris.mapNotNull { uri -> uri.toSharedMediaItem(context) }
+        }
+        onExternalShareConsumed()
+        if (items.isEmpty()) {
+            Toast.makeText(
+                context,
+                if (english) "Unable to read the shared media" else "无法读取分享的媒体文件",
+                Toast.LENGTH_LONG
+            ).show()
+            return@LaunchedEffect
+        }
+        transferRequest = TransferRequest(items, TransferMode.Copy)
+        Toast.makeText(
+            context,
+            if (english) "Choose where to import ${items.size} item(s)" else "请选择导入 ${items.size} 个文件的位置",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     LaunchedEffect(playbackResumeRequest, library.videos, library.localVideos) {
@@ -4062,3 +4112,32 @@ private fun missingPermissions(context: android.content.Context, permissions: Ar
     permissions.filter {
         ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
     }.toTypedArray()
+
+/**
+ * Turns a URI that arrived through the system share sheet into a library item.
+ * Returns null when the media is not something Album can read, so the caller
+ * reports it instead of offering a transfer that is guaranteed to fail.
+ */
+private fun Uri.toSharedMediaItem(context: android.content.Context): MediaItem? {
+    val filename = Uri.decode(lastPathSegment.orEmpty()).substringAfterLast('/')
+    val mime = runCatching { context.contentResolver.getType(this).orEmpty() }.getOrDefault("").ifBlank {
+        MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(filename.substringAfterLast('.', "").lowercase())
+            .orEmpty()
+    }
+    if (!mime.startsWith("image/") && !mime.startsWith("video/")) return null
+    val readable = runCatching {
+        com.example.album.data.openMediaInputStream(context, this)?.use { input -> input.read() >= 0 } == true
+    }.getOrDefault(false)
+    if (!readable) return null
+    return MediaItem(
+        id = toString().hashCode().toLong() and 0xffffffffL,
+        uri = this,
+        name = filename.ifBlank { "shared" },
+        folder = "分享导入",
+        dateTaken = 0L,
+        mimeType = mime,
+        isVideo = mime.startsWith("video/"),
+        isDocument = true
+    )
+}

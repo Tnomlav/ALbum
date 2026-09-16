@@ -64,11 +64,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.album.ui.theme.VaultDimens
+import com.example.album.ui.appText
 import com.example.album.ui.theme.ThemeAccent
 import com.example.album.ui.components.VaultInfoSheet
 import com.example.album.ui.components.VaultWheelChoiceSheet
 import com.example.album.ui.components.VaultColorSheet
 import com.example.album.ui.components.VaultConfirmationSheet
+import com.example.album.ui.components.VaultLicensesSheet
 import com.example.album.ui.components.ListScrollHandle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.zIndex
@@ -76,6 +78,8 @@ import com.example.album.data.ThumbnailRepository
 import com.example.album.BuildConfig
 import com.example.album.data.AppRelease
 import com.example.album.data.AppUpdateChecker
+import com.example.album.data.UpdateStatus
+import com.example.album.data.UserDataBackup
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -104,6 +108,7 @@ fun SettingsScreen(
     var choice by remember { mutableStateOf<ChoiceSetting?>(null) }
     var dialog by remember { mutableStateOf<InfoDialog?>(null) }
     var showThemeColors by remember { mutableStateOf(false) }
+    var showLicenses by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val packageInfo = remember {
         @Suppress("DEPRECATION")
@@ -170,6 +175,53 @@ fun SettingsScreen(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             allFilesAccess = Environment.isExternalStorageManager()
             preferences.edit().putBoolean("all_files_access", allFilesAccess).apply()
+        }
+    }
+
+    var pendingImport by remember { mutableStateOf<String?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val payload = UserDataBackup.export(context)
+                    context.contentResolver.openOutputStream(uri)?.use { stream ->
+                        stream.write(payload.toByteArray(Charsets.UTF_8))
+                    } ?: error("Unable to open the destination file")
+                }
+            }
+            Toast.makeText(
+                context,
+                result.fold(
+                    onSuccess = { if (isEnglish) "Backup saved" else "备份已保存" },
+                    onFailure = { error ->
+                        if (isEnglish) "Export failed: ${error.message ?: "unknown error"}"
+                        else "导出失败：${error.message ?: "未知错误"}"
+                    }
+                ),
+                if (result.isSuccess) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val text = runCatching {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        stream.readBytes().toString(Charsets.UTF_8)
+                    }
+                }
+            }.getOrNull()
+            if (text.isNullOrBlank()) {
+                Toast.makeText(
+                    context,
+                    if (isEnglish) "Unable to read the backup file" else "无法读取备份文件",
+                    Toast.LENGTH_LONG
+                ).show()
+            } else {
+                pendingImport = text
+            }
         }
     }
 
@@ -260,11 +312,21 @@ fun SettingsScreen(
 
         item { SettingsHeader("文件操作") }
         item { ToggleRow("回收站", "开启后，删除的文件将进入回收站", recycleBin) { setBoolean("recycle_bin", it) { recycleBin = it } } }
-        item { ValueRow("回收站文件保留期限", value("retention", "60天")) {
+        item { ValueRow("回收站文件保留期限", value("retention", "60天"), "回收站保存在应用私有目录：保留期结束后自动清空，卸载或清除应用数据会同时删除其中文件") {
             choose("回收站文件保留期限", "retention", listOf("10天", "30天", "60天", "90天"), value("retention", "60天")) { selected ->
                 onRetentionChange(selected.filter(Char::isDigit).toIntOrNull() ?: 60)
             }
         } }
+        item {
+            ClickableRow("导出应用数据", "收藏、队列、排除文件夹与偏好设置；不含媒体、缩略图和 Pixiv 登录信息") {
+                exportLauncher.launch(UserDataBackup.defaultFileName())
+            }
+        }
+        item {
+            ClickableRow("导入应用数据", "从备份文件恢复，会覆盖当前的收藏、队列与偏好设置") {
+                importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+            }
+        }
         item {
             ToggleRow(
                 "所有文件访问权限",
@@ -399,19 +461,24 @@ fun SettingsScreen(
                     "Album is designed to keep your personal media on your device. Photos and videos are scanned, sorted, edited, played, favorited, and cached locally. The app does not upload your local media, use it for advertising, or send it to an analytics service.\n\n" +
                         "The app may request Android media, file-management, notification, and media-playback permissions. These permissions are used only for the related features you enable. You can revoke them in Android settings; some features may then be unavailable.\n\n" +
                         "Pixiv features open Pixiv services in an in-app WebView and may request Pixiv pages, artwork metadata, and media URLs. Pixiv login cookies are stored by Android WebView on this device until you sign out or clear the app data. Pixiv handles information submitted to its services under its own privacy policy.\n\n" +
-                        "When you check for updates, Album requests release metadata from this project's GitHub repository. When you choose an update, Android opens the APK download link from that repository. The app does not silently install updates.\n\n" +
+                        "When you check for updates, Album downloads the release manifest published with this project's GitHub Releases and compares it with the installed version. When you choose an update, Android opens the APK download link from that release. The app does not silently install updates and does not verify the APK for you.\n\n" +
+                        "Album has no cloud backup: Android auto backup and device-to-device transfer are switched off for this app, so favorites, wallpaper and slideshow queues, preferences, and excluded folders stay on this device only and do not survive a reinstall.\n\n" +
+                        "Files you delete are copied into the app's private Trash folder before the original is removed, which means they occupy app storage until the retention period ends. Clearing the app's data or uninstalling Album deletes everything still in Trash.\n\n" +
                         "Media is sent to another app only when you choose a system action such as sharing or opening a file. Settings, thumbnails, playback progress, and cached data remain on the device and can be cleared from the app or Android settings.\n\n" +
-                        "Version: v$appVersion\nLast revised: August 20, 2026"
+                        "Version: v$appVersion\nLast revised: September 17, 2026"
                 } else {
                     "Album 以本地处理为设计原则。图片和视频的扫描、排序、编辑、播放、收藏及缩略图缓存均在本机完成。应用不会上传你的本地媒体，不会将其用于广告，也不会接入分析统计服务。\n\n" +
                         "应用可能申请媒体访问、文件管理、通知和媒体播放等 Android 权限，仅用于你启用的对应功能。你可以在 Android 系统设置中撤销权限；撤销后，相关功能可能无法使用。\n\n" +
                         "Pixiv 功能会通过应用内 WebView 访问 Pixiv 页面，并可能请求作品信息、媒体库信息和媒体地址。Pixiv 登录 Cookie 由 Android WebView 保存在本机，直到你退出登录或清除应用数据。提交给 Pixiv 服务的信息受 Pixiv 自身隐私政策约束。\n\n" +
-                        "检查更新时，Album 会从本项目的 GitHub 仓库读取版本清单。你选择更新后，应用会让 Android 打开该仓库中的 APK 下载地址；应用不会静默安装更新。\n\n" +
+                        "检查更新时，Album 会下载与本项目 GitHub Release 一起发布的版本清单，并与已安装版本比较。你选择更新后，应用会让 Android 打开该 Release 中的 APK 下载地址；应用不会静默安装更新，也不会替你校验 APK。\n\n" +
+                        "Album 不使用云备份：本应用的 Android 自动备份和设备间迁移均已关闭，因此收藏、壁纸与幻灯片队列、偏好设置和排除文件夹只保存在本机，重装后不会恢复。\n\n" +
+                        "删除的文件会先复制到应用私有目录的回收站，再移除原文件，因此它们在保留期内会占用应用存储空间。清除应用数据或卸载 Album 会同时删除回收站中仍在的文件。\n\n" +
                         "只有在你主动使用系统分享或打开文件等操作时，媒体才会交给其他应用。设置、缩略图、播放进度和缓存均保存在本机，可在应用内或 Android 系统设置中清除。\n\n" +
-                        "版本：v$appVersion\n最后修订：2026年8月20日"
+                        "版本：v$appVersion\n最后修订：2026年9月17日"
                 }
             )
         } }
+        item { ValueRow("开源许可", "›") { showLicenses = true } }
         item {
             ValueRow(
                 "应用版本",
@@ -440,13 +507,30 @@ fun SettingsScreen(
                             runCatching {
                                 withContext(Dispatchers.IO) { AppUpdateChecker.fetch(BuildConfig.UPDATE_URL) }
                             }.onSuccess { release ->
-                                if (release.versionCode > appVersionCode) {
-                                    availableUpdate = release
-                                    updateChecked = false
-                                } else {
-                                    availableUpdate = null
-                                    updateChecked = true
-                                    Toast.makeText(context, if (isEnglish) "v$appVersion is up to date" else "当前已是最新版本 v$appVersion", Toast.LENGTH_SHORT).show()
+                                when (AppUpdateChecker.status(release, appVersion, appVersionCode)) {
+                                    UpdateStatus.Available -> {
+                                        availableUpdate = release
+                                        updateChecked = false
+                                    }
+
+                                    UpdateStatus.UpToDate -> {
+                                        availableUpdate = null
+                                        updateChecked = true
+                                        Toast.makeText(context, if (isEnglish) "v$appVersion is up to date" else "当前已是最新版本 v$appVersion", Toast.LENGTH_SHORT).show()
+                                    }
+
+                                    UpdateStatus.SourceBehind -> {
+                                        availableUpdate = null
+                                        updateChecked = false
+                                        dialog = InfoDialog(
+                                            "检查更新",
+                                            if (isEnglish) {
+                                                "The update source still lists v${release.versionName}, which is older than the installed v$appVersion. This version has not been published to the update source yet, so no update can be offered."
+                                            } else {
+                                                "更新源仍停留在 v${release.versionName}，比已安装的 v$appVersion 更旧。这一版还没有发布到更新源，因此暂时无法提供更新。"
+                                            }
+                                        )
+                                    }
                                 }
                             }.onFailure { error ->
                                 Toast.makeText(
@@ -506,6 +590,40 @@ fun SettingsScreen(
     dialog?.let { info ->
         VaultInfoSheet(settingsText(info.title, isEnglish), info.body, if (isEnglish) "Done" else "知道了") { dialog = null }
     }
+    if (showLicenses) {
+        VaultLicensesSheet(isEnglish) { showLicenses = false }
+    }
+    pendingImport?.let { raw ->
+        VaultConfirmationSheet(
+            title = "导入应用数据",
+            body = if (isEnglish) {
+                "Importing replaces the current favorites, wallpaper and slideshow queues, excluded folders, and app preferences. Nothing is imported until you confirm, and no media files are touched."
+            } else {
+                "导入会覆盖当前的收藏、壁纸与幻灯片队列、排除文件夹和应用偏好设置。确认前不会写入任何内容，也不会改动任何媒体文件。"
+            },
+            confirmLabel = if (isEnglish) "Import" else "导入",
+            onDismiss = { pendingImport = null },
+            onConfirm = {
+                val result = runCatching { UserDataBackup.import(context, raw) }
+                pendingImport = null
+                Toast.makeText(
+                    context,
+                    result.fold(
+                        onSuccess = { summary ->
+                            if (isEnglish) "Imported ${summary.appliedValues} values; reloading"
+                            else "已导入 ${summary.appliedValues} 项设置，正在重新加载"
+                        },
+                        onFailure = { error ->
+                            if (isEnglish) "Import failed: ${error.message ?: "not an Album backup"}"
+                            else "导入失败：${error.message ?: "不是 Album 备份文件"}"
+                        }
+                    ),
+                    if (result.isSuccess) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                ).show()
+                if (result.isSuccess) context.findActivity()?.recreate()
+            }
+        )
+    }
     availableUpdate?.let { release ->
         val updateBody = buildString {
             append(if (isEnglish) "Version ${release.versionName}" else "版本 ${release.versionName}")
@@ -542,120 +660,26 @@ fun SettingsScreen(
 private data class ChoiceSetting(val title: String, val options: List<String>, val selected: String, val onSelect: (String) -> Unit)
 private data class InfoDialog(val title: String, val body: String)
 
-private val LocalSettingsEnglish = compositionLocalOf { false }
+/** Finds the Activity behind a ContextWrapper so an import can reload the UI. */
+private fun Context.findActivity(): android.app.Activity? {
+    var current: Context? = this
+    while (current is android.content.ContextWrapper) {
+        if (current is android.app.Activity) return current
+        current = current.baseContext
+    }
+    return null
+}
 
-private val settingsEnglish = mapOf(
-    "清理" to "Cleanup",
-    "查找重复图片、管理回收站和排除文件夹" to "Find duplicate photos, manage Trash, and review excluded folders",
-    "主题" to "Theme",
-    "主题模式" to "Theme mode",
-    "主题颜色" to "Theme color",
-    "语言" to "Language",
-    "长按移动底栏图标" to "Reorder bottom tabs",
-    "开启后可长按并拖动底栏图标调整顺序" to "Long press and drag bottom tabs to reorder them",
-    "显示 Pixiv 底栏页面" to "Show Pixiv bottom tab",
-    "将 Pixiv 文件夹作为独立页面显示在底栏" to "Show the Pixiv folder as a separate bottom tab",
-    "文件操作" to "File operations",
-    "回收站" to "Trash",
-    "开启后，删除的文件将进入回收站" to "Move deleted files to Trash",
-    "回收站文件保留期限" to "Trash retention",
-    "所有文件访问权限" to "All files access",
-    "已开启，归档可直接写入目录" to "Enabled; archive can write directly to folders",
-    "未开启，点击前往系统设置授权" to "Disabled; tap to grant access in system settings",
-    "媒体管理权限" to "Media management access",
-    "修改或删除媒体文件无需系统反复确认" to "Avoid repeated system prompts when changing media",
-    "已开启，删除时使用应用内确认弹窗" to "Enabled; deletion uses the in-app confirmation",
-    "未开启，点击前往系统设置授权" to "Not enabled; tap to grant access in system settings",
-    "删除前确认" to "Confirm before deleting",
-    "控制普通文件删除确认，回收站还原和彻底删除始终需要确认" to "Controls regular deletion; restoring or permanently deleting from Trash always requires confirmation",
-    "复制/移动/编辑文件时保留原修改日期" to "Preserve the original modified date when copying, moving, or editing files",
-    "编辑后保存方式" to "Save edited photos",
-    "保留编辑副本或替换当前版本，保存前均需确认" to "Keep a copy or replace the current version",
-    "复制/移动文件已存在" to "When a file already exists",
-    "同名文件处理" to "Duplicate filename handling",
-    "视频" to "Video",
-    "打开视频时自动播放" to "Autoplay videos",
-    "记住最后一次播放进度" to "Remember playback position",
-    "自动隐藏播放器界面" to "Auto-hide player controls",
-    "播放中无操作 3 秒后隐藏控件" to "Hide controls after 3 seconds of inactivity",
-    "长快进" to "Long seek controls",
-    "在播放器中显示长快退和长快进按钮" to "Show long rewind and fast-forward buttons",
-    "快进长度" to "Seek interval",
-    "长快进长度" to "Long seek interval",
-    "全屏手势" to "Full-screen gestures",
-    "满屏滑动跳过时间" to "Full-width swipe interval",
-    "横向滑满整个屏幕对应的进度" to "Time covered by a full-width horizontal swipe",
-    "边缘误触保护" to "Edge touch protection",
-    "在屏幕边缘松手时取消当次跳转" to "Cancel seeking when released at a screen edge",
-    "显示" to "Display",
-    "播放 GIF 缩略图" to "Animate GIF thumbnails",
-    "仅控制缩略图，预览和全屏始终播放" to "Previews and full screen always remain animated",
-    "预览页显示原图" to "Show original photos in preview",
-    "开启后先显示缩略图，再加载原始图片；关闭可减少内存占用" to "Show a thumbnail first, then load the original image; turn off to reduce memory use",
-    "显示收藏星标" to "Show favorite stars",
-    "显示点号开头的图片" to "Show dot-prefixed images",
-    "显示文件名以 . 开头的图片文件" to "Show image files whose names start with .",
-    "在图片和视频缩略图右上角显示收藏星标" to "Show favorite stars on image and video thumbnails",
-    "默认排序方式" to "Default sort order",
-    "默认界面" to "Default screen",
-    "滚动条" to "Scrollbar",
-    "下拉刷新" to "Pull to refresh",
-    "在支持扫描的页面顶部下拉触发扫描" to "Pull down at the top to rescan",
-    "拖动宽度" to "Touch width",
-    "调整右侧滚动条的触控区域" to "Adjust the scrollbar touch area",
-    "浮现时间" to "Visible duration",
-    "停止滚动后继续显示的时间" to "How long the scrollbar remains after scrolling",
-    "始终显示" to "Always visible",
-    "页面可滚动时保持滚动条常驻" to "Keep the scrollbar visible on scrollable pages",
-    "幻灯片" to "Slideshow",
-    "幻灯片播放间隔" to "Slide interval",
-    "幻灯片播放动画" to "Slide animation",
-    "幻灯片随机播放" to "Shuffle slideshow",
-    "缓存" to "Cache",
-    "后台优化" to "Background optimization",
-    "在后台增量生成分级缩略图" to "Generate tiered thumbnails incrementally in the background",
-    "缓存上限" to "Cache limit",
-    "清理缓存" to "Clear cache",
-    "关于" to "About",
-    "隐私政策" to "Privacy policy",
-    "应用版本" to "App version",
-    "检查更新" to "Check for updates",
-    "自动" to "Automatic",
-    "浅色" to "Light",
-    "深色" to "Dark",
-    "荧光绿" to "Neon green",
-    "明亮蓝" to "Bright blue",
-    "青绿色" to "Teal",
-    "活力橙" to "Orange",
-    "珊瑚红" to "Coral",
-    "紫罗兰" to "Violet",
-    "每次询问" to "Ask every time",
-    "保留二者" to "Keep both",
-    "替换原图" to "Replace original",
-    "覆盖" to "Overwrite",
-    "跳过" to "Skip",
-    "时间" to "Date",
-    "名称" to "Name",
-    "大小" to "Size",
-    "相册" to "Albums",
-    "时间轴" to "Timeline",
-    "自然" to "Natural",
-    "淡入淡出" to "Fade",
-    "滑动" to "Slide",
-    "未添加" to "Not added",
-    "扫描中..." to "Scanning...",
-    "已是最新版本" to "Up to date",
-    "检查中..." to "Checking..."
-)
+private val LocalSettingsEnglish = compositionLocalOf { false }
 
 private fun settingsText(value: String, english: Boolean): String {
     if (!english) return value
-    settingsEnglish[value]?.let { return it }
     Regex("^(\\d+(?:\\.\\d+)?)秒$").matchEntire(value)?.let { return "${it.groupValues[1]} seconds" }
     Regex("^(\\d+)天$").matchEntire(value)?.let { return "${it.groupValues[1]} days" }
     Regex("^已添加 (\\d+) 个$").matchEntire(value)?.let { return "${it.groupValues[1]} added" }
     Regex("^(\\d+) 项$").matchEntire(value)?.let { return "${it.groupValues[1]} items" }
-    return value
+    // One dictionary for the whole app: see AppLanguage.kt.
+    return appText(value, english = true)
 }
 
 internal fun settingsDisplay(title: String, value: String, english: Boolean): String = when {

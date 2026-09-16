@@ -1,5 +1,48 @@
 # Album Changelog
 
+## v1.2.1 - 2026-09-17（工程与产品化收口，未重新构建 APK）
+
+版本号从 `1.1.92` 提升到 `1.2.1`（`VERSION_CODE` 171）。本轮按 [产品成熟度全盘复盘](docs/product-readiness-review.md) 的清单做了一次集中收口：功能行为基本不变，改动集中在发布链路、合规、数据安全、CI 与清理。仓库内 `app/release/` 已不再纳入版本控制；`app/release/app-release.apk` 已更新为本轮签名构建的 1.2.1（arm64-v8a 分包）。
+
+- APK: `app/release/app-release.apk`（arm64-v8a 分包，1.2.1）
+- SHA-256: `90B8F82C78884C76575190E70C7D17FF1FEBB45867745A6F0AD6BA32F361ED8E`
+
+发布与更新：
+
+- `ALBUM_UPDATE_URL` 从 `main` 分支上的 `output-metadata.json` 改为 `releases/latest/download/album-update.json`，不再读取会过期的分支文件。
+- 新增 `scripts/write-update-manifest.ps1`：从 `version.properties` 生成更新清单（含 `versionCode`/`versionName`/`downloadUrl`/`notes`），发布时作为 Release 资产上传；新增 `RELEASING.md` 记录完整发布流程。
+- 更新检查支持 GitHub Release 响应（`tag_name` + assets）与语义化版本比较，并新增"更新源落后于已安装版本"的明确提示，不再把过期清单显示成"已是最新版本"。
+- 版本号统一到 `version.properties`，README 只声明"下一个发布版本"。
+
+合规与隐私：
+
+- 新增 `THIRD_PARTY_NOTICES.md` 与应用内"设置 → 关于 → 开源许可"页，随包提供 LGPL-2.1、Apache-2.0、OFL-1.1 全文；内置 10 款字体的版权声明直接从包内字体文件提取。
+- `allowBackup` 改为 `false`，与既有的"排除全部数据"规则保持一致；隐私政策补充"无云备份""回收站在应用私有目录、卸载即删除"。
+- 回收站页面与设置项明确提示卸载/清除数据会删除回收站内容。
+
+用户数据：
+
+- 收藏改为带稳定身份键：文件改名、移动或被 MediaStore 重新索引后，收藏会自动重新指向新 URI；歧义匹配保持原样，不会张冠李戴。
+- 新增应用数据导出/导入（设置 → 文件操作），覆盖收藏、壁纸与幻灯片队列、排除文件夹和偏好设置，不包含媒体、缩略图与 Pixiv 登录信息。
+
+新能力与体验：
+
+- 支持系统分享入口：其他应用可以把照片/视频"分享到 Album"，随后在目标文件夹页面选择导入位置。
+- 启动图标改为自适应图标（清单此前指向旧 drawable，导致自适应图标与 Android 13+ 主题图标从未生效），并新增单色主题图层。
+
+工程与质量：
+
+- lint 配置化：新增 `app/lint-baseline.xml`，开启 `warningsAsErrors` 与 `abortOnError`，新告警会让构建失败。
+- CI 增加 API 30/35 模拟器仪器测试 job、报告上传与 Dependabot 配置。
+- 依赖升级：`core-ktx 1.19.0`、`lifecycle 2.11.0`、`activity-compose 1.13.0`、`documentfile 1.1.0`、`exifinterface 1.4.2`、`espresso 3.7.0`；`compileSdk` 升到 37，`targetSdk` 保持 36；`resourceConfigurations` 迁移到 `androidResources.localeFilters`。
+- 国际化收敛为单一字典（删除 `SettingsScreen` 里 109 行的第二份映射），新增 `TranslationCoverageTest` 校验每个 `appText` 字面量都有英文；该测试上线时抓出并清除了编辑器裁切比例弹窗中三段乱码文案。
+- 清理：删除 92 行注释掉的编辑器组件、`MediaLibraryState` 中被注释的旧实现、`view_html_video_player.xml`、10 个模板启动图标和两个 Android Studio 模板测试；修复悬浮小窗的无障碍 `performClick` 问题。
+- 单元测试从 66 个增加到 83 个：新增更新检查 8 个、收藏身份 8 个、翻译覆盖 2 个，删除 1 个 Android Studio 模板测试。
+
+仍未完成、需要单独排期的部分（字体子集化、文案迁移到资源、ViewModel/DataStore、大屏布局、TalkBack 实机验收、崩溃上报、性能基线）与原因见复盘文档第 5 节。
+
+验证：`testDebugUnitTest`、`lintDebug`、`assembleDebug`、`assembleRelease` 通过；仪器测试在 CI 的模拟器 job 中运行。
+
 ## v1.1.91 - 2026-09-16 (local signed build)
 
 Structural cleanup: dead code removed, duplicated code shared. Net -2355 lines with no behaviour change.

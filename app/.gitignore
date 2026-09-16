@@ -1,1 +1,6 @@
 /build
+# Local signed build output kept for pre-release verification only. Release
+# artifacts (APKs, update manifest, SHA-256 list) are published to GitHub
+# Releases and must not be committed: every release used to add a ~63 MB blob
+# to the repository.
+/release/

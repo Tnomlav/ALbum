@@ -88,9 +88,6 @@ class MediaLibraryState(context: Context) {
         // per two minutes unless a caller explicitly invalidates it.
         const val FOLDER_INDEX_REFRESH_INTERVAL_MS = 2 * 60 * 1000L
     }
-    /*
-    private val retentionDays = settingsPreferences.getString("retention", "60天")?.filter(Char::isDigit)?.toIntOrNull() ?: 60
-    */
     private val retentionDays = settingsPreferences.getString("retention", "60")?.filter(Char::isDigit)?.toIntOrNull() ?: 60
     private var maintenanceReady = false
 
@@ -383,42 +380,6 @@ class MediaLibraryState(context: Context) {
                 refreshSearchableFolderIndex(accessKey)
             }
         }
-        /*
-        // Keep the filesystem walk off the UI path. Publish one immutable
-        // snapshot at the end so the search view and its loading animation do
-        // not recompose for every filesystem batch.
-        try {
-            val names = linkedSetOf<String>()
-            val children = linkedMapOf<String, MutableSet<String>>()
-            val files = linkedMapOf<String, MutableSet<String>>()
-            localFolders.streamFolderNames(
-                onBatch = { batch ->
-                    names += batch
-                },
-                onChildBatch = { childBatch ->
-                    childBatch.forEach { (parent, childNames) ->
-                        children.getOrPut(parent) { linkedSetOf() } += childNames
-                    }
-                },
-                onFileBatch = { fileBatch ->
-                    fileBatch.forEach { (folder, fileNames) ->
-                        files.getOrPut(folder) { linkedSetOf() } += fileNames
-                    }
-                }
-            )
-            folderNamesAccessKey = accessKey
-            withContext(Dispatchers.Main.immediate) {
-                searchableFolderNames = names.toSet()
-                searchableFolderChildren = children.mapValues { (_, childNames) -> childNames.toSet() }
-                searchableFolderFiles = files.mapValues { (_, fileNames) -> fileNames.toSet() }
-                searchableFoldersReady = true
-            }
-            writeFolderIndex(accessKey, names, children, files)
-        } finally {
-            searchableFoldersLoading = false
-            searchableFoldersReady = true
-        }
-        */
     }
 
     private suspend fun readFolderIndex(accessKey: String): Boolean {

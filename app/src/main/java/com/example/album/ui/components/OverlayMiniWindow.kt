@@ -136,7 +136,15 @@ internal class OverlayMiniWindow(
                         runCatching { windowManager.updateViewLayout(view, params) }
                         return true
                     }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    MotionEvent.ACTION_UP -> {
+                        resizing = false
+                        // Overlay windows are not reachable by the usual
+                        // accessibility path, so report the gesture as a click
+                        // to keep the touch handling observable.
+                        view.performClick()
+                        return true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
                         resizing = false
                         return true
                     }

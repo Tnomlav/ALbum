@@ -1,0 +1,56 @@
+Album 内置字体许可声明 / Bundled font notice
+
+Album 在图片编辑器的“文字”工具中内置下列字体，全部以 SIL Open Font License 1.1
+授权分发。每个字体的版权与来源如下，许可证全文见 assets/licenses/ofl-1.1.txt。
+
+1. DotGothic16  (dotgothic16.ttf)
+   Copyright 2020 The DotGothic16 Project Authors (https://github.com/fontworks-fonts/DotGothic16/)
+   Version 1.100
+   Upstream: https://github.com/google/fonts/tree/main/ofl/dotgothic16
+
+2. Liu Jian Mao Cao  (liu_jian_mao_cao.ttf)
+   Copyright 2018 The Liu Jian Mao Cao Project Authors (https://www.github.com/googlefonts/liujianmaocao)
+   Version 1.003
+   Upstream: https://github.com/google/fonts/tree/main/ofl/liujianmaocao
+
+3. Long Cang  (long_cang.ttf)
+   Copyright 2018 The LongCang Project Authors (https://github.com/googlefonts/longcang)
+   Version 2.001
+   Upstream: https://github.com/google/fonts/tree/main/ofl/longcang
+
+4. Ma Shan Zheng  (ma_shan_zheng.ttf)
+   Copyright 2018 The MaShanZheng Project Authors (https://github.com/googlefonts/mashanzheng)
+   Version 2.002
+   Upstream: https://github.com/google/fonts/tree/main/ofl/mashanzheng
+
+5. Noto Sans SC  (noto_sans_sc.ttf)
+   (c) 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+   Version 2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603
+   Upstream: https://github.com/google/fonts/tree/main/ofl/notosanssc
+
+6. Noto Serif SC  (noto_serif_sc.ttf)
+   (c) 2017-2024 Adobe (http://www.adobe.com/).
+   Version 2.003-H1;hotconv 1.1.1;makeotfexe 2.6.0
+   Upstream: https://github.com/google/fonts/tree/main/ofl/notoserifsc
+
+7. ZCOOL KuaiLe  (zcool_kuaile.ttf)
+   Copyright 2018 The ZCOOL KuaiLe Project Authors (https://github.com/googlefonts/zcool-kuaile)
+   Version 2.001
+   Upstream: https://github.com/google/fonts/tree/main/ofl/zcoolkuaile
+
+8. ZCOOL QingKe HuangYou  (zcool_qingke_huangyou.ttf)
+   Copyright 2018 The ZCOOL QingKe HuangYou Project Authors (https://www.github.com/googlefonts/zcool-qingke-huangyou)
+   Version 1.000
+   Upstream: https://github.com/google/fonts/tree/main/ofl/zcoolqingkehuangyou
+
+9. ZCOOL XiaoWei  (zcool_xiaowei.ttf)
+   Copyright 2018 The ZCOOL XiaoWei Project Authors (https://www.github.com/googlefonts/xiaowei)
+   Version 1.000
+   Upstream: https://github.com/google/fonts/tree/main/ofl/zcoolxiaowei
+
+10. Zhi Mang Xing  (zhi_mang_xing.ttf)
+   Copyright 2018 The ZhiMangXing Project Authors (https://github.com/googlefonts/zhimangxing)
+   Version 2.001
+   Upstream: https://github.com/google/fonts/tree/main/ofl/zhimangxing
+
+许可证 / License: SIL Open Font License 1.1 — see ofl-1.1.txt
