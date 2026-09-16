@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import com.example.album.ui.theme.VaultDimens
+import com.example.album.ui.theme.VaultText
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
 
@@ -81,8 +82,7 @@ private fun TitleSwitchMark(
         )
         Text(
             labels[index],
-            fontSize = 14.sp,
-            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+            style = VaultText.TopBarSwitch,
             color = MaterialTheme.colorScheme.primary,
             maxLines = 1,
             softWrap = false
@@ -113,6 +113,8 @@ fun VaultTopBar(
     actionEnabled: Boolean = true,
     actionCapsule: Boolean = false,
     actionStartPadding: Dp = 0.dp,
+    /** Paints the action in the destructive colour; defaults to the old name. */
+    actionDestructive: Boolean? = null,
     onTitleClick: (() -> Unit)? = null,
     chromeAlpha: Float = 1f
     ,
@@ -123,6 +125,8 @@ fun VaultTopBar(
      * on that side of the bar.
      */
     titleSwitchAtEnd: Boolean = false,
+    /** Description of the back button; name the page it returns to. */
+    backLabel: String? = null,
     onTitleSwitchChange: (Int) -> Unit = {}
 ) {
     val english = LocalAppEnglish.current
@@ -130,7 +134,7 @@ fun VaultTopBar(
     var focusSearchOnExpand by remember { mutableStateOf(false) }
     val searchFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
-    val destructiveAction = actionLabel == appText("清除", english)
+    val destructiveAction = actionDestructive ?: (actionLabel == appText("清除", english))
     val actionColor = if (destructiveAction) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
 
     LaunchedEffect(searchEnabled, focusSearchOnExpand) {
@@ -162,7 +166,10 @@ fun VaultTopBar(
         ) {
             if (onBack != null) {
                 IconButton(onClick = onBack, modifier = Modifier.height(48.dp)) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = appText("返回相册", english))
+                    Icon(
+                        Icons.AutoMirrored.Outlined.ArrowBack,
+                        contentDescription = backLabel ?: appText("返回", english)
+                    )
                 }
                 if (!searchEnabled) {
                     // Pages with a back arrow still want their type switch
@@ -172,7 +179,7 @@ fun VaultTopBar(
                         if (titleSwitch != null && titleSwitch.isNotEmpty()) {
                             TitleSwitchMark(titleSwitch, selectedSearchMode, onTitleSwitchChange, english)
                         } else {
-                            Text(title, fontSize = 16.sp, maxLines = 1)
+                            Text(title, style = VaultText.TopBarTitle, maxLines = 1)
                         }
                     }
                 }
@@ -186,7 +193,7 @@ fun VaultTopBar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Text(title, fontSize = 16.sp, maxLines = 1)
+                    Text(title, style = VaultText.TopBarTitle, maxLines = 1)
                     if (onTitleClick != null) {
                         Icon(
                             Icons.Outlined.SwapHoriz,
@@ -222,7 +229,7 @@ fun VaultTopBar(
                             Text(
                                 actionLabel,
                                 color = if (actionEnabled) actionColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
-                                fontSize = 12.sp,
+                                style = VaultText.TopBarAction,
                                 maxLines = 1,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
@@ -233,7 +240,7 @@ fun VaultTopBar(
                             modifier = Modifier.padding(start = actionStartPadding).height(48.dp).widthIn(min = 44.dp)
                                 .clickable(enabled = actionEnabled, onClick = onActionClick),
                             color = if (actionEnabled) actionColor else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
-                            fontSize = 12.sp,
+                            style = VaultText.TopBarAction,
                             maxLines = 1,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
@@ -357,7 +364,7 @@ fun VaultTopBar(
                 ) {
                     menuItems.forEach { item ->
                         DropdownMenuItem(
-                            text = { Text(item, fontSize = 14.sp) },
+                            text = { Text(item, style = VaultText.Body) },
                             modifier = Modifier.height(52.dp),
                             onClick = {
                                 menuExpanded = false

@@ -125,7 +125,7 @@ fun SelectionScreen(
     }
     if (query.isNotBlank() && orderedMedia.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(appText("没有找到相关内容", english), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(appText("没有匹配的内容", english), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
@@ -385,7 +385,7 @@ fun AlbumSelectionScreen(
     }
     if (query.isNotBlank() && albums.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(appText("没有找到相关内容", english), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(appText("没有匹配的内容", english), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }

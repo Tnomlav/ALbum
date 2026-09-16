@@ -112,7 +112,7 @@ fun SlideshowQueueScreen(
     if (visibleItems.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                appText("这里还没有图片", english),
+                appText("还没有图片", english),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }

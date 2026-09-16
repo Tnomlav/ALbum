@@ -15,7 +15,10 @@ internal enum class MainMenuAction {
 
     companion object {
         fun fromLabel(label: String): MainMenuAction? = when (label) {
-            "\u626b\u63cf\u5237\u65b0", "Scan" -> Scan
+            // "刷新" is the cheap re-read of the media index (pull to refresh or
+            // tapping the current tab); the menu entry is the full re-scan of
+            // storage, so it says so.
+            "\u91cd\u65b0\u626b\u63cf", "\u626b\u63cf\u5237\u65b0", "Rescan", "Scan" -> Scan
             "\u6dfb\u52a0\u672c\u5730\u6587\u4ef6\u5939", "Add local folder" -> AddLocalFolder
             "\u65b0\u5efa\u6587\u4ef6\u5939", "New folder" -> CreateFolder
             "\u5217\u6570", "Columns" -> Columns

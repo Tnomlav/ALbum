@@ -50,6 +50,9 @@ import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.components.VaultTextInputSheet
 import com.example.album.ui.components.VaultWheelChoiceSheet
 import com.example.album.ui.components.VaultLineSlider
+import com.example.album.ui.components.VaultBottomSheet
+import com.example.album.ui.components.VaultSheetApplyButton
+import com.example.album.ui.theme.VaultText
 import com.example.album.wallpaper.WallpaperRefresh
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -122,14 +125,13 @@ fun WallpaperSettingsSheet(
             .apply()
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(text("壁纸设置", "Wallpaper settings")) },
-        text = {
-            Column(
-                Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+    // Same bottom-sheet shape as every other dialog in the app.
+    VaultBottomSheet(title = text("壁纸设置", "Wallpaper settings"), onDismiss = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 22.dp).heightIn(max = 380.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
                 Row(
                     Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
                         .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
@@ -177,7 +179,7 @@ fun WallpaperSettingsSheet(
                     SettingChoiceRow(text("声音播放", "Sound playback"), soundLabel(sound, english), enabled = dynamicBackground) { dialog = WallpaperSettingDialog.Sound }
                     Text(
                         text("动态壁纸音量：${(wallpaperVolume * 100).toInt()}%", "Live wallpaper volume: ${(wallpaperVolume * 100).toInt()}%"),
-                        fontSize = 13.sp,
+                        style = VaultText.RowLabel,
                         color = if (dynamicBackground && sound != WallpaperSound.Disabled) androidx.compose.material3.MaterialTheme.colorScheme.onSurface else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f)
                     )
                     val volumeActiveColor = androidx.compose.material3.MaterialTheme.colorScheme.primary
@@ -193,20 +195,16 @@ fun WallpaperSettingsSheet(
                         thumbColor = volumeActiveColor
                     )
                 }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                save()
-                // Let the wallpaper service pick the new settings up right
-                // away instead of waiting for the next rotation or a manual
-                // re-apply that the system may not honour.
-                WallpaperRefresh.notifySettingsChanged(context)
-                onDismiss()
-            }) { Text(text("应用", "Apply")) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(text("取消", "Cancel")) } }
-    )
+        }
+        VaultSheetApplyButton {
+            save()
+            // Let the wallpaper service pick the new settings up right away
+            // instead of waiting for the next rotation or a manual re-apply
+            // that the system may not honour.
+            WallpaperRefresh.notifySettingsChanged(context)
+            onDismiss()
+        }
+    }
 
     when (dialog) {
         WallpaperSettingDialog.Span -> ChoiceDialog(
@@ -250,7 +248,7 @@ private fun RowScope.TypeChoice(label: String, selected: Boolean, onClick: () ->
         ).clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, color = if (selected) androidx.compose.material3.MaterialTheme.colorScheme.onSurface else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, textAlign = TextAlign.Center)
+        Text(label, color = if (selected) androidx.compose.material3.MaterialTheme.colorScheme.onSurface else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, style = VaultText.RowValue, textAlign = TextAlign.Center)
     }
 }
 
@@ -263,13 +261,13 @@ internal fun SettingChoiceRow(label: String, value: String, enabled: Boolean = t
         Text(
             label,
             modifier = Modifier.weight(1f),
-            fontSize = 13.sp,
+            style = VaultText.RowLabel,
             color = if (enabled) androidx.compose.material3.MaterialTheme.colorScheme.onSurface else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f)
         )
         Text(
             value,
             modifier = Modifier.padding(start = 12.dp),
-            fontSize = 12.sp,
+            style = VaultText.RowValue,
             color = if (enabled) androidx.compose.material3.MaterialTheme.colorScheme.primary else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f),
             textAlign = TextAlign.End,
             maxLines = 1
@@ -368,7 +366,7 @@ private fun FrequencyDialog(
 @Composable
 internal fun SettingSwitch(label: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, modifier = Modifier.weight(1f), fontSize = 13.sp, color = if (enabled) androidx.compose.material3.MaterialTheme.colorScheme.onSurface else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f))
+        Text(label, modifier = Modifier.weight(1f), style = VaultText.RowLabel, color = if (enabled) androidx.compose.material3.MaterialTheme.colorScheme.onSurface else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f))
         Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }

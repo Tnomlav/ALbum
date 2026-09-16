@@ -132,8 +132,8 @@ fun TimelineScreen(
 
     if (media.isEmpty()) {
         Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(if (query.isBlank()) appText(if (isVideo) "这里还没有视频" else "这里还没有图片", english) else appText("没有找到相关内容", english), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (query.isNotBlank()) TextButton(onClick = onClearQuery, modifier = Modifier.padding(top = 8.dp)) { Text(appText("清除", english)) }
+            Text(if (query.isBlank()) appText(if (isVideo) "还没有视频" else "还没有图片", english) else appText("没有匹配的内容", english), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (query.isNotBlank()) TextButton(onClick = onClearQuery, modifier = Modifier.padding(top = 8.dp)) { Text(appText("清除搜索", english)) }
         }
         return
     }
@@ -416,7 +416,7 @@ private fun OptimizedTimelineGrid(
             },
             modifier = Modifier.align(Alignment.CenterEnd)
         )
-        PullRefreshIndicator(pullDistance, pullRefreshing, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+        PullRefreshIndicator(pullDistance, loading, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
 }
 
@@ -609,7 +609,7 @@ private fun AdaptiveTimeline(
             },
             modifier = Modifier.align(Alignment.CenterEnd)
         )
-        PullRefreshIndicator(pullDistance, pullRefreshing, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+        PullRefreshIndicator(pullDistance, loading, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
 }
 

@@ -251,11 +251,11 @@ fun AlbumsScreen(
                 scrollRequest = scrollRequest
             )
         media.isEmpty() && pinnedAlbumName == null -> EmptyMessage(
-            emptyMessage ?: if (query.isBlank()) appText(if (isVideo) "这里还没有视频" else "这里还没有图片", english) else appText("没有找到相关内容", english),
-            actionLabel = query.takeIf { it.isNotBlank() }?.let { appText("清除", english) },
+            emptyMessage ?: if (query.isBlank()) appText(if (isVideo) "还没有视频" else "还没有图片", english) else appText("没有匹配的内容", english),
+            actionLabel = query.takeIf { it.isNotBlank() }?.let { appText("清除搜索", english) },
             onAction = onClearQuery
         )
-        albums.isEmpty() && currentAlbum == null -> EmptyMessage(appText("没有找到相关内容", english), appText("清除", english), onClearQuery)
+        albums.isEmpty() && currentAlbum == null -> EmptyMessage(appText("没有匹配的内容", english), appText("清除搜索", english), onClearQuery)
         else -> AnimatedContent(
             targetState = currentAlbum,
             contentKey = { it?.name },
@@ -404,7 +404,7 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
             },
             modifier = Modifier.align(Alignment.CenterEnd)
         )
-        PullRefreshIndicator(pullDistance, pullRefreshing, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+        PullRefreshIndicator(pullDistance, refreshing, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
 }
 
@@ -581,7 +581,7 @@ private fun FolderGrid(
         },
         modifier = Modifier.align(Alignment.CenterEnd)
     )
-    PullRefreshIndicator(pullDistance, pullRefreshing, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+    PullRefreshIndicator(pullDistance, refreshing, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
 }
 
@@ -745,7 +745,7 @@ private fun AdaptiveFolderGrid(
             },
             modifier = Modifier.align(Alignment.CenterEnd)
         )
-        PullRefreshIndicator(pullDistance, pullRefreshing, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+        PullRefreshIndicator(pullDistance, refreshing, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
 }
 
@@ -796,7 +796,7 @@ private fun EmptyFolderMessage() {
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(appText("此文件夹没有内容", LocalAppEnglish.current), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(appText("文件夹为空", LocalAppEnglish.current), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

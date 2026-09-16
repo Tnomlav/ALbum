@@ -76,6 +76,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
 import com.example.album.ui.theme.ThemeAccent
+import com.example.album.ui.theme.VaultText
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -100,7 +101,7 @@ fun VaultOptionSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(option, modifier = Modifier.weight(1f), fontSize = 15.sp)
+                    Text(option, modifier = Modifier.weight(1f), style = VaultText.Body)
                     if (option == selected) Text("✓", fontSize = 16.sp)
                 }
             }
@@ -126,7 +127,7 @@ fun VaultApplyChoiceSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(option, modifier = Modifier.weight(1f), fontSize = 15.sp)
+                    Text(option, modifier = Modifier.weight(1f), style = VaultText.Body)
                     if (option == draft) Text("✓", fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
                 }
             }
@@ -159,14 +160,14 @@ fun VaultSortChoiceSheet(
         Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
             methods.forEach { option ->
                 Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable { draftMethod = option }.padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(option, Modifier.weight(1f), fontSize = 15.sp)
+                    Text(option, Modifier.weight(1f), style = VaultText.Body)
                     if (option == draftMethod) Text("✓", fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
                 }
             }
             Spacer(Modifier.height(46.dp))
             directions.forEach { option ->
                 Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable { draftDirection = option }.padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(option, Modifier.weight(1f), fontSize = 15.sp)
+                    Text(option, Modifier.weight(1f), style = VaultText.Body)
                     if (option == draftDirection) Text("✓", fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
                 }
             }
@@ -300,7 +301,7 @@ fun VaultColorSheet(
                             shape = CircleShape,
                             border = if (option == selected) androidx.compose.foundation.BorderStroke(3.dp, MaterialTheme.colorScheme.onSurface) else null
                         ) {}
-                        Text(optionLabel(option), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(optionLabel(option), style = VaultText.RowValue, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 repeat(3 - rowOptions.size) { Spacer(Modifier.widthIn(min = 82.dp)) }
@@ -514,7 +515,7 @@ fun VaultWheelChoiceSheet(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Box(Modifier.fillMaxWidth().heightIn(min = 60.dp), contentAlignment = Alignment.Center) {
-                        Text(title, color = foreground, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Text(title, color = foreground, style = VaultText.SheetTitle)
                         IconButton(
                             onClick = { dismissAnimated() },
                             modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp).size(40.dp)
@@ -522,18 +523,35 @@ fun VaultWheelChoiceSheet(
                         ) { Icon(Icons.Outlined.Close, appText("关闭", LocalAppEnglish.current), tint = foreground) }
                     }
                     ChoiceWheel(options, draft, onSelected = { draft = it }, foreground = foreground, muted = muted, divider = divider)
-                    Box(Modifier.fillMaxWidth().height(74.dp), contentAlignment = Alignment.Center) {
-                        TextButton(
-                            onClick = { dismissAnimated { onApply(draft) } },
-                            modifier = Modifier.fillMaxWidth(.8f).height(54.dp),
-                            shape = CircleShape,
-                            border = androidx.compose.foundation.BorderStroke(2.dp, if (playerStyle) Color.White else MaterialTheme.colorScheme.primary)
-                        ) {
-                            Text(appText("应用", LocalAppEnglish.current), color = if (playerStyle) Color.White else MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+                    VaultSheetApplyButton(
+                        playerStyle = playerStyle,
+                        onClick = { dismissAnimated { onApply(draft) } }
+                    )
                 }
             }
+        }
+    }
+}
+
+/**
+ * The apply action shared by every bottom sheet: one outlined pill at the
+ * bottom, so "apply" always looks and sits the same way.
+ */
+@Composable
+fun VaultSheetApplyButton(
+    label: String = appText("应用", LocalAppEnglish.current),
+    playerStyle: Boolean = false,
+    onClick: () -> Unit
+) {
+    val foreground = if (playerStyle) Color.White else MaterialTheme.colorScheme.primary
+    Box(Modifier.fillMaxWidth().height(74.dp), contentAlignment = Alignment.Center) {
+        TextButton(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth(.8f).height(54.dp),
+            shape = CircleShape,
+            border = androidx.compose.foundation.BorderStroke(2.dp, foreground)
+        ) {
+            Text(label, color = foreground, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -945,8 +963,9 @@ private fun DateWheel(
     }
 }
 
+/** The shared bottom-sheet frame: title bar with a close button, then content. */
 @Composable
-private fun VaultBottomSheet(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+fun VaultBottomSheet(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val english = LocalAppEnglish.current
     var shown by remember { mutableStateOf(false) }
     var closing by remember { mutableStateOf(false) }
@@ -995,7 +1014,7 @@ private fun VaultBottomSheet(title: String, onDismiss: () -> Unit, content: @Com
             ) {
                 Column {
                     Box(Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) {
-                        Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Text(title, style = VaultText.SheetTitle)
                         IconButton(onClick = ::dismissAnimated, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)) {
                             Icon(Icons.Outlined.Close, contentDescription = appText("关闭", english))
                         }

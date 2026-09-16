@@ -152,6 +152,7 @@ import com.example.album.ui.components.VaultSortChoiceSheet
 import com.example.album.ui.components.VaultSortWheelSheet
 import com.example.album.ui.components.VaultLayoutWheelSheet
 import com.example.album.ui.screens.SlideshowSettingsSheet
+import com.example.album.ui.screens.GestureHintsSheet
 import com.example.album.ui.components.VaultWheelChoiceSheet
 import com.example.album.ui.components.VaultDateSheet
 import com.example.album.ui.components.VaultTextInputDialog
@@ -673,6 +674,11 @@ fun AlbumApp(
     // then opens in full screen and begins playing immediately.
     var slideshowStartImmersive by remember { mutableStateOf(false) }
     var showSlideshowSettings by remember { mutableStateOf(false) }
+    var showGestureHints by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        // Most of the app's gestures are invisible; spell them out once.
+        if (!albumSettings.getBoolean("gesture_hints_shown", false)) showGestureHints = true
+    }
     var suspendedSearchQuery by rememberSaveable { mutableStateOf<String?>(null) }
     var searchOpen by rememberSaveable { mutableStateOf(true) }
     LaunchedEffect(selectionMode) {
@@ -1200,7 +1206,12 @@ fun AlbumApp(
         MainTab.Pixiv -> "Pixiv"
         MainTab.Tools -> "Tools"
         MainTab.Settings -> "Settings"
-    } else tab.label
+    } else when (tab) {
+        // The label follows the content in both languages, not just English:
+        // the icon already switches, and "视频 icon + 相册 label" reads wrong.
+        MainTab.Albums -> if (albumShowsVideos) "视频" else "相册"
+        else -> tab.label
+    }
 
     fun mediaInDisplayOrder(items: List<MediaItem>): List<MediaItem> {
         return if (selectedTab == MainTab.Timeline) {
@@ -1791,7 +1802,7 @@ fun AlbumApp(
     }
 
     // Pull to refresh only re-reads MediaStore. The full storage walk behind
-    // "扫描刷新" touches every file in DCIM/Pictures/Movies/Downloads and made
+    // "重新扫描" touches every file in DCIM/Pictures/Movies/Downloads and made
     // every pull feel slow even when nothing had changed; the system media
     // provider already indexes new files, so the walk stays on the menu entry.
     val refreshLibrary: () -> Unit = {
@@ -2300,6 +2311,11 @@ fun AlbumApp(
                         slideshowQueueOpen = false
                     }
                 },
+                backLabel = if (slideshowQueueFolderMode && slideshowQueueOpenedFolder != null) {
+                    appText("返回队列", english)
+                } else {
+                    appText("返回工具箱", english)
+                },
                 actionLabel = appText("播放", english),
                 actionEnabled = slideshowQueueMedia.isNotEmpty(),
                 actionCapsule = true,
@@ -2362,6 +2378,7 @@ fun AlbumApp(
                     wallpaperSelectedUris = emptySet()
                     wallpaperSelectionOrder = emptyList()
                 },
+                backLabel = appText("返回工具箱", english),
                 // Static/live moved to the title switch, matching the other
                 // pages now that the search field is gone.
                 searchModeLabels = emptyList(),
@@ -2383,10 +2400,13 @@ fun AlbumApp(
                     if (progress == null) appText("中止", english)
                     else if (english) "Cancel ${progress.completed}/${progress.total}" else "中止 ${progress.completed}/${progress.total}"
                 } else when {
-                    wallpaperSelectionMode -> appText("清除", english)
+                    // "清除" collided with "清除搜索" elsewhere; this action
+                    // only takes the selected items out of the queue.
+                    wallpaperSelectionMode -> appText("移出队列", english)
                     wallpaperQueueIsApplied -> appText("重新应用", english)
                     else -> appText("应用", english)
                 },
+                actionDestructive = wallpaperSelectionMode,
                 actionEnabled = if (wallpaperImportRunning) true else if (wallpaperSelectionMode) {
                     wallpaperSelectedUris.isNotEmpty()
                 } else true,
@@ -2517,31 +2537,31 @@ fun AlbumApp(
                 onFavoriteClick = { favoriteFilter = !favoriteFilter },
                 menuItems = when (tab) {
                     MainTab.Albums -> if (appLanguage == "English") {
-                        if (openedFolder == null) listOf("Scan", "Add local folder", "Columns", "Sort", "Select")
-                        else listOf("Scan", "New folder", "Columns", "Layout", "Sort", "Select")
+                        if (openedFolder == null) listOf("Rescan", "Add local folder", "Columns", "Sort", "Select")
+                        else listOf("Rescan", "New folder", "Columns", "Layout", "Sort", "Select")
                     } else {
-                        if (openedFolder == null) listOf("扫描刷新", "添加本地文件夹", "列数", "排序方式", "进入多选")
-                        else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
+                        if (openedFolder == null) listOf("重新扫描", "添加本地文件夹", "列数", "排序方式", "进入多选")
+                        else listOf("重新扫描", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
                     }
                     MainTab.Timeline -> if (appLanguage == "English") {
-                        listOf("Scan", "Add local folder", "Jump to date", "Columns", "Layout", "Select")
-                    } else listOf("扫描刷新", "添加本地文件夹", "跳转日期", "列数", "排布方式", "进入多选")
+                        listOf("Rescan", "Add local folder", "Jump to date", "Columns", "Layout", "Select")
+                    } else listOf("重新扫描", "添加本地文件夹", "跳转日期", "列数", "排布方式", "进入多选")
                     MainTab.Videos -> if (appLanguage == "English") {
-                        if (openedFolder == null) listOf("Scan", "Add local folder", "Columns", "Sort", "Select")
-                        else listOf("Scan", "New folder", "Columns", "Layout", "Sort", "Select")
+                        if (openedFolder == null) listOf("Rescan", "Add local folder", "Columns", "Sort", "Select")
+                        else listOf("Rescan", "New folder", "Columns", "Layout", "Sort", "Select")
                     } else {
-                        if (openedFolder == null) listOf("扫描刷新", "添加本地文件夹", "列数", "排序方式", "进入多选")
-                        else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
+                        if (openedFolder == null) listOf("重新扫描", "添加本地文件夹", "列数", "排序方式", "进入多选")
+                        else listOf("重新扫描", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
                     }
                     MainTab.Pixiv -> if (appLanguage == "English") {
-                        if (pixivSearchMode == PixivSearchMode.Tag) listOf("Scan", "Columns", "Layout", "Sort", "Select", "Notes")
-                        else if (openedFolder == null) listOf("Scan", "Columns", "Sort", "Select", "Notes")
-                        else listOf("Scan", "New folder", "Columns", "Layout", "Sort", "Select", "Notes")
+                        if (pixivSearchMode == PixivSearchMode.Tag) listOf("Rescan", "Columns", "Layout", "Sort", "Select", "Notes")
+                        else if (openedFolder == null) listOf("Rescan", "Columns", "Sort", "Select", "Notes")
+                        else listOf("Rescan", "New folder", "Columns", "Layout", "Sort", "Select", "Notes")
                     } else if (pixivSearchMode == PixivSearchMode.Tag) {
-                        listOf("扫描刷新", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
+                        listOf("重新扫描", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
                     } else if (openedFolder == null) {
-                        listOf("扫描刷新", "列数", "排序方式", "进入多选", "注意事项")
-                    } else listOf("扫描刷新", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
+                        listOf("重新扫描", "列数", "排序方式", "进入多选", "注意事项")
+                    } else listOf("重新扫描", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
                     MainTab.Tools -> emptyList()
                     MainTab.Settings -> emptyList()
                 },
@@ -2599,6 +2619,12 @@ fun AlbumApp(
                 onBack = when {
                     openedFolder != null && tab != MainTab.Timeline -> ::navigateFolderBack
                     searchOpen && query.isNotBlank() -> ::suspendSearch
+                    else -> null
+                },
+                backLabel = when {
+                    openedFolder != null && tab != MainTab.Timeline ->
+                        appText("返回上级文件夹", english)
+                    searchOpen && query.isNotBlank() -> appText("退出搜索", english)
                     else -> null
                 },
                 searchPlaceholder = if (tab == MainTab.Pixiv) {
@@ -2812,26 +2838,11 @@ fun AlbumApp(
                                 scrollToTopToken = System.nanoTime()
                             } else {
                                 // Already at the top: a second tap refreshes.
+                                // The grids show their refresh indicator while
+                                // the reload runs, so no extra toast is needed.
                                 when (tab) {
-                                    MainTab.Pixiv -> {
-                                        Toast.makeText(
-                                            context,
-                                            appText("正在刷新 P 页", english),
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                        requestPixivReload()
-                                    }
-                                    MainTab.Albums, MainTab.Videos, MainTab.Timeline -> {
-                                        // Without a visible hint this refresh is
-                                        // indistinguishable from nothing
-                                        // happening on a full library.
-                                        Toast.makeText(
-                                            context,
-                                            appText("正在刷新媒体库", english),
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                        refreshLibrary()
-                                    }
+                                    MainTab.Pixiv -> requestPixivReload()
+                                    MainTab.Albums, MainTab.Videos, MainTab.Timeline -> refreshLibrary()
                                     else -> Unit
                                 }
                             }
@@ -3324,6 +3335,7 @@ fun AlbumApp(
                     onThemeColorChange = onThemeColorChange,
                     onNavReorderChange = { navReorderEnabled = it },
                     onToolsReorderChange = { toolsReorderEnabled = it },
+                    onShowHints = { showGestureHints = true },
                     onPixivTabEnabledChange = { enabled ->
                         pixivTabEnabled = enabled
                         tabOrder = normalizedTabOrder(tabOrder, enabled)
@@ -3609,6 +3621,12 @@ fun AlbumApp(
             preferences = albumSettings,
             onDismiss = { showSlideshowSettings = false }
         )
+    }
+    if (showGestureHints) {
+        GestureHintsSheet(onDismiss = {
+            showGestureHints = false
+            albumSettings.edit().putBoolean("gesture_hints_shown", true).apply()
+        })
     }
     if (showSlideshowColumnDialog) {
         val options = (1..6).map { if (english) "$it columns" else "$it 列" }

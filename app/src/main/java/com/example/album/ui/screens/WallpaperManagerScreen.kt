@@ -147,7 +147,7 @@ fun WallpaperManagerScreen(
     if (!showFolderTiles && visibleMedia.isEmpty() && folders.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                if (query.isBlank()) appText("壁纸队列为空", english) else appText("没有找到相关内容", english),
+                if (query.isBlank()) appText("壁纸队列为空", english) else appText("没有匹配的内容", english),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }

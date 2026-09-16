@@ -88,6 +88,7 @@ fun SettingsScreen(
     onThemeColorChange: (String) -> Unit,
     onNavReorderChange: (Boolean) -> Unit,
     onToolsReorderChange: (Boolean) -> Unit = {},
+    onShowHints: () -> Unit = {},
     onPixivTabEnabledChange: (Boolean) -> Unit,
     onRetentionChange: (Int) -> Unit,
     onDefaultSortChange: (String) -> Unit,
@@ -240,6 +241,10 @@ fun SettingsScreen(
         item { ToggleRow("下拉刷新", "在支持扫描的页面顶部下拉触发扫描", pullRefresh) { setBoolean("pull_refresh", it) { pullRefresh = it } } }
         item { ToggleRow("长按移动底栏图标", "开启后可长按并拖动底栏图标调整顺序", navReorder) { setBoolean("nav_reorder", it) { navReorder = it; onNavReorderChange(it) } } }
         item { ToggleRow("长按移动工具箱组件", "开启后可长按并拖动工具箱内的条目调整顺序", toolsReorder) { setBoolean("tools_reorder", it) { toolsReorder = it; onToolsReorderChange(it) } } }
+        // The gesture list is shown once on first launch; keep it reachable.
+        item {
+            ClickableRow("使用提示", "查看长按、拖动、播放器手势等隐藏操作") { onShowHints() }
+        }
         item {
             ToggleRow("显示 Pixiv 底栏页面", "将 Pixiv 文件夹作为独立页面显示在底栏", pixivTabEnabled) { enabled ->
                 setBoolean("pixiv_tab_enabled", enabled) {
@@ -680,6 +685,29 @@ private fun SettingsHeader(title: String, expanded: Boolean = true, onClick: (()
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary
             )
+        }
+    }
+}
+
+/** A plain row that only opens something else. */
+@Composable
+private fun ClickableRow(label: String, note: String?, onClick: () -> Unit) {
+    val english = LocalSettingsEnglish.current
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = VaultDimens.SettingsRowMinHeight)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 15.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(settingsText(label, english), style = MaterialTheme.typography.bodyMedium)
+            note?.let {
+                Text(
+                    settingsText(it, english),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

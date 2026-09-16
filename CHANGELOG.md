@@ -1,5 +1,22 @@
 # Album Changelog
 
+## v1.1.89 - 2026-09-16 (local signed build)
+
+Consistency pass over the whole UI, following the review of what feels intuitive and visually coherent.
+
+- One modal language: the wallpaper settings and slideshow settings are bottom sheets now, with the same frame, the same rows and the same apply pill as every other sheet (they were centred Material dialogs, the only ones in the app).
+- One vocabulary for the top-bar action: "清除" (which also meant "clear the search") is now "移出队列" for the queue action, and the empty states say "清除搜索"; the menu entry that walks storage is "重新扫描" while pull-to-refresh and tapping the current tab stay "刷新".
+- Feedback: a refresh started from the UI now shows the same pull-to-refresh indicator the gesture uses, instead of being invisible on a full library; the extra toasts were removed.
+- The bottom-bar label follows the content in Chinese too (相册 ↔ 视频), matching its icon and the English behaviour.
+- Back buttons are named after the page they return to (返回工具箱, 返回队列, 返回上级文件夹, 退出搜索) instead of always "返回相册".
+- Empty states speak with one voice: 还没有图片 / 还没有视频, 文件夹为空, 没有匹配的内容, plus the queue messages.
+- Semantic text styles (`VaultText`) replace the scattered hard-coded font sizes in the top bar, the sheets and the settings rows.
+- New one-time "使用提示" sheet listing the gestures that are otherwise invisible (long press to select, long-press to reorder, viewer and player gestures, tab-tap to top/refresh); it is also reachable from Settings.
+- English coverage checked properly this time: 362 strings are mapped and only 12 were missing (the review's "one third" figure came from a bad parse of the mapping file); those are added now.
+- APK: `app/release/app-release.apk` (arm64-v8a split)
+- SHA-256: `3AFCBF9584032F80C20B4FB4732DF1BD998A644F5DF20530D862D7B7E721E708`
+- Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug` and `assembleRelease` passed. On the test phone the hints sheet renders and opens from Settings, and the wallpaper settings sheet now matches the shared sheet shape.
+
 ## v1.1.87 - 2026-09-16 (local signed build)
 
 - The P page's artist/Tag switch moved to the right side of the bar, next to the favourite and overflow buttons, where the search it controls lives; the page keeps its "Pixiv" title on the left.
