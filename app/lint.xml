@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Version-availability checks: what they report depends on what the version
+  lookup returns at analysis time, so the same commit can produce different
+  results on a laptop and on CI (that is exactly how the first green-ish CI run
+  failed: eight "newer version available" errors that the local baseline had
+  never seen). Keep them visible in reports, but below the warning level so
+  they cannot fail a build.
+-->
+<lint>
+    <issue id="GradleDependency" severity="informational" />
+    <issue id="NewerVersionAvailable" severity="informational" />
+    <issue id="AndroidGradlePluginVersion" severity="informational" />
+</lint>
