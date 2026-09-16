@@ -69,6 +69,7 @@ import com.example.album.ui.components.MediaThumbnail
 import com.example.album.ui.components.PressableMediaThumbnail
 import com.example.album.ui.components.PullRefreshIndicator
 import com.example.album.ui.components.rememberPullRefreshConnection
+import com.example.album.ui.components.rememberPullToRefresh
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.example.album.ui.components.ListScrollHandle
 import com.example.album.ui.components.LazyGridMediaPrefetch
@@ -331,42 +332,21 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
     }
         val albumCovers = remember(albums) { albums.mapNotNull { it.coverItem ?: it.items.firstOrNull() } }
     LazyGridMediaPrefetch(gridState, albumCovers, keySelector = MediaItem::folder)
-    var pullDistance by remember { mutableFloatStateOf(0f) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val scrollJob = remember { arrayOfNulls<Job>(1) }
     val metrics by remember(gridState) { derivedStateOf { gridScrollMetrics(gridState) } }
-    val density = LocalDensity.current
-    val triggerPull = with(density) { 96.dp.toPx() }
-    val maxPull = with(density) { 144.dp.toPx() }
-    // Loading/scanning alone must not move the content like a pull gesture.
-    val pullRefreshing = refreshing && pullDistance > 0f
-    LaunchedEffect(refreshing) {
-        if (!refreshing) pullDistance = 0f
-    }
-    val pullOffset by animateFloatAsState(
-        targetValue = if (pullRefreshing) triggerPull else pullDistance,
-        animationSpec = if (pullDistance > 0f && !refreshing) snap() else tween(240, easing = CubicBezierEasing(.22f, .8f, .28f, 1f)),
-        label = "album-pull"
-    )
-    val pullConnection = rememberPullRefreshConnection(
-        enabled = pullEnabled,
+    val pull = rememberPullToRefresh(
         refreshing = refreshing,
+        enabled = pullEnabled,
         atTop = { !gridState.canScrollBackward },
-        pullDistance = { pullDistance },
-        triggerDistance = triggerPull,
-        maxDistance = maxPull,
-        onPullDistanceChange = { pullDistance = it },
-        onRelease = { pullDistance = 0f },
-        onRefreshStarted = {
-            pullDistance = triggerPull
-            onRefresh()
-        }
+        onRefresh = onRefresh,
+        label = "album-pull"
     )
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
             state = gridState,
-            modifier = Modifier.fillMaxSize().padding(horizontal = 7.dp).graphicsLayer { translationY = pullOffset }.nestedScroll(pullConnection).batchSelectionGesture(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 7.dp).graphicsLayer { translationY = pull.offset }.nestedScroll(pull.connection).batchSelectionGesture(
                 state = gridState,
                 items = albums,
                 keyOf = { it.name },
@@ -404,7 +384,7 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
             },
             modifier = Modifier.align(Alignment.CenterEnd)
         )
-        PullRefreshIndicator(pullDistance, refreshing, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+        PullRefreshIndicator(pull.distance, refreshing, pull.triggerDistance, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
 }
 
@@ -496,35 +476,15 @@ private fun FolderGrid(
             }
     }
         LazyGridMediaPrefetch(gridState, album.items)
-    var pullDistance by remember { mutableFloatStateOf(0f) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val scrollJob = remember { arrayOfNulls<Job>(1) }
     val metrics by remember(gridState) { derivedStateOf { gridScrollMetrics(gridState) } }
-    val density = LocalDensity.current
-    val triggerPull = with(density) { 96.dp.toPx() }
-    val maxPull = with(density) { 144.dp.toPx() }
-    val pullRefreshing = refreshing && pullDistance > 0f
-    LaunchedEffect(refreshing) {
-        if (!refreshing) pullDistance = 0f
-    }
-    val pullOffset by animateFloatAsState(
-        targetValue = if (pullRefreshing) triggerPull else pullDistance,
-        animationSpec = if (pullDistance > 0f && !refreshing) snap() else tween(240, easing = CubicBezierEasing(.22f, .8f, .28f, 1f)),
-        label = "folder-pull"
-    )
-    val pullConnection = rememberPullRefreshConnection(
-        enabled = pullEnabled,
+    val pull = rememberPullToRefresh(
         refreshing = refreshing,
+        enabled = pullEnabled,
         atTop = { !gridState.canScrollBackward },
-        pullDistance = { pullDistance },
-        triggerDistance = triggerPull,
-        maxDistance = maxPull,
-        onPullDistanceChange = { pullDistance = it },
-        onRelease = { pullDistance = 0f },
-        onRefreshStarted = {
-            pullDistance = triggerPull
-            onRefresh()
-        }
+        onRefresh = onRefresh,
+        label = "folder-pull"
     )
     if (layout == MediaLayout.Adaptive) {
         AdaptiveFolderGrid(album, columns, refreshing, onOpenMedia, onLongPressMedia, onSelectionGestureStartMedia, onBatchSelectMedia, onSelectionGestureEnd, onRefresh, sharedElementEnabled, onOpenPixivArchive, favoriteUris, showFavoriteBadge, selectionPreview, selectedUris, initialFirstVisibleItem, initialFirstVisibleOffset, onScrollPositionChanged, onFirstVisibleMediaChanged, scrollToUri, scrollToToken, scrollToTopToken, scrollRequest)
@@ -534,7 +494,7 @@ private fun FolderGrid(
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns),
         state = gridState,
-        modifier = Modifier.fillMaxSize().graphicsLayer { translationY = pullOffset }.nestedScroll(pullConnection).batchSelectionGesture(
+        modifier = Modifier.fillMaxSize().graphicsLayer { translationY = pull.offset }.nestedScroll(pull.connection).batchSelectionGesture(
             state = gridState,
             items = album.items,
             keyOf = { it.uri.toString() },
@@ -581,7 +541,7 @@ private fun FolderGrid(
         },
         modifier = Modifier.align(Alignment.CenterEnd)
     )
-    PullRefreshIndicator(pullDistance, refreshing, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+    PullRefreshIndicator(pull.distance, refreshing, pull.triggerDistance, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
 }
 
@@ -656,38 +616,18 @@ private fun AdaptiveFolderGrid(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val scrollJob = remember { arrayOfNulls<Job>(1) }
     val metrics by remember(state) { derivedStateOf { staggeredGridScrollMetrics(state) } }
-    var pullDistance by remember { mutableFloatStateOf(0f) }
-    val density = LocalDensity.current
-    val triggerPull = with(density) { 96.dp.toPx() }
-    val maxPull = with(density) { 144.dp.toPx() }
-    val pullRefreshing = refreshing && pullDistance > 0f
-    LaunchedEffect(refreshing) {
-        if (!refreshing) pullDistance = 0f
-    }
-    val pullOffset by animateFloatAsState(
-        targetValue = if (pullRefreshing) triggerPull else pullDistance,
-        animationSpec = if (pullDistance > 0f && !refreshing) snap() else tween(240, easing = CubicBezierEasing(.22f, .8f, .28f, 1f)),
-        label = "adaptive-folder-pull"
-    )
-    val pullConnection = rememberPullRefreshConnection(
-        enabled = pullEnabled,
+    val pull = rememberPullToRefresh(
         refreshing = refreshing,
+        enabled = pullEnabled,
         atTop = { !state.canScrollBackward },
-        pullDistance = { pullDistance },
-        triggerDistance = triggerPull,
-        maxDistance = maxPull,
-        onPullDistanceChange = { pullDistance = it },
-        onRelease = { pullDistance = 0f },
-        onRefreshStarted = {
-            pullDistance = triggerPull
-            onRefresh()
-        }
+        onRefresh = onRefresh,
+        label = "adaptive-folder-pull"
     )
     Box(Modifier.fillMaxSize()) {
         LazyVerticalStaggeredGrid(
             columns = StaggeredGridCells.Fixed(columns),
             state = state,
-                modifier = Modifier.fillMaxSize().graphicsLayer { translationY = pullOffset }.nestedScroll(pullConnection).batchSelectionStaggeredGesture(
+                modifier = Modifier.fillMaxSize().graphicsLayer { translationY = pull.offset }.nestedScroll(pull.connection).batchSelectionStaggeredGesture(
                     state = state,
                     items = album.items,
                     keyOf = { it.uri.toString() },
@@ -745,7 +685,7 @@ private fun AdaptiveFolderGrid(
             },
             modifier = Modifier.align(Alignment.CenterEnd)
         )
-        PullRefreshIndicator(pullDistance, refreshing, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+        PullRefreshIndicator(pull.distance, refreshing, pull.triggerDistance, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
 }
 

@@ -629,26 +629,6 @@ fun ImageEditorDialog(
                     }
                 }
             }
-            /*
-            if (customRatioOpen && panel == EditorPanel.Compose) {
-                EditorRatioPopoverNew(
-                    title = appText("自定义裁剪比例", english),
-                    width = customWidth,
-                    height = customHeight,
-                    onWidthChange = { customWidth = it.filter(Char::isDigit).take(4) },
-                    onHeightChange = { customHeight = it.filter(Char::isDigit).take(4) },
-                    onDismiss = { customRatioOpen = false },
-                    onConfirm = {
-                        val width = customWidth.toFloatOrNull()
-                        val height = customHeight.toFloatOrNull()
-                        if (width != null && height != null && width > 0f && height > 0f) {
-                            commit(state.copy(crop = CropPreset.Custom, customCropRatio = width / height, cropRect = NormalizedRect()))
-                            customRatioOpen = false
-                        }
-                    }
-                )
-            }
-                */
             if (customRatioOpen && panel == EditorPanel.Compose) {
                 EditorRatioPopoverNew(
                     width = customWidth,

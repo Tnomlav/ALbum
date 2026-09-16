@@ -3,7 +3,6 @@ package com.example.album.ui.theme
 import androidx.compose.ui.graphics.Color
 
 val VaultGreen = Color(0xFF00E673)
-val VaultGreenDark = Color(0xFF19E67A)
 val VaultBlue = Color(0xFF3D8BFF)
 val VaultTeal = Color(0xFF00C7BE)
 val VaultOrange = Color(0xFFFF9F0A)

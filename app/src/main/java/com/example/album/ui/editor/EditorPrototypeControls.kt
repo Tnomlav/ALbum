@@ -45,7 +45,6 @@ internal val EditorAccent: Color
 internal val EditorInk = Color(0xFF232725)
 internal val EditorMuted = Color(0xFF777B79)
 internal val EditorTile = Color(0xFFF0F0EE)
-internal val EditorStageColor = Color(0xFFF6F6F4)
 
 @Composable
 internal fun EditorRuler(

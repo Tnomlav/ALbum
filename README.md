@@ -26,12 +26,12 @@ Album 主要服务于希望直接管理本机媒体文件的用户：不上传�
 
 - [GitHub Releases](https://github.com/Tnomlav/ALbum/releases)
 - 最新已发布版本：[v1.1.50 APK](https://github.com/Tnomlav/ALbum/releases/download/v1.1.50/Album-v1.1.50.apk)
-- 当前构建版本：`1.1.89`
+- 当前构建版本：`1.1.91`
 
-仓库内本地签名构建 `app/release/app-release.apk` 为 `1.1.89`（arm64-v8a 分包，其余架构见构建输出目录），仅用于交付前验证，不代表已创建 GitHub Release。其 SHA-256 为：
+仓库内本地签名构建 `app/release/app-release.apk` 为 `1.1.91`（arm64-v8a 分包，其余架构见构建输出目录），仅用于交付前验证，不代表已创建 GitHub Release。其 SHA-256 为：
 
 ```text
-3AFCBF9584032F80C20B4FB4732DF1BD998A644F5DF20530D862D7B7E721E708
+43A97129BF16C445B7DE710DADFE7C4F6E3A8D813EA6F11E2F46EC43F52258DD
 ```
 
 安装前请确认文件来自本仓库，并通过 SHA-256 校验下载完整性。正式发布版本和发布说明会优先放在 GitHub Releases。

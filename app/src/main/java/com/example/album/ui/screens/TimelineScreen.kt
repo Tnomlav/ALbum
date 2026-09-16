@@ -46,6 +46,7 @@ import com.example.album.ui.searchTextMatches
 import com.example.album.ui.components.PressableMediaThumbnail
 import com.example.album.ui.components.PullRefreshIndicator
 import com.example.album.ui.components.rememberPullRefreshConnection
+import com.example.album.ui.components.rememberPullToRefresh
 import com.example.album.ui.components.ListScrollHandle
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.example.album.ui.components.LazyGridMediaPrefetch
@@ -293,36 +294,15 @@ private fun OptimizedTimelineGrid(
     }
         val flatItems = remember(groupedDates) { groupedDates.flatMap { it.value } }
     LazyGridMediaPrefetch(state, flatItems)
-    var pullDistance by remember { mutableFloatStateOf(0f) }
     val scope = rememberCoroutineScope()
     val scrollJob = remember { arrayOfNulls<Job>(1) }
     val metrics by remember(state) { derivedStateOf { timelineGridScrollMetrics(state) } }
-    val density = LocalDensity.current
-    val triggerPull = with(density) { 96.dp.toPx() }
-    val maxPull = with(density) { 144.dp.toPx() }
-    val pullRefreshing = loading && pullDistance > 0f
-    LaunchedEffect(loading) {
-        if (!loading) pullDistance = 0f
-    }
-    val pullOffset by animateFloatAsState(
-        targetValue = if (pullRefreshing) triggerPull else pullDistance,
-        animationSpec = if (pullDistance > 0f && !loading) snap()
-        else tween(240, easing = CubicBezierEasing(.22f, .8f, .28f, 1f)),
-        label = "timeline-grid-pull"
-    )
-    val pullConnection = rememberPullRefreshConnection(
-        enabled = pullEnabled,
+    val pull = rememberPullToRefresh(
         refreshing = loading,
+        enabled = pullEnabled,
         atTop = { !state.canScrollBackward },
-        pullDistance = { pullDistance },
-        triggerDistance = triggerPull,
-        maxDistance = maxPull,
-        onPullDistanceChange = { pullDistance = it },
-        onRelease = { pullDistance = 0f },
-        onRefreshStarted = {
-            pullDistance = triggerPull
-            onRefresh()
-        }
+        onRefresh = onRefresh,
+        label = "timeline-grid-pull"
     )
     LaunchedEffect(jumpToDate, groupedDates) {
         val target = jumpToDate ?: return@LaunchedEffect
@@ -346,7 +326,7 @@ private fun OptimizedTimelineGrid(
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns.coerceIn(1, 6)),
             state = state,
-            modifier = Modifier.fillMaxSize().graphicsLayer { translationY = pullOffset }.nestedScroll(pullConnection).batchSelectionGesture(
+            modifier = Modifier.fillMaxSize().graphicsLayer { translationY = pull.offset }.nestedScroll(pull.connection).batchSelectionGesture(
                 state = state,
                 items = flatItems,
                 keyOf = { it.uri.toString() },
@@ -416,7 +396,7 @@ private fun OptimizedTimelineGrid(
             },
             modifier = Modifier.align(Alignment.CenterEnd)
         )
-        PullRefreshIndicator(pullDistance, loading, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+        PullRefreshIndicator(pull.distance, loading, pull.triggerDistance, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
 }
 
@@ -502,32 +482,12 @@ private fun AdaptiveTimeline(
     val scope = rememberCoroutineScope()
     val scrollJob = remember { arrayOfNulls<Job>(1) }
     val metrics by remember(state) { derivedStateOf { timelineStaggeredGridScrollMetrics(state) } }
-    var pullDistance by remember { mutableFloatStateOf(0f) }
-    val density = LocalDensity.current
-    val triggerPull = with(density) { 96.dp.toPx() }
-    val maxPull = with(density) { 144.dp.toPx() }
-    val pullRefreshing = loading && pullDistance > 0f
-    LaunchedEffect(loading) {
-        if (!loading) pullDistance = 0f
-    }
-    val pullOffset by animateFloatAsState(
-        targetValue = if (pullRefreshing) triggerPull else pullDistance,
-        animationSpec = if (pullDistance > 0f && !loading) snap() else tween(240, easing = CubicBezierEasing(.22f, .8f, .28f, 1f)),
-        label = "adaptive-timeline-pull"
-    )
-    val pullConnection = rememberPullRefreshConnection(
-        enabled = pullEnabled,
+    val pull = rememberPullToRefresh(
         refreshing = loading,
+        enabled = pullEnabled,
         atTop = { !state.canScrollBackward },
-        pullDistance = { pullDistance },
-        triggerDistance = triggerPull,
-        maxDistance = maxPull,
-        onPullDistanceChange = { pullDistance = it },
-        onRelease = { pullDistance = 0f },
-        onRefreshStarted = {
-            pullDistance = triggerPull
-            onRefresh()
-        }
+        onRefresh = onRefresh,
+        label = "adaptive-timeline-pull"
     )
     LaunchedEffect(jumpToDate, groupedDates) {
         val target = jumpToDate ?: return@LaunchedEffect
@@ -547,7 +507,7 @@ private fun AdaptiveTimeline(
         LazyVerticalStaggeredGrid(
             columns = StaggeredGridCells.Fixed(columns),
             state = state,
-            modifier = Modifier.fillMaxSize().graphicsLayer { translationY = pullOffset }.nestedScroll(pullConnection).batchSelectionStaggeredGesture(
+            modifier = Modifier.fillMaxSize().graphicsLayer { translationY = pull.offset }.nestedScroll(pull.connection).batchSelectionStaggeredGesture(
                 state = state,
                 items = flatItems,
                 keyOf = { it.uri.toString() },
@@ -609,7 +569,7 @@ private fun AdaptiveTimeline(
             },
             modifier = Modifier.align(Alignment.CenterEnd)
         )
-        PullRefreshIndicator(pullDistance, loading, triggerPull, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+        PullRefreshIndicator(pull.distance, loading, pull.triggerDistance, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
 }
 

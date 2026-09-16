@@ -276,12 +276,6 @@ private val HtmlPortraitIcon: ImageVector by lazy {
     }.build()
 }
 
-private fun htmlOrientationIcon(mode: Int): ImageVector = when (mode) {
-    1 -> HtmlLandscapeIcon
-    2 -> HtmlPortraitIcon
-    3 -> HtmlAutoOrientationIcon
-    else -> HtmlFullscreenIcon
-}
 
 private val HtmlAutoOrientationIcon = htmlLineIcon("html-auto-orientation") {
     moveTo(8f, 4f); lineTo(16f, 4f); lineTo(18f, 6f); lineTo(18f, 18f); lineTo(16f, 20f); lineTo(8f, 20f); lineTo(6f, 18f); lineTo(6f, 6f); close()
@@ -308,7 +302,6 @@ private fun htmlLineIcon(name: String, draw: androidx.compose.ui.graphics.vector
         path(fill = null, stroke = androidx.compose.ui.graphics.SolidColor(Color.White), strokeLineWidth = 1.7f, pathBuilder = draw)
     }.build()
 
-private val HtmlShareIcon = htmlLineIcon("html-share") { moveTo(12f, 15f); lineTo(12f, 3f); moveTo(12f, 3f); lineTo(8f, 7f); moveTo(12f, 3f); lineTo(16f, 7f); moveTo(5f, 11f); lineTo(5f, 19f); lineTo(19f, 19f); lineTo(19f, 11f) }
 private val HtmlSequenceIcon = htmlLineIcon("html-sequence") { moveTo(3f, 5f); lineTo(20f, 5f); moveTo(16f, 2f); lineTo(20f, 5f); moveTo(3f, 12f); lineTo(20f, 12f); moveTo(16f, 9f); lineTo(20f, 12f); moveTo(3f, 19f); lineTo(20f, 19f); moveTo(16f, 16f); lineTo(20f, 19f) }
 private val HtmlRepeatIcon = htmlLineIcon("html-repeat") { moveTo(17f, 2f); lineTo(21f, 6f); lineTo(17f, 10f); moveTo(3f, 6f); lineTo(21f, 6f); moveTo(7f, 22f); lineTo(3f, 18f); lineTo(7f, 14f); moveTo(21f, 18f); lineTo(3f, 18f) }
 private val HtmlShuffleIcon = htmlLineIcon("html-shuffle") { moveTo(3f, 7f); lineTo(6f, 7f); lineTo(18f, 17f); lineTo(21f, 17f); moveTo(18f, 14f); lineTo(21f, 17f); lineTo(18f, 20f); moveTo(3f, 17f); lineTo(6f, 17f); lineTo(15f, 7f); lineTo(21f, 7f); moveTo(18f, 4f); lineTo(21f, 7f); lineTo(18f, 10f) }
@@ -321,10 +314,6 @@ private val HtmlLongForwardIcon = ImageVector.Builder("html-long-forward", 24.dp
 private val HtmlPlayIcon = ImageVector.Builder("html-play", 24.dp, 24.dp, 24f, 24f).apply { path(fill = androidx.compose.ui.graphics.SolidColor(Color.White), pathBuilder = { moveTo(7f, 4f); lineTo(20f, 12f); lineTo(7f, 20f); close() }) }.build()
 private val HtmlPauseIcon = ImageVector.Builder("html-pause", 24.dp, 24.dp, 24f, 24f).apply { path(fill = androidx.compose.ui.graphics.SolidColor(Color.White), pathBuilder = { moveTo(7f, 4f); lineTo(11f, 4f); lineTo(11f, 20f); lineTo(7f, 20f); close(); moveTo(14f, 4f); lineTo(18f, 4f); lineTo(18f, 20f); lineTo(14f, 20f); close() }) }.build()
 private val HtmlPipIcon = htmlLineIcon("html-pip") { moveTo(3f, 4f); lineTo(21f, 4f); lineTo(21f, 20f); lineTo(3f, 20f); close(); moveTo(12f, 11f); lineTo(19f, 11f); lineTo(19f, 17f); lineTo(12f, 17f); close() }
-private val HtmlMiniWindowIcon = htmlLineIcon("html-mini-window") {
-    moveTo(4f, 6f); lineTo(14f, 6f); lineTo(14f, 12f); lineTo(4f, 12f); close()
-    moveTo(12f, 12f); lineTo(21f, 12f); lineTo(21f, 20f); lineTo(12f, 20f); close()
-}
 private val HtmlBackgroundIcon = htmlLineIcon("html-background") {
     moveTo(4f, 13f); lineTo(4f, 10f); lineTo(5f, 7f); lineTo(7f, 5f); lineTo(10f, 4f); lineTo(14f, 4f); lineTo(17f, 5f); lineTo(19f, 7f); lineTo(20f, 10f); lineTo(20f, 13f)
     moveTo(4f, 13f); lineTo(7f, 13f); lineTo(7f, 19f); lineTo(5f, 19f); lineTo(3f, 17f); lineTo(3f, 14f); close()

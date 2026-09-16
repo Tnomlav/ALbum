@@ -26,6 +26,13 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.LinearEasing
@@ -93,6 +100,63 @@ fun rememberPullRefreshConnection(
             }
         }
     }
+}
+
+/**
+ * Everything a scrollable page needs for pull-to-refresh: the distance to feed
+ * the indicator, the offset to shift the content by, and the scroll connection.
+ *
+ * The grid pages used to spell this out five times with the same numbers and
+ * the same "loading alone must not move the content" rule.
+ */
+class PullToRefresh(
+    val distance: Float,
+    val offset: Float,
+    val triggerDistance: Float,
+    val connection: NestedScrollConnection
+)
+
+@Composable
+fun rememberPullToRefresh(
+    refreshing: Boolean,
+    enabled: Boolean,
+    atTop: () -> Boolean,
+    onRefresh: () -> Unit,
+    label: String
+): PullToRefresh {
+    var distance by androidx.compose.runtime.remember { mutableFloatStateOf(0f) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val trigger = with(density) { 96.dp.toPx() }
+    val maxPull = with(density) { 144.dp.toPx() }
+    // Loading/scanning alone must not move the content like a pull gesture.
+    val pullRefreshing = refreshing && distance > 0f
+    androidx.compose.runtime.LaunchedEffect(refreshing) {
+        if (!refreshing) distance = 0f
+    }
+    val offset by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (pullRefreshing) trigger else distance,
+        animationSpec = if (distance > 0f && !refreshing) {
+            androidx.compose.animation.core.snap()
+        } else {
+            tween(240, easing = CubicBezierEasing(.22f, .8f, .28f, 1f))
+        },
+        label = label
+    )
+    val connection = rememberPullRefreshConnection(
+        enabled = enabled,
+        refreshing = refreshing,
+        atTop = atTop,
+        pullDistance = { distance },
+        triggerDistance = trigger,
+        maxDistance = maxPull,
+        onPullDistanceChange = { distance = it },
+        onRelease = { distance = 0f },
+        onRefreshStarted = {
+            distance = trigger
+            onRefresh()
+        }
+    )
+    return PullToRefresh(distance, offset, trigger, connection)
 }
 
 @Composable

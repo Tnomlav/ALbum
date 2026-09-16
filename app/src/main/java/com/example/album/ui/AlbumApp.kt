@@ -139,7 +139,6 @@ import com.example.album.data.TransferMode
 import com.example.album.data.TransferRequest
 import com.example.album.playback.PlaybackResumeRequest
 import com.example.album.ui.components.MediaViewer
-import com.example.album.ui.components.SlideshowOverlay
 import com.example.album.ui.components.LocalMediaAnimatedVisibilityScope
 import com.example.album.ui.components.LocalMediaSharedTransitionScope
 import com.example.album.ui.components.LocalActiveSharedMediaKey
@@ -162,8 +161,6 @@ import com.example.album.ui.editor.ImageEditorDialog
 import com.example.album.ui.screens.AlbumsScreen
 import com.example.album.ui.screens.SettingsScreen
 import com.example.album.ui.screens.TimelineScreen
-import com.example.album.ui.screens.SelectionScreen
-import com.example.album.ui.screens.AlbumSelectionScreen
 import com.example.album.ui.screens.CleanupScreen
 import com.example.album.ui.screens.WallpaperManagerScreen
 import com.example.album.ui.screens.SlideshowQueueScreen

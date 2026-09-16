@@ -782,40 +782,6 @@ private fun VaultActionInput(
     )
 }
 
-@Composable
-fun VaultRatioInputSheet(
-    title: String,
-    width: String,
-    height: String,
-    onWidthChange: (String) -> Unit,
-    onHeightChange: (String) -> Unit,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    val english = LocalAppEnglish.current
-    val valid = (width.toFloatOrNull() ?: 0f) > 0f && (height.toFloatOrNull() ?: 0f) > 0f
-    VaultBottomSheet(title, onDismiss) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            VaultActionInput(width, onWidthChange, appText("宽", english), Modifier.weight(1f))
-            Text(":")
-            VaultActionInput(height, onHeightChange, appText("高", english), Modifier.weight(1f))
-        }
-        Box(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterEnd) {
-            TextButton(onClick = onConfirm, enabled = valid, modifier = Modifier.widthIn(min = 64.dp).height(48.dp)) {
-                Text(
-                    appText("应用", english),
-                    color = if (valid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-    }
-}
 
 @Composable
 fun VaultDateSheet(initialMillis: Long, onDismiss: () -> Unit, onSelect: (Long) -> Unit) {

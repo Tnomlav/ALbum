@@ -1,5 +1,17 @@
 # Album Changelog
 
+## v1.1.91 - 2026-09-16 (local signed build)
+
+Structural cleanup: dead code removed, duplicated code shared. Net -2355 lines with no behaviour change.
+
+- Deleted `HtmlVideoPlayer.kt` (661 lines) and `SelectionScreen.kt` (461 lines): neither was referenced anywhere since the viewer and the in-place selection replaced them.
+- Deleted the unreferenced `NativeVideoPlayer` (896 lines) and `SlideshowOverlay` (121 lines) from `MediaViewer.kt`, plus `SimilarContent`, `VaultRatioInputSheet`, `renderDoodleComposite`, `EditorStageColor`, `htmlOrientationIcon`, `HtmlShareIcon`, `HtmlMiniWindowIcon` and the unused `VaultGreenDark` colour.
+- Removed a commented-out editor popover that had been left behind with mangled text.
+- The five copies of the pull-to-refresh scaffolding (three grids in the album screen, two in the timeline) are now one `rememberPullToRefresh()` helper: the distances, the animation and the "loading alone must not move the content" rule live in one place.
+- APK: `app/release/app-release.apk` (arm64-v8a split)
+- SHA-256: `43A97129BF16C445B7DE710DADFE7C4F6E3A8D813EA6F11E2F46EC43F52258DD`
+- Verification: `lintDebug`, `testDebugUnitTest`, `assembleDebug` and `assembleRelease` passed. The phone was in use during this round, so the pull-to-refresh refactor is compile/lint verified but not re-tested by hand.
+
 ## v1.1.89 - 2026-09-16 (local signed build)
 
 Consistency pass over the whole UI, following the review of what feels intuitive and visually coherent.

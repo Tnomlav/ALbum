@@ -625,11 +625,6 @@ private fun drawOverlays(bitmap: Bitmap, state: ImageEditState) {
     overlay.recycle()
 }
 
-internal fun renderDoodleComposite(base: Bitmap, strokes: List<EditorStroke>): Bitmap {
-    val result = base.copy(Bitmap.Config.ARGB_8888, true)
-    drawDoodleOverlays(result, strokes)
-    return result
-}
 
 private fun drawDoodleOverlays(bitmap: Bitmap, strokes: List<EditorStroke>) {
     val overlay = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
