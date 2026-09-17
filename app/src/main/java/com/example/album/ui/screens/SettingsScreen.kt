@@ -306,9 +306,17 @@ fun SettingsScreen(
                 }
             }
         }
-        if (settingsSection == null || settingsSection == "主题") {
+        if (settingsSection == null) {
         item { SettingsHeader("主题", settingsSection == "主题") { settingsSection = if (settingsSection == "主题") null else "主题" } }
+        item { SettingsHeader("文件操作", settingsSection == "文件操作") { settingsSection = if (settingsSection == "文件操作") null else "文件操作" } }
+        item { SettingsHeader("显示", settingsSection == "显示") { settingsSection = if (settingsSection == "显示") null else "显示" } }
+        item { SettingsHeader("视频", settingsSection == "视频") { settingsSection = if (settingsSection == "视频") null else "视频" } }
+        item { SettingsHeader("滚动条", settingsSection == "滚动条") { settingsSection = if (settingsSection == "滚动条") null else "滚动条" } }
+        item { SettingsHeader("幻灯片", settingsSection == "幻灯片") { settingsSection = if (settingsSection == "幻灯片") null else "幻灯片" } }
+        item { SettingsHeader("缓存", settingsSection == "缓存") { settingsSection = if (settingsSection == "缓存") null else "缓存" } }
+        item { SettingsHeader("关于", settingsSection == "关于") { settingsSection = if (settingsSection == "关于") null else "关于" } }
         }
+        if (settingsSection == "主题") {
         item { ValueRow("主题模式", if (isEnglish && themeMode == "自动") "System" else themeMode) { choose("主题模式", "theme_mode", listOf("自动", "浅色", "深色"), themeMode) { themeMode = it; onThemeModeChange(it) } } }
         item { ThemeColorRow(themeAccent.label) { showThemeColors = true } }
         item { ValueRow("语言", language) {
@@ -333,11 +341,8 @@ fun SettingsScreen(
                 }
             }
         }
-
-        if (settingsSection == null || settingsSection == "文件操作") {
-        item { SettingsHeader("文件操作", settingsSection == "文件操作") { settingsSection = if (settingsSection == "文件操作") null else "文件操作" } }
-        if (settingsSection == "文件操作") {
         }
+        if (settingsSection == "文件操作") {
         item { ToggleRow("回收站", "开启后，删除的文件将进入回收站", recycleBin) { setBoolean("recycle_bin", it) { recycleBin = it } } }
         item { ValueRow("回收站文件保留期限", value("retention", "60天"), "保存在应用私有目录，卸载时会一并删除") {
             choose("回收站文件保留期限", "retention", listOf("10天", "30天", "60天", "90天"), value("retention", "60天")) { selected ->
@@ -379,12 +384,8 @@ fun SettingsScreen(
         item { ToggleRow("重命名时显示后缀", "关闭后只编辑文件名，原后缀会自动保留", showRenameExtension) { setBoolean("rename_show_extension", it) { showRenameExtension = it; onRenameExtensionChange(it) } } }
         item { ValueRow("编辑后保存方式", value("edit_save", "每次询问"), "保留编辑副本或替换当前版本，保存前均需确认") { choose("编辑后保存方式", "edit_save", listOf("每次询问", "保留二者", "替换原图"), value("edit_save", "每次询问")) } }
         item { ValueRow("复制/移动文件已存在", value("conflict", "保留两者")) { choose("同名文件处理", "conflict", listOf("保留两者", "覆盖", "跳过"), value("conflict", "保留两者")) } }
-
-        if (settingsSection == null || settingsSection == "显示") {
         }
-        item { SettingsHeader("显示", settingsSection == "显示") { settingsSection = if (settingsSection == "显示") null else "显示" } }
         if (settingsSection == "显示") {
-        }
         item { ToggleRow("播放 GIF 缩略图", "仅控制缩略图，预览和全屏始终播放", gifThumbnails) { setBoolean("gif_thumbnails", it) { gifThumbnails = it } } }
         item { ToggleRow("预览页显示原图", "先显示缩略图再加载原图", previewOriginal) { setBoolean("preview_original", it) { previewOriginal = it } } }
         item { ToggleRow("显示收藏星标", "在缩略图右上角显示收藏星标", showFavoriteBadge) { setBoolean("show_favorite_badge", it) { onShowFavoriteBadgeChange(it) } } }
@@ -405,19 +406,14 @@ fun SettingsScreen(
                 value("default_home", "相册")
             )
         } }
-
-        if (settingsSection == null || settingsSection == "视频") {
         }
-        item { SettingsHeader("视频", settingsSection == "视频") { settingsSection = if (settingsSection == "视频") null else "视频" } }
         if (settingsSection == "视频") {
-        }
         item { ToggleRow("打开视频时自动播放", null, autoplay) { setBoolean("video_autoplay", it) { autoplay = it } } }
         item { ToggleRow("进入后台时自动暂停", null, pauseVideoOnBackground) { setBoolean("video_pause_on_background", it) { pauseVideoOnBackground = it } } }
         item { ToggleRow("记住最后一次播放进度", null, rememberProgress) { setBoolean("video_progress", it) { rememberProgress = it } } }
         item { ToggleRow("自动隐藏播放器界面", "播放中无操作 3 秒后隐藏控件", autoHidePlayer) { setBoolean("video_auto_hide", it) { autoHidePlayer = it } } }
         item { ToggleRow("长快进", "在播放器中显示长快退和长快进按钮", longSkip) { setBoolean("long_skip", it) { longSkip = it } } }
         item { ValueRow("快进长度", value("normal_skip", "10秒")) { choose("快进长度", "normal_skip", listOf("3秒", "5秒", "10秒", "15秒", "30秒"), value("normal_skip", "10秒")) } }
-        if (longSkip) item { ValueRow("长快进长度", value("long_skip_length", "30秒")) { choose("长快进长度", "long_skip_length", listOf("30秒", "60秒", "90秒", "120秒"), value("long_skip_length", "30秒")) } }
         item { ValueRow("满屏滑动跳过时间", value("gesture_seek", "90秒"), "横向滑满整个屏幕对应的进度") { choose("满屏滑动跳过时间", "gesture_seek", listOf("30秒", "60秒", "90秒", "120秒", "150秒"), value("gesture_seek", "90秒")) } }
         item { ToggleRow("边缘误触保护", "在屏幕边缘松手时取消当次跳转", edgeProtection) { setBoolean("edge_protection", it) { edgeProtection = it } } }
         item { ToggleRow("单击暂停", null, tapPause) {
@@ -447,28 +443,16 @@ fun SettingsScreen(
         item { ValueRow("快退：暂停：快进 触控占比", value("video_seek_pause_ratio", "1:1:1")) {
             choose("快退：暂停：快进 触控占比", "video_seek_pause_ratio", listOf("1:1:1", "1:2:1", "1:0:1"), value("video_seek_pause_ratio", "1:1:1"))
         } }
-
-        }
-        if (settingsSection == null || settingsSection == "滚动条") {
-        item { SettingsHeader("滚动条", settingsSection == "滚动条") { settingsSection = if (settingsSection == "滚动条") null else "滚动条" } }
         }
         if (settingsSection == "滚动条") {
         item { ValueRow("拖动宽度", value("scroll_width", "24px"), "调整右侧滚动条的触控区域") { choose("拖动宽度", "scroll_width", listOf("16px", "24px", "32px"), value("scroll_width", "24px")) } }
         item { ValueRow("浮现时间", value("scroll_duration", "1秒"), "停止滚动后继续显示的时间") { choose("浮现时间", "scroll_duration", listOf("0.5秒", "1秒", "2秒", "3秒"), value("scroll_duration", "1秒")) } }
         item { ToggleRow("始终显示", "页面可滚动时保持滚动条常驻", persistentScrollbar) { setBoolean("persistent_scrollbar", it) { persistentScrollbar = it } } }
         }
-
-        if (settingsSection == null || settingsSection == "幻灯片") {
-        item { SettingsHeader("幻灯片", settingsSection == "幻灯片") { settingsSection = if (settingsSection == "幻灯片") null else "幻灯片" } }
-        }
         if (settingsSection == "幻灯片") {
         item { ValueRow("幻灯片播放间隔", value("slideshow_interval", "3秒")) { choose("幻灯片播放间隔", "slideshow_interval", (1..10).map { "${it}秒" }, value("slideshow_interval", "3秒")) } }
         item { ValueRow("幻灯片播放动画", value("slideshow_animation", "自然")) { choose("幻灯片播放动画", "slideshow_animation", listOf("自然", "淡入淡出", "滑动"), value("slideshow_animation", "自然")) } }
         item { ToggleRow("幻灯片随机播放", null, randomSlideshow) { setBoolean("random_slideshow", it) { randomSlideshow = it } } }
-        }
-
-        if (settingsSection == null || settingsSection == "缓存") {
-        item { SettingsHeader("缓存", settingsSection == "缓存") { settingsSection = if (settingsSection == "缓存") null else "缓存" } }
         }
         if (settingsSection == "缓存") {
         item { ToggleRow("后台优化", "在后台增量生成分级缩略图", backgroundOptimization) {
@@ -492,10 +476,6 @@ fun SettingsScreen(
                 Toast.makeText(context, if (isEnglish) "Cleared ${formatCacheSize(cleared)} of cache" else "已清理 ${formatCacheSize(cleared)} 缓存", Toast.LENGTH_SHORT).show()
             }
         } }
-        }
-
-        if (settingsSection == null || settingsSection == "关于") {
-        item { SettingsHeader("关于", settingsSection == "关于") { settingsSection = if (settingsSection == "关于") null else "关于" } }
         }
         if (settingsSection == "关于") {
         item { ValueRow("隐私政策", "›") {

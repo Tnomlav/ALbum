@@ -53,6 +53,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
@@ -308,6 +309,8 @@ private fun ToolsScreen(
     Column(
         Modifier.fillMaxSize()
             .verticalScroll(rememberScrollState())
+            // This page has no top bar any more, so it owns the status bar inset.
+            .statusBarsPadding()
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -2584,7 +2587,10 @@ fun AlbumApp(
                 contentKey = { it },
                 label = "main-tab-topbar-transition"
             ) { tab ->
-                if (tab != MainTab.Settings) VaultTopBar(
+                // The Tools and Settings pages have no search field, no page
+                // switch and no menu, so their top bar carried nothing: the
+                // Tools page drops it entirely.
+                if (tab != MainTab.Settings && tab != MainTab.Tools) VaultTopBar(
                 title = if (openedFolder != null) {
                     openedFolder.orEmpty()
                 } else if (tab == MainTab.Timeline) {
