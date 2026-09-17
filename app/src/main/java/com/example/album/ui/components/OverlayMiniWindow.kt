@@ -49,7 +49,8 @@ internal class OverlayMiniWindow(
         private const val EDGE_BOTTOM = 8
 
         /** How far from a border the finger counts as "grab the border". */
-        private const val BORDER_DP = 30f
+        /** Size of the corner squares that resize the window. */
+        private const val CORNER_DP = 44f
 
         /** Controls hide themselves after this long, like the in-app player. */
         private const val CONTROLS_TIMEOUT_MS = 3_000L
@@ -72,6 +73,9 @@ internal class OverlayMiniWindow(
     private var gestureEdges = 0
     private var gestureMoved = false
     private var buttonDragListener: View.OnTouchListener? = null
+    private var compact = false
+    private var savedWidth = 0
+    private var savedHeight = 0
     private val hideHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val hideControls = Runnable { setControlsVisible(false) }
     private var controlsVisible = true
@@ -353,13 +357,21 @@ internal class OverlayMiniWindow(
         params: WindowManager.LayoutParams,
         density: Float
     ): Int {
-        val band = BORDER_DP * density
-        var edges = 0
-        if (rawX <= params.x + band) edges = edges or EDGE_LEFT
-        else if (rawX >= params.x + params.width - band) edges = edges or EDGE_RIGHT
-        if (rawY <= params.y + band) edges = edges or EDGE_TOP
-        else if (rawY >= params.y + params.height - band) edges = edges or EDGE_BOTTOM
-        return edges
+        // Resizing and moving are completely separate gestures: only the four
+        // corner squares resize, everything else (including the edges) moves the
+        // window. Overlapping bands used to make a drag ambiguous.
+        val band = CORNER_DP * density
+        val nearLeft = rawX <= params.x + band
+        val nearRight = rawX >= params.x + params.width - band
+        val nearTop = rawY <= params.y + band
+        val nearBottom = rawY >= params.y + params.height - band
+        return when {
+            nearLeft && nearTop -> EDGE_LEFT or EDGE_TOP
+            nearRight && nearTop -> EDGE_RIGHT or EDGE_TOP
+            nearLeft && nearBottom -> EDGE_LEFT or EDGE_BOTTOM
+            nearRight && nearBottom -> EDGE_RIGHT or EDGE_BOTTOM
+            else -> 0
+        }
     }
 
     /**
@@ -421,6 +433,33 @@ internal class OverlayMiniWindow(
     }
 
     /** Keeps the window inside the current screen bounds. */
+    /**
+     * Shrinks the window while the app sits in the background (the recents /
+     * multi-task screen keeps our overlay on top, where a full size window is
+     * in the way) and restores the user's size when the app comes back.
+     */
+    fun setCompact(compact: Boolean) {
+        val view = root ?: return
+        val params = layoutParams ?: return
+        if (compact == this.compact) return
+        this.compact = compact
+        if (compact) {
+            savedWidth = params.width
+            savedHeight = params.height
+            val metrics = context.resources.displayMetrics
+            val target = (min(metrics.widthPixels, metrics.heightPixels) * 0.42f).roundToInt()
+                .coerceAtMost((220 * metrics.density).roundToInt())
+                .coerceAtLeast((120 * metrics.density).roundToInt())
+            params.width = target
+            params.height = (target * 9f / 16f).roundToInt()
+        } else if (savedWidth > 0) {
+            params.width = savedWidth
+            params.height = savedHeight
+        }
+        clampToScreen()
+        runCatching { windowManager.updateViewLayout(view, params) }
+    }
+
     private fun clampToScreen() {
         val view = root ?: return
         val params = layoutParams ?: return

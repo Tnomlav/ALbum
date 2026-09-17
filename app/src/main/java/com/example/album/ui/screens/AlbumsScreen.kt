@@ -12,6 +12,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -285,10 +286,13 @@ fun AlbumsScreen(
                 // place through the shared element (260ms). Fading the pages
                 // made the previous one linger, which is what looked like a
                 // leftover; the shared element is the part worth keeping.
-                // The new page fades in while the cover flies; the old page is
-                // gone in the same frame, so nothing of it lingers.
-                fadeIn(tween(220, easing = CubicBezierEasing(.22f, .78f, .24f, 1f))) togetherWith
-                    ExitTransition.None
+                // The outgoing page reaches alpha 0 within a millisecond, while
+                // the (invisible) scale animation keeps the transition open just
+                // long enough for the shared element to fly. Going through
+                // ExitTransition.None left the old page fully visible for the
+                // whole 260ms of the shared animation.
+                EnterTransition.None togetherWith
+                    (fadeOut(tween(1)) + scaleOut(tween(260), targetScale = 1f))
             },
             label = "album-folder"
         ) { shownAlbum ->

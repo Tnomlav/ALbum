@@ -963,7 +963,10 @@ fun AlbumApp(
     suspend fun reloadPixivPage(forceWalk: Boolean = true) {
         if (selectedTab != MainTab.Pixiv || cleanupOpen) return
         val generation = ++pixivReloadGeneration
-        pixivPageRefreshing = true
+        // Loading the cached snapshot is not a "refresh": showing the progress
+        // indicator for it is what made opening the app look like it was
+        // loading. Only a real SAF walk sets the flag.
+        var walking = false
         try {
             // Show the previous snapshot immediately (SAF tree walks are slow)
             // and replace it once the fresh walk finishes.
@@ -983,6 +986,8 @@ fun AlbumApp(
                 // like a load.
                 return
             }
+            pixivPageRefreshing = true
+            walking = true
             // A full SAF walk can take several seconds. Partial snapshots are
             // streamed through a conflated channel so folders appear as soon as
             // they are read instead of all at the end.
@@ -1010,7 +1015,7 @@ fun AlbumApp(
             pixivSourceFolderName = snapshot.sourceFolderName
             pixivLibraryVersion++
         } finally {
-            if (generation == pixivReloadGeneration) pixivPageRefreshing = false
+            if (walking && generation == pixivReloadGeneration) pixivPageRefreshing = false
         }
     }
     fun requestPixivReload(forceWalk: Boolean = true) {

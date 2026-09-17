@@ -166,10 +166,11 @@ internal fun DeferredVideoSeekSlider(
         ),
         thumb = {
             Box(
-                Modifier.size(16.dp)
+                // The thumb is exactly as wide as the bar (12dp).
+                Modifier.size(12.dp)
                     .clip(CircleShape)
                     .background(thumbColor, CircleShape)
-                    .border(4.dp, thumbBorderColor, CircleShape)
+                    .border(3.dp, thumbBorderColor, CircleShape)
             )
         }
     )

@@ -810,12 +810,14 @@ internal fun Media3VideoPlayer(
                     }
                 }
                 Lifecycle.Event.ON_RESUME -> {
+                    floatingWindow?.setCompact(false)
                     pictureInPictureRequested = false
                     if (pausedForBackground) {
                         pausedForBackground = false
                         player.play()
                     }
                 }
+                Lifecycle.Event.ON_STOP -> floatingWindow?.setCompact(true)
                 else -> Unit
             }
         }

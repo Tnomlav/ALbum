@@ -9,7 +9,6 @@ import android.provider.MediaStore
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
@@ -163,8 +162,6 @@ fun SettingsScreen(
     // Settings are grouped into sub-pages: the main page keeps the theme and
     // one row per group, and tapping a row opens that group on its own page.
     var settingsSection by remember { mutableStateOf<String?>(null) }
-    // The system back gesture leaves a sub-page before it leaves Settings.
-    BackHandler(enabled = settingsSection != null) { settingsSection = null }
 
     val choiceValues = remember { mutableStateMapOf<String, String>() }
     val isEnglish = language == "English"
@@ -309,13 +306,9 @@ fun SettingsScreen(
                 }
             }
         }
-        if (settingsSection == null) {
-        if (settingsSection == null) {
+        if (settingsSection == null || settingsSection == "主题") {
         item { SettingsHeader("主题", settingsSection == "主题") { settingsSection = if (settingsSection == "主题") null else "主题" } }
         }
-        if (settingsSection == "主题") {
-        }
-        if (settingsSection == "主题") {
         item { ValueRow("主题模式", if (isEnglish && themeMode == "自动") "System" else themeMode) { choose("主题模式", "theme_mode", listOf("自动", "浅色", "深色"), themeMode) { themeMode = it; onThemeModeChange(it) } } }
         item { ThemeColorRow(themeAccent.label) { showThemeColors = true } }
         item { ValueRow("语言", language) {
@@ -341,15 +334,10 @@ fun SettingsScreen(
             }
         }
 
-        }
-        if (settingsSection == null) {
-        }
-        if (settingsSection == null) {
+        if (settingsSection == null || settingsSection == "文件操作") {
         item { SettingsHeader("文件操作", settingsSection == "文件操作") { settingsSection = if (settingsSection == "文件操作") null else "文件操作" } }
-        }
         if (settingsSection == "文件操作") {
         }
-        if (settingsSection == "文件操作") {
         item { ToggleRow("回收站", "开启后，删除的文件将进入回收站", recycleBin) { setBoolean("recycle_bin", it) { recycleBin = it } } }
         item { ValueRow("回收站文件保留期限", value("retention", "60天"), "保存在应用私有目录，卸载时会一并删除") {
             choose("回收站文件保留期限", "retention", listOf("10天", "30天", "60天", "90天"), value("retention", "60天")) { selected ->
@@ -392,13 +380,9 @@ fun SettingsScreen(
         item { ValueRow("编辑后保存方式", value("edit_save", "每次询问"), "保留编辑副本或替换当前版本，保存前均需确认") { choose("编辑后保存方式", "edit_save", listOf("每次询问", "保留二者", "替换原图"), value("edit_save", "每次询问")) } }
         item { ValueRow("复制/移动文件已存在", value("conflict", "保留两者")) { choose("同名文件处理", "conflict", listOf("保留两者", "覆盖", "跳过"), value("conflict", "保留两者")) } }
 
-        if (settingsSection == null) {
+        if (settingsSection == null || settingsSection == "显示") {
         }
-        }
-        if (settingsSection == null) {
         item { SettingsHeader("显示", settingsSection == "显示") { settingsSection = if (settingsSection == "显示") null else "显示" } }
-        }
-        if (settingsSection == "显示") {
         if (settingsSection == "显示") {
         }
         item { ToggleRow("播放 GIF 缩略图", "仅控制缩略图，预览和全屏始终播放", gifThumbnails) { setBoolean("gif_thumbnails", it) { gifThumbnails = it } } }
@@ -422,13 +406,9 @@ fun SettingsScreen(
             )
         } }
 
-        if (settingsSection == null) {
+        if (settingsSection == null || settingsSection == "视频") {
         }
-        }
-        if (settingsSection == null) {
         item { SettingsHeader("视频", settingsSection == "视频") { settingsSection = if (settingsSection == "视频") null else "视频" } }
-        }
-        if (settingsSection == "视频") {
         if (settingsSection == "视频") {
         }
         item { ToggleRow("打开视频时自动播放", null, autoplay) { setBoolean("video_autoplay", it) { autoplay = it } } }
@@ -469,12 +449,8 @@ fun SettingsScreen(
         } }
 
         }
-        if (settingsSection == null) {
-        }
-        if (settingsSection == null) {
+        if (settingsSection == null || settingsSection == "滚动条") {
         item { SettingsHeader("滚动条", settingsSection == "滚动条") { settingsSection = if (settingsSection == "滚动条") null else "滚动条" } }
-        }
-        if (settingsSection == "滚动条") {
         }
         if (settingsSection == "滚动条") {
         item { ValueRow("拖动宽度", value("scroll_width", "24px"), "调整右侧滚动条的触控区域") { choose("拖动宽度", "scroll_width", listOf("16px", "24px", "32px"), value("scroll_width", "24px")) } }
@@ -482,12 +458,8 @@ fun SettingsScreen(
         item { ToggleRow("始终显示", "页面可滚动时保持滚动条常驻", persistentScrollbar) { setBoolean("persistent_scrollbar", it) { persistentScrollbar = it } } }
         }
 
-        if (settingsSection == null) {
-        }
-        if (settingsSection == null) {
+        if (settingsSection == null || settingsSection == "幻灯片") {
         item { SettingsHeader("幻灯片", settingsSection == "幻灯片") { settingsSection = if (settingsSection == "幻灯片") null else "幻灯片" } }
-        }
-        if (settingsSection == "幻灯片") {
         }
         if (settingsSection == "幻灯片") {
         item { ValueRow("幻灯片播放间隔", value("slideshow_interval", "3秒")) { choose("幻灯片播放间隔", "slideshow_interval", (1..10).map { "${it}秒" }, value("slideshow_interval", "3秒")) } }
@@ -495,12 +467,8 @@ fun SettingsScreen(
         item { ToggleRow("幻灯片随机播放", null, randomSlideshow) { setBoolean("random_slideshow", it) { randomSlideshow = it } } }
         }
 
-        if (settingsSection == null) {
-        }
-        if (settingsSection == null) {
+        if (settingsSection == null || settingsSection == "缓存") {
         item { SettingsHeader("缓存", settingsSection == "缓存") { settingsSection = if (settingsSection == "缓存") null else "缓存" } }
-        }
-        if (settingsSection == "缓存") {
         }
         if (settingsSection == "缓存") {
         item { ToggleRow("后台优化", "在后台增量生成分级缩略图", backgroundOptimization) {
@@ -526,12 +494,8 @@ fun SettingsScreen(
         } }
         }
 
-        if (settingsSection == null) {
-        }
-        if (settingsSection == null) {
+        if (settingsSection == null || settingsSection == "关于") {
         item { SettingsHeader("关于", settingsSection == "关于") { settingsSection = if (settingsSection == "关于") null else "关于" } }
-        }
-        if (settingsSection == "关于") {
         }
         if (settingsSection == "关于") {
         item { ValueRow("隐私政策", "›") {
@@ -624,7 +588,6 @@ fun SettingsScreen(
                     }
                 }
             )
-        }
         }
         }
     }
