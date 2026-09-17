@@ -9,6 +9,7 @@ import android.provider.MediaStore
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
@@ -163,6 +164,9 @@ fun SettingsScreen(
     // Settings are grouped into sub-pages: the main page keeps the theme and
     // one row per group, and tapping a row opens that group on its own page.
     var settingsSection by remember { mutableStateOf<String?>(null) }
+    // A sub-page owns the back gesture: it returns to the Settings list rather
+    // than leaving Settings (or the app).
+    BackHandler(enabled = settingsSection != null) { settingsSection = null }
 
     val choiceValues = remember { mutableStateMapOf<String, String>() }
     val isEnglish = language == "English"
