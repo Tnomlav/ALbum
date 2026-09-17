@@ -172,6 +172,7 @@ internal class OverlayMiniWindow(
                         if (edges != 0) {
                             applyResize(
                                 params = params,
+                                edges = edges,
                                 dx = dx,
                                 dy = dy,
                                 density = density,
@@ -330,6 +331,7 @@ internal class OverlayMiniWindow(
      */
     private fun applyResize(
         params: WindowManager.LayoutParams,
+        edges: Int,
         dx: Float,
         dy: Float,
         density: Float,
@@ -350,10 +352,14 @@ internal class OverlayMiniWindow(
         // where both directions shrank the window.
         val horizontalGrowth = if (startRawX < centerX) -dx else dx
         val verticalGrowth = if (startRawY < centerY) -dy else dy
-        val growth = if (abs(horizontalGrowth) >= abs(verticalGrowth)) {
-            horizontalGrowth
-        } else {
-            verticalGrowth * 16f / 9f
+        val horizontalEdge = edges and (EDGE_LEFT or EDGE_RIGHT) != 0
+        val verticalEdge = edges and (EDGE_TOP or EDGE_BOTTOM) != 0
+        val growth = when {
+            // Corners move on both axes: average the projections so the window
+            // scales smoothly instead of snapping to one axis.
+            horizontalEdge && verticalEdge -> (horizontalGrowth + verticalGrowth * 16f / 9f) / 2f
+            horizontalEdge -> horizontalGrowth
+            else -> verticalGrowth * 16f / 9f
         }
         val newWidth = (startWidth + growth).roundToInt().coerceIn(minWidth, maxWidth)
         val newHeight = (newWidth * 9f / 16f).roundToInt()

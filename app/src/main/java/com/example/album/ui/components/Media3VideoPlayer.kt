@@ -1124,7 +1124,10 @@ internal fun Media3VideoPlayer(
             val ratio = miniVideoAspect
             val horizontalDelta = if (fromLeft) -delta.x else delta.x
             val verticalDelta = (if (fromTop) -delta.y else delta.y) * ratio
-            val sizeDelta = if (abs(horizontalDelta) >= abs(verticalDelta)) horizontalDelta else verticalDelta
+            // Dragging a corner moves the finger on both axes; averaging the
+            // two projections keeps the window growing smoothly instead of
+            // jumping to whichever axis happened to be larger.
+            val sizeDelta = (horizontalDelta + verticalDelta) / 2f
             val oldWidth = miniWidthPx
             val oldHeight = oldWidth / ratio
             val oldRight = miniOffset.x + oldWidth
@@ -1720,8 +1723,10 @@ internal fun MiniVideoButton(
 ) {
     IconButton(
         onClick = onClick,
-        modifier = modifier.size(40.dp).background(Color.Black.copy(alpha = .48f), CircleShape)
+        // No black disc behind the icon: the same flat white icon as the
+        // floating window, so both mini windows look the same.
+        modifier = modifier.size(44.dp)
     ) {
-        Icon(icon, label, tint = Color.White, modifier = Modifier.size(23.dp))
+        Icon(icon, label, tint = Color.White, modifier = Modifier.size(26.dp))
     }
 }

@@ -379,7 +379,9 @@ private fun CropFrame(
                         dx * dx + dy * dy <= radius * radius
                     } ?: -1
                     if (handle < 0) {
-                        val edgeTolerance = radius
+                        // Edges get a wider band than the corners: the finger
+                        // usually lands slightly outside the visible border.
+                        val edgeTolerance = radius * 1.8f
                         val candidates = listOf(
                             if (pointX in visible.left - edgeTolerance..visible.right + edgeTolerance) abs(pointY - visible.top) else Float.POSITIVE_INFINITY,
                             if (pointX in visible.left - edgeTolerance..visible.right + edgeTolerance) abs(pointY - visible.bottom) else Float.POSITIVE_INFINITY,

@@ -2606,18 +2606,33 @@ fun AlbumApp(
                         else listOf("重新扫描", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
                     }
                     MainTab.Pixiv -> if (appLanguage == "English") {
-                        if (pixivSearchMode == PixivSearchMode.Tag) listOf("Rescan", "Columns", "Layout", "Sort", "Select", "Notes")
-                        else if (openedFolder == null) listOf("Rescan", "Columns", "Sort", "Select", "Notes")
+                        if (pixivSearchMode == PixivSearchMode.Tag) listOf("Search by artist", "Rescan", "Columns", "Layout", "Sort", "Select", "Notes")
+                        else if (openedFolder == null) listOf("Search by tag", "Rescan", "Columns", "Sort", "Select", "Notes")
                         else listOf("Rescan", "New folder", "Columns", "Layout", "Sort", "Select", "Notes")
                     } else if (pixivSearchMode == PixivSearchMode.Tag) {
-                        listOf("重新扫描", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
+                        listOf("按画师搜索", "重新扫描", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
                     } else if (openedFolder == null) {
-                        listOf("重新扫描", "列数", "排序方式", "进入多选", "注意事项")
+                        listOf("按 Tag 搜索", "重新扫描", "列数", "排序方式", "进入多选", "注意事项")
                     } else listOf("重新扫描", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
                     MainTab.Tools -> emptyList()
                     MainTab.Settings -> emptyList()
                 },
                 onMenuItemClick = { action ->
+                    // Explicit alternative to the title switch for the P page's
+                    // search mode: the switch is the only other way to change
+                    // it, and this path cannot be missed.
+                    if (tab == MainTab.Pixiv && (action == "按画师搜索" || action == "按 Tag 搜索" ||
+                            action == "Search by artist" || action == "Search by tag")
+                    ) {
+                        pixivSearchMode = if (pixivSearchMode == PixivSearchMode.Tag) {
+                            PixivSearchMode.Artist
+                        } else {
+                            PixivSearchMode.Tag
+                        }
+                        openedFolder = null
+                        folderScope = null
+                        return@VaultTopBar
+                    }
                     when (MainMenuAction.fromLabel(action)) {
                         MainMenuAction.Scan -> scope.launch {
                             requestMediaScan(true)

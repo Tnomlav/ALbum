@@ -317,7 +317,9 @@ fun MediaViewer(
 
     LaunchedEffect(currentIndex, viewerItems) {
         if (current.isVideo) return@LaunchedEffect
-        val adjacent = listOf(currentIndex + 1, currentIndex - 1, currentIndex + 2)
+        // Two pictures on each side: swiping reveals the neighbour out of the
+        // thumbnail cache instead of an empty frame.
+        val adjacent = listOf(currentIndex - 2, currentIndex - 1, currentIndex + 1, currentIndex + 2)
             .mapNotNull(viewerItems::getOrNull)
             .filterNot(MediaItem::isVideo)
         ThumbnailRepository.prefetch(context, adjacent, 1800, thumbnailPreferences)
@@ -565,7 +567,10 @@ fun MediaViewer(
                             Modifier.fillMaxSize().graphicsLayer {
                                 translationX = pagerOffset + if (pagerOffset < 0f) pageWidth else -pageWidth
                             },
-                            requestedSize = 720,
+                            // The small cached thumbnail decodes immediately, so
+                            // the neighbour appears under the finger instead of
+                            // a blank frame while a larger size loads.
+                            requestedSize = 360,
                             showVideoMark = false,
                             contentScale = ContentScale.Fit,
                             backgroundColor = imageFullScreenBackground,
@@ -586,7 +591,7 @@ fun MediaViewer(
                         label = "viewer-media",
                         modifier = Modifier.fillMaxSize()
                             .graphicsLayer { translationX = pagerOffset }
-                            .pointerInput(currentIndex, viewerItems.size, imageScale) {
+                            .pointerInput(currentIndex, viewerItems.size) {
                                 val width = size.width.toFloat().coerceAtLeast(1f)
                                 fun hasNeighbour(direction: Int): Boolean =
                                     currentIndex + direction in viewerItems.indices
@@ -612,38 +617,56 @@ fun MediaViewer(
                                     }
                                 }
                                 fun settle() = slideTo(0f, 150)
-                                detectHorizontalDragGestures(
-                                    onDragStart = { pagerDragging = true },
-                                    onHorizontalDrag = { change, amount ->
-                                        // While zoomed the picture pans first;
-                                        // only movement that keeps pushing past
-                                        // its edge turns into a page drag.
-                                        if (!pushingPastEdge(amount)) return@detectHorizontalDragGestures
-                                        change.consume()
-                                        val next = pagerOffset + amount
-                                        pagerOffset = when {
-                                            // Rubber band at either end of the
-                                            // playlist instead of detaching.
-                                            next < 0f && !hasNeighbour(1) -> next * .35f
-                                            next > 0f && !hasNeighbour(-1) -> next * .35f
-                                            else -> next.coerceIn(-width, width)
+                                // Written by hand instead of detectHorizontalDragGestures:
+                                // that detector consumes the gesture the moment it
+                                // starts, so a zoomed picture could no longer pan --
+                                // the transformable saw consumed changes and gave up.
+                                // Nothing is consumed here until the gesture has been
+                                // classified as a page drag.
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    val slop = viewConfiguration.touchSlop
+                                    var paging = false
+                                    var handedToPicture = false
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                        val totalDx = change.position.x - down.position.x
+                                        if (!paging && !handedToPicture && abs(totalDx) > slop) {
+                                            // Past the slop either the picture pans
+                                            // (zoomed, not at its edge) or the page
+                                            // takes the drag.
+                                            if (pushingPastEdge(totalDx)) {
+                                                paging = true
+                                                pagerDragging = true
+                                            } else {
+                                                handedToPicture = true
+                                            }
                                         }
-                                    },
-                                    onDragEnd = {
+                                        if (paging && change.pressed) {
+                                            change.consume()
+                                            val next = pagerOffset + (change.position.x - change.previousPosition.x)
+                                            pagerOffset = when {
+                                                // Rubber band at either end of the
+                                                // playlist instead of detaching.
+                                                next < 0f && !hasNeighbour(1) -> next * .35f
+                                                next > 0f && !hasNeighbour(-1) -> next * .35f
+                                                else -> next.coerceIn(-width, width)
+                                            }
+                                        }
+                                        if (!change.pressed) break
+                                    }
+                                    if (paging) {
                                         pagerDragging = false
-                                        if (pagerOffset == 0f) return@detectHorizontalDragGestures
                                         val direction = if (pagerOffset < 0f) 1 else -1
-                                        // A quarter of the page is enough to
-                                        // commit, the way a swipe should feel.
-                                        if (abs(pagerOffset) >= width * .2f && hasNeighbour(direction)) {
+                                        // 15% of the page commits the swipe.
+                                        if (abs(pagerOffset) >= width * .15f && hasNeighbour(direction)) {
                                             slideTo(if (direction > 0) -width else width, 170) {
-                                                // The neighbour is centred now:
-                                                // hand the page over without a
-                                                // second slide.
+                                                // The neighbour is centred now: hand
+                                                // the page over without a second slide.
                                                 pagerCommit = true
-                                                // Leave the zoomed state behind:
-                                                // the next picture opens as it
-                                                // was, not zoomed at an offset.
+                                                // Leave the zoomed state behind: the
+                                                // next picture opens as it was.
                                                 imageScale = 1f
                                                 imageOffset = Offset.Zero
                                                 moveViewer(direction)
@@ -652,12 +675,8 @@ fun MediaViewer(
                                         } else {
                                             settle()
                                         }
-                                    },
-                                    onDragCancel = {
-                                        pagerDragging = false
-                                        settle()
                                     }
-                                )
+                                }
                             }
                     ) { shown ->
                         Box(

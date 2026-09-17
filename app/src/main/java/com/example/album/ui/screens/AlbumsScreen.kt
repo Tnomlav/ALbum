@@ -275,6 +275,10 @@ fun AlbumsScreen(
         else -> AnimatedContent(
             targetState = currentAlbum,
             contentKey = { it?.name },
+            // Always measure against the page: the album list and the folder
+            // grid have different content heights, and letting the container
+            // follow them moved the page up and down while switching.
+            modifier = Modifier.fillMaxSize(),
             transitionSpec = {
                 // Keep the cover as the shared element while the old grid
                 // disappears and the destination grid arrives underneath it.

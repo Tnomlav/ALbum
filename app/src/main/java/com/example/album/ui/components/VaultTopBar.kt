@@ -65,28 +65,36 @@ private fun TitleSwitchMark(
     english: Boolean
 ) {
     val index = selected.coerceIn(labels.indices)
-    Row(
+    // The pill is small; the clickable area around it is not. A ~27dp target
+    // was easy to miss, which is why switching back from Tag often did nothing.
+    Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = .14f))
-            .clickable { onChange((index + 1) % labels.size) }
-            .padding(horizontal = 8.dp, vertical = 5.dp),
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .height(48.dp)
+            .clickable { onChange((index + 1) % labels.size) },
+        contentAlignment = Alignment.Center
     ) {
-        Icon(
-            Icons.Outlined.SwapHoriz,
-            contentDescription = appText("切换", english),
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.height(17.dp)
-        )
-        Text(
-            labels[index],
-            style = VaultText.TopBarSwitch,
-            color = MaterialTheme.colorScheme.primary,
-            maxLines = 1,
-            softWrap = false
-        )
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = .14f))
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Outlined.SwapHoriz,
+                contentDescription = appText("切换", english),
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.height(17.dp)
+            )
+            Text(
+                labels[index],
+                style = VaultText.TopBarSwitch,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
     }
 }
 
