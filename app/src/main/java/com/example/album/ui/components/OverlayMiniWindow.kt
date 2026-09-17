@@ -8,6 +8,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
@@ -91,7 +92,10 @@ internal class OverlayMiniWindow(
         if (root != null) return
         val density = context.resources.displayMetrics.density
         val screenWidth = context.resources.displayMetrics.widthPixels
-        val width = min((screenWidth * 0.62f).roundToInt(), (320 * density).roundToInt())
+        val screenHeight = context.resources.displayMetrics.heightPixels
+        // Base the starting size on the short side of the screen, so the window
+        // is the same size whether it was opened in portrait or landscape.
+        val width = min((min(screenWidth, screenHeight) * 0.62f).roundToInt(), (320 * density).roundToInt())
         val height = (width * 9f / 16f).roundToInt()
 
         val container = FrameLayout(context).apply {
@@ -408,16 +412,26 @@ internal class OverlayMiniWindow(
     private fun clampToScreen() {
         val view = root ?: return
         val params = layoutParams ?: return
-        val metrics = context.resources.displayMetrics
-        val density = metrics.density
-        val maxWidth = (metrics.widthPixels - 16 * density).roundToInt()
+        val density = context.resources.displayMetrics.density
+        // Use the display bounds, not the configuration metrics: while the phone
+        // shows the background/recents screen those metrics report a much
+        // smaller area and the window used to shrink to its minimum.
+        val bounds = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            windowManager.currentWindowMetrics.bounds
+        } else {
+            val metrics = context.resources.displayMetrics
+            android.graphics.Rect(0, 0, metrics.widthPixels, metrics.heightPixels)
+        }
+        val screenWidth = bounds.width()
+        val screenHeight = bounds.height()
+        val maxWidth = (screenWidth - 16 * density).roundToInt()
             .coerceAtLeast((160 * density).roundToInt())
         if (params.width > maxWidth) {
             params.width = maxWidth
             params.height = (maxWidth * 9f / 16f).roundToInt()
         }
-        params.x = params.x.coerceIn(0, (metrics.widthPixels - params.width).coerceAtLeast(0))
-        params.y = params.y.coerceIn(0, (metrics.heightPixels - params.height).coerceAtLeast(0))
+        params.x = params.x.coerceIn(0, (screenWidth - params.width).coerceAtLeast(0))
+        params.y = params.y.coerceIn(0, (screenHeight - params.height).coerceAtLeast(0))
         runCatching { windowManager.updateViewLayout(view, params) }
     }
 }

@@ -306,9 +306,10 @@ fun SettingsScreen(
                 }
             }
         }
-        if (settingsSection == null || settingsSection == "主题") {
+        if (settingsSection == null) {
         item { SettingsHeader("主题", settingsSection == "主题") { settingsSection = if (settingsSection == "主题") null else "主题" } }
         }
+        if (settingsSection == "主题") {
         item { ValueRow("主题模式", if (isEnglish && themeMode == "自动") "System" else themeMode) { choose("主题模式", "theme_mode", listOf("自动", "浅色", "深色"), themeMode) { themeMode = it; onThemeModeChange(it) } } }
         item { ThemeColorRow(themeAccent.label) { showThemeColors = true } }
         item { ValueRow("语言", language) {
@@ -334,10 +335,11 @@ fun SettingsScreen(
             }
         }
 
-        if (settingsSection == null || settingsSection == "文件操作") {
-        item { SettingsHeader("文件操作", settingsSection == "文件操作") { settingsSection = if (settingsSection == "文件操作") null else "文件操作" } }
-        if (settingsSection == "文件操作") {
         }
+        if (settingsSection == null) {
+        item { SettingsHeader("文件操作", settingsSection == "文件操作") { settingsSection = if (settingsSection == "文件操作") null else "文件操作" } }
+        }
+        if (settingsSection == "文件操作") {
         item { ToggleRow("回收站", "开启后，删除的文件将进入回收站", recycleBin) { setBoolean("recycle_bin", it) { recycleBin = it } } }
         item { ValueRow("回收站文件保留期限", value("retention", "60天"), "保存在应用私有目录，卸载时会一并删除") {
             choose("回收站文件保留期限", "retention", listOf("10天", "30天", "60天", "90天"), value("retention", "60天")) { selected ->
@@ -380,7 +382,7 @@ fun SettingsScreen(
         item { ValueRow("编辑后保存方式", value("edit_save", "每次询问"), "保留编辑副本或替换当前版本，保存前均需确认") { choose("编辑后保存方式", "edit_save", listOf("每次询问", "保留二者", "替换原图"), value("edit_save", "每次询问")) } }
         item { ValueRow("复制/移动文件已存在", value("conflict", "保留两者")) { choose("同名文件处理", "conflict", listOf("保留两者", "覆盖", "跳过"), value("conflict", "保留两者")) } }
 
-        if (settingsSection == null || settingsSection == "显示") {
+        if (settingsSection == null) {
         }
         item { SettingsHeader("显示", settingsSection == "显示") { settingsSection = if (settingsSection == "显示") null else "显示" } }
         if (settingsSection == "显示") {
@@ -406,7 +408,7 @@ fun SettingsScreen(
             )
         } }
 
-        if (settingsSection == null || settingsSection == "视频") {
+        if (settingsSection == null) {
         }
         item { SettingsHeader("视频", settingsSection == "视频") { settingsSection = if (settingsSection == "视频") null else "视频" } }
         if (settingsSection == "视频") {
@@ -449,7 +451,7 @@ fun SettingsScreen(
         } }
 
         }
-        if (settingsSection == null || settingsSection == "滚动条") {
+        if (settingsSection == null) {
         item { SettingsHeader("滚动条", settingsSection == "滚动条") { settingsSection = if (settingsSection == "滚动条") null else "滚动条" } }
         }
         if (settingsSection == "滚动条") {
@@ -458,7 +460,7 @@ fun SettingsScreen(
         item { ToggleRow("始终显示", "页面可滚动时保持滚动条常驻", persistentScrollbar) { setBoolean("persistent_scrollbar", it) { persistentScrollbar = it } } }
         }
 
-        if (settingsSection == null || settingsSection == "幻灯片") {
+        if (settingsSection == null) {
         item { SettingsHeader("幻灯片", settingsSection == "幻灯片") { settingsSection = if (settingsSection == "幻灯片") null else "幻灯片" } }
         }
         if (settingsSection == "幻灯片") {
@@ -467,7 +469,7 @@ fun SettingsScreen(
         item { ToggleRow("幻灯片随机播放", null, randomSlideshow) { setBoolean("random_slideshow", it) { randomSlideshow = it } } }
         }
 
-        if (settingsSection == null || settingsSection == "缓存") {
+        if (settingsSection == null) {
         item { SettingsHeader("缓存", settingsSection == "缓存") { settingsSection = if (settingsSection == "缓存") null else "缓存" } }
         }
         if (settingsSection == "缓存") {
@@ -494,7 +496,7 @@ fun SettingsScreen(
         } }
         }
 
-        if (settingsSection == null || settingsSection == "关于") {
+        if (settingsSection == null) {
         item { SettingsHeader("关于", settingsSection == "关于") { settingsSection = if (settingsSection == "关于") null else "关于" } }
         }
         if (settingsSection == "关于") {

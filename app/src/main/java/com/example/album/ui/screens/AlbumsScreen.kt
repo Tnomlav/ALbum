@@ -280,11 +280,15 @@ fun AlbumsScreen(
             // follow them moved the page up and down while switching.
             modifier = Modifier.fillMaxSize(),
             transitionSpec = {
-                // A straight swap. Cross-fading the album list and the folder
-                // grid made the page flash (both were drawn at once, at
-                // different heights), and every variation of the fade was
-                // still reported as a flash.
-                EnterTransition.None togetherWith ExitTransition.None
+                // The pages themselves swap in the same frame, while the cover
+                // of the folder that is being opened keeps flying to its new
+                // place through the shared element (260ms). Fading the pages
+                // made the previous one linger, which is what looked like a
+                // leftover; the shared element is the part worth keeping.
+                // The new page fades in while the cover flies; the old page is
+                // gone in the same frame, so nothing of it lingers.
+                fadeIn(tween(220, easing = CubicBezierEasing(.22f, .78f, .24f, 1f))) togetherWith
+                    ExitTransition.None
             },
             label = "album-folder"
         ) { shownAlbum ->

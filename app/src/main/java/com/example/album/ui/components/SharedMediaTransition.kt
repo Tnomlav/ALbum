@@ -21,15 +21,11 @@ internal fun Modifier.mediaSharedElement(item: MediaItem): Modifier {
     val visibilityScope = LocalMediaAnimatedVisibilityScope.current
     val key = "media:${item.uri}"
     val activeKey = LocalActiveSharedMediaKey.current
-    // Only the item the viewer is opening or closing takes part in a shared
-    // transition. Sharing every tile made the album list and the folder grid
-    // animate into each other, which kept the previous page composed (and
-    // visible) while the new one appeared.
-    if (activeKey != key) return this
+    if (visibilityScope == null && activeKey != key) return this
     return with(sharedScope) {
         val state = rememberSharedContentState(key)
         val transform = BoundsTransform { _: Rect, _: Rect ->
-            tween<Rect>(360, easing = CubicBezierEasing(.22f, .78f, .24f, 1f))
+            tween<Rect>(260, easing = CubicBezierEasing(.22f, .78f, .24f, 1f))
         }
         if (visibilityScope != null) {
             sharedElement(state, visibilityScope, boundsTransform = transform)

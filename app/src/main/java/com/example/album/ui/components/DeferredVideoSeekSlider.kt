@@ -22,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -54,7 +55,9 @@ internal fun DeferredVideoSeekSlider(
 ) {
     val duration = durationMs.coerceAtLeast(1L)
     val trackStrokeWidthPx = with(LocalDensity.current) { 12.dp.toPx() }
-    val trackGapPx = with(LocalDensity.current) { 3.dp.toPx() }
+    // The thumb is 12dp wide (the bar's own width); the played and unplayed
+    // segments stop at its edges, so nothing at all is painted underneath it.
+    val trackGapPx = with(LocalDensity.current) { 6.dp.toPx() }
     var displayedValue by remember { mutableFloatStateOf(valueMs.toFloat()) }
     var dragging by remember { mutableStateOf(false) }
     val latestOnSeek = rememberUpdatedState(onSeek)
@@ -162,12 +165,21 @@ internal fun DeferredVideoSeekSlider(
             disabledInactiveTickColor = Color.Transparent
         ),
         thumb = {
+            // Concentric circles: a transparent 12dp outer ring with a 6dp
+            // white core, so the thumb is as thick as the bar and the gap on
+            // either side of it is genuinely empty.
             Box(
-                Modifier.size(16.dp)
+                Modifier.size(12.dp)
                     .clip(CircleShape)
-                    .background(thumbColor, CircleShape)
-                    .border(4.dp, thumbBorderColor, CircleShape)
-            )
+                    .background(Color.Transparent, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    Modifier.size(6.dp)
+                        .clip(CircleShape)
+                        .background(thumbColor, CircleShape)
+                )
+            }
         }
     )
 }

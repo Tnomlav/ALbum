@@ -616,25 +616,12 @@ fun AlbumApp(
                 }
             }
         }
-        if (stillActive && queuePresent) return@LaunchedEffect
-        // Only offer the restore once per installed version so deliberately
-        // changing the wallpaper is not fought on every launch.
-        val restoreVersion = preferences.getInt("wallpaper_restore_version", -1)
-        if (restoreVersion == com.example.album.BuildConfig.VERSION_CODE) return@LaunchedEffect
-        val backup = withContext(Dispatchers.IO) { WallpaperBackup.load(context) } ?: return@LaunchedEffect
-        val allMedia = (library.images + library.videos + library.localImages + library.localVideos)
-            .distinctBy { it.uri.toString() }
-        val restored = backup.uris.mapNotNull { uri -> allMedia.firstOrNull { it.uri.toString() == uri } }
-        if (restored.isEmpty()) return@LaunchedEffect
         wallpaperRestoreAttempted = true
         preferences.edit().putInt("wallpaper_restore_version", com.example.album.BuildConfig.VERSION_CODE).apply()
-        if (backup.kind == WallpaperAppliedStore.KIND_DYNAMIC) {
-            // Restore silently: opening the system wallpaper picker on launch
-            // looked like the app starting something by itself.
-            setDynamicWallpaper(context, restored.filter { it.isVideo }, english, openSettings = false)
-        } else {
-            setStaticWallpaper(context, restored.filterNot { it.isVideo }, english, openSettings = false)
-        }
+        // The backup stays available for a manual restore from the wallpaper
+        // manager, but the app no longer re-applies it on launch: doing that
+        // silently replaced a wallpaper the user had chosen by themselves, and
+        // a live wallpaper that could not play left them with a dead one.
     }
     LaunchedEffect(context) {
         val loaded = withContext(Dispatchers.IO) { SlideshowQueueStore.load(context) }
