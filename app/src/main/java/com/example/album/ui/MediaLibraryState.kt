@@ -144,6 +144,21 @@ class MediaLibraryState(context: Context) {
     var recycleEntries by mutableStateOf<List<RecycleEntry>>(emptyList())
         private set
 
+    init {
+        // Publish the cached snapshot before the first frame. Waiting for the
+        // refresh coroutine left the albums page with nothing to show for a few
+        // frames, which is what made a cold start look like it was loading.
+        runCatching { com.example.album.data.MediaSnapshotStore.load(appContext) }.getOrNull()?.let { cached ->
+            allImages = cached.images
+            allVideos = cached.videos
+            localImages = cached.localImages
+            localVideos = cached.localVideos
+            images = cached.images
+            videos = cached.videos
+            initialLoadComplete = true
+        }
+    }
+
     /* init {
         val days = settingsPreferences.getString("retention", "60天")?.filter(Char::isDigit)?.toIntOrNull() ?: 60
     } */

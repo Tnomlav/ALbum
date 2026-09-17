@@ -2578,11 +2578,11 @@ fun AlbumApp(
                 transitionSpec = {
                     val direction = if (tabOrder.indexOf(targetState) >= tabOrder.indexOf(initialState)) 1 else -1
                     (
-                        fadeIn(tween(260, delayMillis = 18, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))) +
-                            slideInHorizontally(tween(380, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))) { width -> direction * width * 24 / 100 }
+                        fadeIn(tween(190, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))) +
+                            slideInHorizontally(tween(240, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))) { width -> direction * width * 24 / 100 }
                         ) togetherWith (
-                        fadeOut(tween(220, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))) +
-                            slideOutHorizontally(tween(380, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))) { width -> -direction * width * 24 / 100 }
+                        fadeOut(tween(170, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))) +
+                            slideOutHorizontally(tween(240, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))) { width -> -direction * width * 24 / 100 }
                         ) using SizeTransform(clip = false)
                 },
                 contentKey = { it },
@@ -2838,7 +2838,7 @@ fun AlbumApp(
                 )
             AnimatedVisibility(
                 visible = openedFolder == null && !wallpaperManagerOpen,
-                enter = slideInVertically(tween(240, easing = CubicBezierEasing(.22f, .8f, .28f, 1f))) { it } + fadeIn(tween(160)),
+                enter = slideInVertically(tween(170, easing = CubicBezierEasing(.22f, .8f, .28f, 1f))) { it } + fadeIn(tween(120)),
                 // Leaving the page hides the bar at once: the slide-out used to
                 // still be running while the folder page was already visible.
                 exit = ExitTransition.None
@@ -3104,18 +3104,18 @@ fun AlbumApp(
                             )
                         ) +
                             slideInHorizontally(
-                                tween(380, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))
+                                tween(240, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))
                             ) { width -> direction * width * 24 / 100 } +
                             scaleIn(
                                 initialScale = .992f,
-                                animationSpec = tween(380, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))
+                                animationSpec = tween(240, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))
                             )
                         ) togetherWith (
                         fadeOut(
                             tween(300, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))
                         ) +
                             slideOutHorizontally(
-                                tween(380, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))
+                                tween(240, easing = CubicBezierEasing(.22f, 1f, .36f, 1f))
                             ) { width -> -direction * width * 24 / 100 } +
                             scaleOut(
                                 targetScale = .992f,

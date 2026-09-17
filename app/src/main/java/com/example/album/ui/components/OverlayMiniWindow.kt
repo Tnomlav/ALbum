@@ -106,7 +106,10 @@ internal class OverlayMiniWindow(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.CENTER
-            )
+            ).apply {
+                // The transport row sits a little below the vertical centre.
+                topMargin = (28 * density).roundToInt()
+            }
         }
         val rewind = overlayButton(com.example.album.R.drawable.ic_mw_rewind, density) { onSeekBack() }
         val playPause = overlayButton(com.example.album.R.drawable.ic_mw_pause, density) {

@@ -112,17 +112,12 @@ internal fun DeferredVideoSeekSlider(
         activeColor = activeColor,
         inactiveColor = inactiveColor,
         thumbColor = Color.White,
-        // The band around the thumb is filled with the unplayed track colour
-        // and its transparency, so it matches the right-hand part of the bar
-        // exactly instead of reading as an outline.
-        thumbBorderColor = inactiveColor,
-        thumbGap = 3.dp
-        ,
-        // The band is exactly as thick as the bar (12dp) and the dot keeps the
-        // archive slider's dot-to-track proportion, so the separator reads as
-        // part of the bar instead of a disc sitting on top of it.
-        thumbBandSize = 12.dp,
-        thumbDotSize = 9.dp
+        // 1:1 with the archive page's slider (the same call the VLC player
+        // makes): white track, plain white thumb, default band and gap.
+        thumbBorderColor = Color.White,
+        thumbGap = 3.dp,
+        thumbBandSize = 16.dp,
+        thumbDotSize = 10.dp
     )
 }
 
