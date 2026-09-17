@@ -443,7 +443,11 @@ fun AlbumApp(
     }
     val lifecycleOwner = context as? LifecycleOwner
     val pixivRepository = remember { PixivArchiveRepository(context) }
+    pixivRepository.english = english
     val pixivArchiveSession = remember { PixivArchiveSession(context) }
+    // The archive session builds user-visible status messages without a
+    // Composable context, so it needs to know the current language.
+    pixivArchiveSession.english = english
     val preferences = remember { context.getSharedPreferences("album_preferences", android.content.Context.MODE_PRIVATE) }
     val albumSettings = remember { context.getSharedPreferences("album_settings", android.content.Context.MODE_PRIVATE) }
     var showRenameExtension by remember { mutableStateOf(albumSettings.getBoolean("rename_show_extension", false)) }

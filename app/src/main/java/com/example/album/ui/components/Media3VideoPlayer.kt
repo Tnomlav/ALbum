@@ -753,6 +753,16 @@ internal fun Media3VideoPlayer(
             pictureInPictureRequested = true
             // The mini window replaces the app, so the task moves to the back
             // and only the floating window stays on screen.
+            // Lock the orientation we are in first: in landscape the system
+            // otherwise rotates the task while backgrounding it, which made the
+            // window feel much slower to appear than in portrait.
+            val landscapeNow = configuration.orientation ==
+                android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            hostActivity?.requestedOrientation = if (landscapeNow) {
+                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
             hostActivity?.moveTaskToBack(true)
         } else if (onEnterPictureInPicture()) {
             pictureInPictureRequested = true

@@ -638,9 +638,9 @@ private fun DuplicateContent(
             }
         }
         if (deleting) {
-            item { CleanupBusy("正在删除重复图片…") }
+            item { CleanupBusy(if (english) "Deleting duplicate photos…" else "正在删除重复图片…") }
         } else if (scanning) {
-            item { CleanupBusy("正在计算文件哈希…") }
+            item { CleanupBusy(if (english) "Hashing files…" else "正在计算文件哈希…") }
         } else if (liveGroups.isEmpty()) {
             item { CleanupEmpty("没有发现重复图片") }
         }
@@ -1100,6 +1100,8 @@ data class ArchiveActivity(
 
 /** Keeps archive work and its result alive while the archive page is not visible. */
 class PixivArchiveSession(context: Context) {
+    /** Whether the UI is in English; set from the composable that owns this session. */
+    var english: Boolean = false
     private val preferences = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
     val records = mutableStateOf(loadRecords())
     val state = mutableStateOf(loadState())
@@ -1146,7 +1148,7 @@ class PixivArchiveSession(context: Context) {
         failed.intValue = 0
         activity.value = ArchiveActivity(
             phase = PixivArchivePhase.Discover,
-            message = "正在准备扫描"
+            message = if (english) "Preparing to scan" else "正在准备扫描"
         )
     }
 
@@ -1653,7 +1655,7 @@ private fun ArchiveContent(
                 activity = activity.copy(
                     phase = PixivArchivePhase.Error,
                     message = error.message ?: if (english) "Archive failed" else "归档失败，来源文件已保留",
-                    logs = (listOf(error.message ?: "归档任务异常") + activity.logs).take(4)
+                    logs = (listOf(error.message ?: if (english) "Archive task failed" else "归档任务异常") + activity.logs).take(4)
                 )
                 state = ArchiveUiState.Error
             }
@@ -1891,7 +1893,7 @@ private fun ArchiveContent(
                 ArchivePrimaryButton(
                     label = when {
                         allArchived -> "已归档"
-                        state == ArchiveUiState.Archiving -> "正在归档..."
+                        state == ArchiveUiState.Archiving -> if (english) "Archiving..." else "正在归档..."
                         else -> "开始归档"
                     },
                     onClick = { requestArchive() },
@@ -2046,7 +2048,7 @@ private fun ArchiveContent(
                                 activity = activity.copy(
                                     phase = PixivArchivePhase.Error,
                                     message = error.message ?: if (english) "Archive failed" else "归档失败，来源文件已保留",
-                                    logs = (listOf(error.message ?: "归档任务异常") + activity.logs).take(4)
+                                    logs = (listOf(error.message ?: if (english) "Archive task failed" else "归档任务异常") + activity.logs).take(4)
                                 )
                                 state = ArchiveUiState.Error
                             }
@@ -2099,7 +2101,7 @@ private fun ArchiveContent(
             body = if (english) {
                 "Waiting for the login status to sync. Please wait."
             } else {
-                "正在等待登录状态同步，请稍候。"
+                if (english) "Waiting for the sign-in state to sync." else "正在等待登录状态同步，请稍候。"
             },
             confirmLabel = appText("取消等待", english),
             onDismiss = { checkingPixivLogin = false },

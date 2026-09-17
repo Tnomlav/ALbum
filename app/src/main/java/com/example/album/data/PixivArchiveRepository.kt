@@ -103,6 +103,14 @@ data class PixivLibrarySnapshot(
 )
 
 class PixivArchiveRepository(private val context: Context) {
+    /**
+     * User-visible progress text is built here, without a Composable context,
+     * so the owner sets the current language before starting work.
+     */
+    var english: Boolean = false
+
+    private fun t(chinese: String, englishText: String) = if (english) englishText else chinese
+
     private val mediaRepository = MediaRepository(context)
     private val metadataCache = mutableMapOf<String, PixivMetadata>()
     private val metadataCacheLock = Mutex()
@@ -465,7 +473,7 @@ class PixivArchiveRepository(private val context: Context) {
         onProgress: suspend (PixivArchiveProgress) -> Unit = {},
         onRecord: suspend (PixivArchiveRecord) -> Unit = {}
     ): List<PixivArchiveRecord> = withContext(Dispatchers.IO) {
-        onProgress(PixivArchiveProgress(PixivArchivePhase.Discover, 0, 0, 0, message = "正在读取来源目录"))
+        onProgress(PixivArchiveProgress(PixivArchivePhase.Discover, 0, 0, 0, message = t("正在读取来源目录", "Reading source folder")))
         val root = treeDocumentFile(sourceTree)
             ?: throw IllegalStateException("无法读取 Pixiv 来源目录")
         val files = mutableListOf<DocumentFile>()
@@ -473,7 +481,7 @@ class PixivArchiveRepository(private val context: Context) {
             .getOrElse { throw IllegalStateException("来源目录读取失败，请检查访问权限", it) }
         files.sortBy { it.name.orEmpty().lowercase(Locale.ROOT) }
         val filesToScan = files.distinctBy { it.uri }.take(maxItems.coerceAtLeast(1))
-        onProgress(PixivArchiveProgress(PixivArchivePhase.Metadata, 0, filesToScan.size, 0, message = "找到 ${filesToScan.size} 张图片，正在查询作品信息", log = "已读取 ${filesToScan.size} 个文件"))
+        onProgress(PixivArchiveProgress(PixivArchivePhase.Metadata, 0, filesToScan.size, 0, message = t("找到 ${filesToScan.size} 张图片，正在查询作品信息", "Found ${filesToScan.size} images; querying artwork info"), log = t("已读取 ${filesToScan.size} 个文件", "Read ${filesToScan.size} files")))
         val parsed = filesToScan.map { file -> file to parsePixivFilename(file.name.orEmpty()) }
         val hasUncachedPid = parsed.any { (file, details) ->
             details?.first?.let { pid -> readPersistedMetadata(pid) == null } == true
@@ -501,7 +509,7 @@ class PixivArchiveRepository(private val context: Context) {
                     total = filesToScan.size,
                     failed = warnings,
                     currentFile = file.name.orEmpty(),
-                    message = "正在查询 Pixiv 信息"
+                    message = t("正在查询 Pixiv 信息", "Querying Pixiv artwork info")
                 ))
                 val info = pid?.let { metadataRequests[it]?.await() }
                 val record = PixivArchiveRecord(
@@ -562,7 +570,7 @@ class PixivArchiveRepository(private val context: Context) {
                 file to record
             }
         }
-        onProgress(PixivArchiveProgress(PixivArchivePhase.Metadata, 0, files.size, 0, message = "正在重新查询 ${files.size} 张图片"))
+        onProgress(PixivArchiveProgress(PixivArchivePhase.Metadata, 0, files.size, 0, message = t("正在重新查询 ${files.size} 张图片", "Re-querying ${files.size} images")))
         val semaphore = Semaphore(PIXIV_METADATA_CONCURRENCY)
         val requests = files.mapNotNull { (_, record) -> record.pid }
             .distinct()
@@ -616,16 +624,16 @@ class PixivArchiveRepository(private val context: Context) {
         val total = records.count { it.canArchive }
         val root = treeDocumentFile(targetTree, createMissing = true)
         if (root == null) {
-            onProgress(PixivArchiveProgress(PixivArchivePhase.Error, 0, total, total, message = "无法读取归档目标目录", log = "目标目录读取失败，可重新选择后重试"))
+            onProgress(PixivArchiveProgress(PixivArchivePhase.Error, 0, total, total, message = t("无法读取归档目标目录", "Cannot read the archive destination"), log = t("目标目录读取失败，可重新选择后重试", "Destination unavailable; choose it again and retry")))
             return@withContext PixivArchiveResult(
-                records.map { if (it.canArchive) it.copy(status = PixivArchiveStatus.Failed, message = "目标目录不可用，来源文件已保留") else it },
+                records.map { if (it.canArchive) it.copy(status = PixivArchiveStatus.Failed, message = t("目标目录不可用，来源文件已保留", "Destination unavailable; source files were kept")) else it },
                 0,
                 total
             )
         }
         var completed = 0
         var failed = 0
-        onProgress(PixivArchiveProgress(PixivArchivePhase.Folders, 0, total, 0, message = "正在准备画师目录"))
+        onProgress(PixivArchiveProgress(PixivArchivePhase.Folders, 0, total, 0, message = t("正在准备画师目录", "Preparing artist folders")))
         val updated = records.map { record ->
             if (!record.canArchive) return@map record
             val metadata = requireNotNull(record.metadata)
