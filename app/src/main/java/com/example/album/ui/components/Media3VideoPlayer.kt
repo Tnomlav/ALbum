@@ -818,11 +818,9 @@ internal fun Media3VideoPlayer(
                     }
                 }
                 Lifecycle.Event.ON_STOP -> {
-                    // Optional: some users want the window out of the way while
-                    // the phone is in the background / multi-task view.
-                    if (preferences.getBoolean("mini_shrink_on_background", false)) {
-                        floatingWindow?.setCompact(true)
-                    }
+                    // Leaving the app keeps the window at the size the user
+                    // chose. Shrinking is the window's own job: it reacts to the
+                    // system's task switcher, not to our process going idle.
                 }
                 else -> Unit
             }
