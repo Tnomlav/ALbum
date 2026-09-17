@@ -68,6 +68,8 @@ fun TimelineScreen(
     query: String,
     loading: Boolean,
     scanning: Boolean = false,
+    /** False until the first library scan finishes; see AlbumsScreen. */
+    initialLoadComplete: Boolean = true,
     searchingFolders: Boolean = false,
     permissionGranted: Boolean,
     isVideo: Boolean,
@@ -121,7 +123,7 @@ fun TimelineScreen(
         }
         return
     }
-    if (refreshing && media.isEmpty()) {
+    if ((refreshing || !initialLoadComplete) && media.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }

@@ -82,6 +82,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -127,6 +128,8 @@ import androidx.media3.ui.PlayerView
 import com.example.album.data.MediaItem
 import com.example.album.playback.MediaPlaybackService
 import com.example.album.playback.albumExtractorsFactory
+import com.example.album.playback.positionForPersistence
+import com.example.album.playback.videoProgressKey
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appSeekText
 import com.example.album.ui.appText
@@ -424,6 +427,9 @@ internal fun Media3VideoPlayer(
     var pictureInPictureRequested by remember { mutableStateOf(false) }
     var pendingFloatingWindow by remember { mutableStateOf(false) }
     var floatingWindow by remember { mutableStateOf<OverlayMiniWindow?>(null) }
+    // Bumped when the floating window hands the video surface back, which
+    // recreates the in-app PlayerView and re-attaches the surface.
+    var videoSurfaceToken by remember { mutableIntStateOf(0) }
     val overlayPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -593,6 +599,13 @@ internal fun Media3VideoPlayer(
     // The listener below outlives a single recomposition, so it reads the
     // current item through a state holder instead of a captured value.
     val fallbackProbeItem by rememberUpdatedState(current)
+    // Where this video was left off, honouring the "remember playback
+    // position" setting. The stored value is written with the same key helper
+    // by the in-app player, the background service and the viewer.
+    fun startPositionFor(item: MediaItem): Long {
+        if (!preferences.getBoolean("video_progress", true)) return 0L
+        return preferences.getLong(videoProgressKey(item.uri), 0L).coerceAtLeast(0L)
+    }
     val player = remember(videos) {
         ExoPlayer.Builder(context, albumRenderersFactory(context))
             // MPEG-1 program streams need the extra extractor; everything else
@@ -639,7 +652,7 @@ internal fun Media3VideoPlayer(
                         .setMimeType(item.mimeType.takeIf { it.startsWith("video/") && it != "video/*" })
                         .build()
                 }
-                setMediaItems(items, currentIndex, 0L)
+                setMediaItems(items, currentIndex, startPositionFor(videos[currentIndex]))
                 prepare()
                 playWhenReady = preferences.getBoolean("video_autoplay", true)
         }
@@ -681,13 +694,20 @@ internal fun Media3VideoPlayer(
             return
         }
         val window = OverlayMiniWindow(
-            context = context,
+            // The floating window belongs to the process, not to the Activity:
+            // with the Activity's context the window is torn down as soon as
+            // the app goes to the background.
+            context = context.applicationContext,
             player = player,
             onRestore = {
                 floatingWindow = null
                 pictureInPictureRequested = false
                 controlsVisible = true
                 controlsInteraction++
+                // The overlay owned the player's video surface while it was up;
+                // rebuilding the in-app surface is what brings the picture back
+                // instead of audio only.
+                videoSurfaceToken++
             },
             onClose = {
                 floatingWindow = null
@@ -709,6 +729,9 @@ internal fun Media3VideoPlayer(
             floatingWindow = window
             // Keep playing while the app is in the background.
             pictureInPictureRequested = true
+            // The mini window replaces the app, so the task moves to the back
+            // and only the floating window stays on screen.
+            hostActivity?.moveTaskToBack(true)
         } else if (onEnterPictureInPicture()) {
             pictureInPictureRequested = true
         } else {
@@ -806,6 +829,12 @@ internal fun Media3VideoPlayer(
                     requestedIndex = changedIndex
                     currentIndex = changedIndex
                     onCurrentChanged(changed)
+                    // Pick up where this video was left off, the same way a
+                    // freshly opened player does.
+                    val resumeAt = startPositionFor(changed)
+                    if (resumeAt > 0L && player.currentPosition < resumeAt) {
+                        seekToVideoFrame(player, resumeAt)
+                    }
                 }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -836,7 +865,16 @@ internal fun Media3VideoPlayer(
         player.addListener(listener)
         onDispose {
             if (preferences.getBoolean("video_progress", true)) {
-                preferences.edit().putLong("video_position_${current.uri.hashCode()}", player.currentPosition).apply()
+                preferences.edit()
+                    .putLong(
+                        videoProgressKey(current.uri),
+                        positionForPersistence(
+                            player.currentPosition,
+                            player.duration.takeIf { it > 0L } ?: 0L,
+                            player.playbackState == Player.STATE_ENDED
+                        )
+                    )
+                    .apply()
             }
             player.removeListener(listener)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1087,20 +1125,22 @@ internal fun Media3VideoPlayer(
                 .graphicsLayer { rotationZ = if (rotateCanvas) 90f else 0f }
                 .background(Color.Black)
         ) {
-        AndroidView(
-            factory = { viewContext ->
-                (PlayerView.inflate(viewContext, com.example.album.R.layout.view_media3_video_player, null) as PlayerView).apply {
-                    this.player = player
-                    controllerShowTimeoutMs = 3_000
-                    controllerHideOnTouch = true
-                    controllerAutoShow = true
+        key(videoSurfaceToken) {
+            AndroidView(
+                factory = { viewContext ->
+                    (PlayerView.inflate(viewContext, com.example.album.R.layout.view_media3_video_player, null) as PlayerView).apply {
+                        this.player = player
+                        controllerShowTimeoutMs = 3_000
+                        controllerHideOnTouch = true
+                        controllerAutoShow = true
+                    }
+                },
+                update = { it.player = player },
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    scaleX = if (mirrorVideo) -1f else 1f
                 }
-            },
-            update = { it.player = player },
-            modifier = Modifier.fillMaxSize().graphicsLayer {
-                scaleX = if (mirrorVideo) -1f else 1f
-            }
-        )
+            )
+        }
         if (miniMode || pictureInPictureMode) {
             MiniWindowControls(
                 player = player,

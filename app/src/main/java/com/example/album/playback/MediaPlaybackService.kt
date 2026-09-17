@@ -135,7 +135,7 @@ class MediaPlaybackService : Service() {
         val uri = mediaUri ?: return
         val position = player?.currentPosition ?: return
         getSharedPreferences("album_settings", MODE_PRIVATE).edit()
-            .putLong("video_position_${uri.toString().hashCode()}", position)
+            .putLong(videoProgressKey(uri), position)
             .apply()
     }
 
@@ -145,7 +145,7 @@ class MediaPlaybackService : Service() {
         val position = activePlayer?.currentPosition?.coerceAtLeast(0L) ?: 0L
         val shouldPlay = activePlayer?.playWhenReady == true
         getSharedPreferences("album_settings", MODE_PRIVATE).edit()
-            .putLong("video_position_${uri.toString().hashCode()}", position)
+            .putLong(videoProgressKey(uri), position)
             .apply()
 
         handler.removeCallbacks(saveProgress)

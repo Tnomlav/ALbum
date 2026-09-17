@@ -20,6 +20,8 @@ import com.example.album.ui.shareMedia
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -179,7 +181,6 @@ import com.example.album.ui.appText
 import com.example.album.playback.MediaPlaybackService
 import com.example.album.playback.PlaybackResumeRequest
 import com.example.album.playback.positionForPersistence
-import com.example.album.playback.resumePosition
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -487,15 +488,43 @@ fun MediaViewer(
                 )
                 }
             } else {
+                // How far the picture is dragged horizontally, in pixels. The
+                // page follows the finger and the neighbour is pulled in from
+                // the edge; releasing past the middle switches pages.
+                var pagerOffset by remember { mutableFloatStateOf(0f) }
+                // Suppresses the slide transition for the frame in which a drag
+                // turns into a page change: the animation already happened
+                // under the finger.
+                var pagerCommit by remember { mutableStateOf(false) }
                 val transformState = rememberTransformableState { zoomChange, panChange, _ ->
                     val nextScale = (imageScale * zoomChange).coerceIn(1f, 5f)
                     val maxX = imageViewport.width * (nextScale - 1f) / 2f
                     val maxY = imageViewport.height * (nextScale - 1f) / 2f
                     imageScale = nextScale
                     imageOffset = if (nextScale <= 1.01f) Offset.Zero else Offset(
-                        (imageOffset.x + panChange.x).coerceIn(-maxX, maxX),
+                        // A damped overshoot past the edge is allowed; letting
+                        // go there switches to the neighbouring picture.
+                        overshootingOffset(imageOffset.x + panChange.x, maxX),
                         (imageOffset.y + panChange.y).coerceIn(-maxY, maxY)
                     )
+                }
+                fun leaveZoomedPicture() {
+                    val maxX = imageViewport.width * (imageScale - 1f) / 2f
+                    val threshold = imageViewport.width * .16f
+                    val overRight = imageOffset.x - maxX
+                    val overLeft = -imageOffset.x - maxX
+                    when {
+                        overRight > threshold -> {
+                            imageScale = 1f
+                            imageOffset = Offset.Zero
+                            moveViewer(-1)
+                        }
+                        overLeft > threshold -> {
+                            imageScale = 1f
+                            imageOffset = Offset.Zero
+                            moveViewer(1)
+                        }
+                    }
                 }
                 Box(
                     Modifier.fillMaxSize().pointerInput(current.uri, showInfo, showMenu) {
@@ -527,26 +556,101 @@ fun MediaViewer(
                             .clipToBounds()
                         .onSizeChanged { imageViewport = it }
                         .transformable(state = transformState, canPan = { imageScale > 1.01f })
+                        .pointerInput(imageScale, currentIndex, viewerItems.size) {
+                            // A zoomed picture pans under the finger; when it is
+                            // released past its edge, the neighbouring picture
+                            // takes over.
+                            if (imageScale <= 1.01f) return@pointerInput
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                var pressed = true
+                                while (pressed) {
+                                    val event = awaitPointerEvent()
+                                    pressed = event.changes.any { it.pressed }
+                                }
+                                leaveZoomedPicture()
+                            }
+                        }
                     ) {
+                    // The page the finger is pulling in, drawn under the
+                    // current one so both edges of the drag are visible.
+                    val pageWidth = imageViewport.width.toFloat().coerceAtLeast(1f)
+                    val neighbourIndex = when {
+                        pagerOffset < -0.5f -> currentIndex + 1
+                        pagerOffset > 0.5f -> currentIndex - 1
+                        else -> -1
+                    }
+                    if (neighbourIndex in viewerItems.indices) {
+                        MediaThumbnail(
+                            viewerItems[neighbourIndex],
+                            Modifier.fillMaxSize().graphicsLayer {
+                                translationX = pagerOffset + if (pagerOffset < 0f) pageWidth else -pageWidth
+                            },
+                            requestedSize = 720,
+                            showVideoMark = false,
+                            contentScale = ContentScale.Fit,
+                            backgroundColor = imageFullScreenBackground,
+                            animateGif = false
+                        )
+                    }
                     AnimatedContent(
                         targetState = current,
                         transitionSpec = {
-                            val easing = CubicBezierEasing(.22f, .72f, .24f, 1f)
-                            slideInHorizontally(tween(240, easing = easing)) { width -> viewerDirection * width } togetherWith
-                                slideOutHorizontally(tween(240, easing = easing)) { width -> -viewerDirection * width }
+                            if (pagerCommit) {
+                                EnterTransition.None togetherWith ExitTransition.None
+                            } else {
+                                val easing = CubicBezierEasing(.22f, .72f, .24f, 1f)
+                                slideInHorizontally(tween(240, easing = easing)) { width -> viewerDirection * width } togetherWith
+                                    slideOutHorizontally(tween(240, easing = easing)) { width -> -viewerDirection * width }
+                            }
                         },
                         label = "viewer-media",
-                        modifier = Modifier.fillMaxSize().pointerInput(currentIndex, viewerItems.size, imageScale) {
-                            if (imageScale > 1.01f) return@pointerInput
-                            var distance = 0f
-                            detectHorizontalDragGestures(
-                                onDragStart = { distance = 0f },
-                                onHorizontalDrag = { change, amount -> change.consume(); distance += amount },
-                                onDragEnd = {
-                                    if (abs(distance) > 90f) moveViewer(if (distance < 0) 1 else -1)
+                        modifier = Modifier.fillMaxSize()
+                            .graphicsLayer { translationX = pagerOffset }
+                            .pointerInput(currentIndex, viewerItems.size, imageScale) {
+                                if (imageScale > 1.01f) return@pointerInput
+                                val width = size.width.toFloat().coerceAtLeast(1f)
+                                fun hasNeighbour(direction: Int): Boolean =
+                                    currentIndex + direction in viewerItems.indices
+                                fun slideTo(target: Float, durationMs: Int, onFinished: () -> Unit = {}) {
+                                    scope.launch {
+                                        val animation = Animatable(pagerOffset)
+                                        animation.animateTo(target, tween(durationMs)) { pagerOffset = value }
+                                        onFinished()
+                                    }
                                 }
-                            )
-                        }
+                                fun settle() = slideTo(0f, 150)
+                                detectHorizontalDragGestures(
+                                    onHorizontalDrag = { change, amount ->
+                                        change.consume()
+                                        val next = pagerOffset + amount
+                                        pagerOffset = when {
+                                            // Rubber band at either end of the
+                                            // playlist instead of detaching.
+                                            next < 0f && !hasNeighbour(1) -> next * .35f
+                                            next > 0f && !hasNeighbour(-1) -> next * .35f
+                                            else -> next.coerceIn(-width, width)
+                                        }
+                                    },
+                                    onDragEnd = {
+                                        val direction = if (pagerOffset < 0f) 1 else -1
+                                        if (abs(pagerOffset) >= width * .5f && hasNeighbour(direction)) {
+                                            slideTo(if (direction > 0) -width else width, 170) {
+                                                // The neighbour is centred now:
+                                                // hand the page over without a
+                                                // second slide.
+                                                pagerCommit = true
+                                                moveViewer(direction)
+                                                pagerOffset = 0f
+                                                pagerCommit = false
+                                            }
+                                        } else {
+                                            settle()
+                                        }
+                                    },
+                                    onDragCancel = { settle() }
+                                )
+                            }
                     ) { shown ->
                         Box(
                             Modifier.fillMaxSize().mediaSharedElement(shown).graphicsLayer {
@@ -1148,6 +1252,16 @@ private fun formatPlayerTime(milliseconds: Long): String {
 
 private fun roundToInt(value: Float): Int = value.toInt()
 
+/**
+ * Allows a damped drag past the edge of a zoomed picture, so releasing there
+ * can be read as "go to the neighbouring picture".
+ */
+private fun overshootingOffset(value: Float, limit: Float): Float = when {
+    value > limit -> limit + (value - limit) * .35f
+    value < -limit -> -limit + (value + limit) * .35f
+    else -> value
+}
+
 @Composable
 private fun MediaInfoPanel(item: MediaItem, modifier: Modifier = Modifier, playerStyle: Boolean = false) {
     val context = LocalContext.current
@@ -1224,5 +1338,3 @@ private fun readDetails(context: Context, item: MediaItem): MediaDetails {
 private fun share(context: Context, item: MediaItem, english: Boolean) {
     shareMedia(context, listOf(item), english)
 }
-
-private fun progressKey(item: MediaItem): String = "video_position_${item.uri.toString().hashCode()}"

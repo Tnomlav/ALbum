@@ -55,9 +55,14 @@ fun VaultLineSlider(
                     .takeIf { it > 0f } ?: 1f
                 val fraction = ((sliderState.value - sliderState.valueRange.start) / span).coerceIn(0f, 1f)
                 val thumbCenter = size.width * fraction
+                // Paint the whole track with the unplayed colour first, so the
+                // band around the thumb shows the track instead of whatever is
+                // behind the slider. On the video player that background is
+                // black, which used to leave black notches on both sides of the
+                // thumb.
                 drawLine(
                     color = inactiveColor,
-                    start = Offset((thumbCenter + thumbTrackGap).coerceAtMost(size.width), centerY),
+                    start = Offset(0f, centerY),
                     end = Offset(size.width, centerY),
                     strokeWidth = trackStrokeWidth,
                     cap = StrokeCap.Round

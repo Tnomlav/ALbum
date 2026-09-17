@@ -2695,24 +2695,22 @@ fun AlbumApp(
                     tab == MainTab.Pixiv -> if (pixivSearchMode == PixivSearchMode.Tag) 1 else 0
                     else -> 0
                 },
-                titleSwitch = when (tab) {
-                    MainTab.Albums,
-                    MainTab.Timeline -> listOf(
+                titleSwitch = when {
+                    // The photo/video switch belongs to the library home page;
+                    // inside a folder the bar shows the folder name instead.
+                    openedFolder != null -> null
+                    tab == MainTab.Albums || tab == MainTab.Timeline -> listOf(
                         if (english) "Pictures" else "图片",
                         if (english) "Videos" else "视频"
                     )
-                    // Inside an artist folder the bar shows the folder name.
-                    MainTab.Pixiv -> if (openedFolder == null) {
-                        listOf(
-                            if (english) "Artist" else "画师",
-                            "Tag"
-                        )
-                    } else null
+                    // The P page's switch takes the place of its title, the
+                    // same way the photo/video switch does on the library.
+                    tab == MainTab.Pixiv -> listOf(
+                        if (english) "Artist" else "画师",
+                        "Tag"
+                    )
                     else -> null
                 },
-                // The P page's switch controls its search, so it sits with the
-                // trailing actions instead of at the leading edge.
-                titleSwitchAtEnd = tab == MainTab.Pixiv,
                 onTitleSwitchChange = { index ->
                     if (tab == MainTab.Albums) {
                         val showVideos = index == 1
@@ -3073,6 +3071,7 @@ fun AlbumApp(
                     searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                     loading = library.loading,
                     scanning = library.scanning,
+                    initialLoadComplete = library.initialLoadComplete,
                     permissionGranted = if (albumShowsVideos) library.videoPermissionGranted else library.imagePermissionGranted,
                     sort = mediaSort,
                     sortDirection = sortDirection,
@@ -3088,8 +3087,11 @@ fun AlbumApp(
                         selectionFolderFirstVisibleOffset = offset
                         albumPageAtTop = index <= 0 && offset <= 0
                     },
-                    initialMediaFirstVisibleItem = selectionMediaFirstVisibleItem,
-                    initialMediaFirstVisibleOffset = selectionMediaFirstVisibleOffset,
+                    // A folder always opens at the top. This used to receive
+                    // the scroll position of whichever media grid was last on
+                    // screen, so entering a folder could start halfway down.
+                    initialMediaFirstVisibleItem = 0,
+                    initialMediaFirstVisibleOffset = 0,
                     onFirstVisibleMediaChanged = { selectionAnchorUri = it },
                     scrollToTopToken = scrollToTopToken,
                     scrollToUri = viewerScrollUri,
@@ -3153,6 +3155,7 @@ fun AlbumApp(
                     searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                     loading = library.loading,
                     scanning = library.scanning,
+                    initialLoadComplete = library.initialLoadComplete,
                     permissionGranted = library.videoPermissionGranted,
                     sort = mediaSort,
                     sortDirection = sortDirection,
@@ -3226,6 +3229,7 @@ fun AlbumApp(
                     query = appliedQuery,
                     loading = library.loading,
                     scanning = library.scanning,
+                    initialLoadComplete = library.initialLoadComplete,
                     permissionGranted = if (timelineShowsVideos) library.videoPermissionGranted else library.imagePermissionGranted,
                     isVideo = timelineShowsVideos,
                     columns = timelineColumns,

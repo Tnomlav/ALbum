@@ -106,6 +106,9 @@ class MediaLibraryState(context: Context) {
         private set
     var loading by mutableStateOf(false)
         private set
+    /** False until the first library scan finishes. */
+    var initialLoadComplete by mutableStateOf(false)
+        private set
     var refreshError by mutableStateOf<String?>(null)
         private set
     var scanning by mutableStateOf(false)
@@ -274,6 +277,9 @@ class MediaLibraryState(context: Context) {
             }
         } finally {
             loading = false
+            // Remember that at least one scan finished: until then an empty
+            // library means "not loaded yet", not "no media".
+            initialLoadComplete = true
         }
     }
 
