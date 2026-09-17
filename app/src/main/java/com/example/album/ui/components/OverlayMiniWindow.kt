@@ -61,6 +61,16 @@ internal class OverlayMiniWindow(
     private val hideHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val hideControls = Runnable { setControlsVisible(false) }
     private var controlsVisible = true
+    private val configurationCallback = object : android.content.ComponentCallbacks {
+        override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+            // Rotating the device (which is what happens when the app goes to
+            // the background in landscape) changes the screen bounds; without
+            // re-clamping, the window ends up outside the visible area.
+            clampToScreen()
+        }
+
+        override fun onLowMemory() = Unit
+    }
 
     val isShowing: Boolean get() = root != null
 
@@ -162,10 +172,11 @@ internal class OverlayMiniWindow(
                         if (edges != 0) {
                             applyResize(
                                 params = params,
-                                edges = edges,
                                 dx = dx,
                                 dy = dy,
                                 density = density,
+                                startRawX = startX,
+                                startRawY = startY,
                                 startWindowX = startWindowX,
                                 startWindowY = startWindowY,
                                 startWidth = startWidth,
@@ -217,6 +228,7 @@ internal class OverlayMiniWindow(
         layoutParams = params
         runCatching { windowManager.addView(container, params) }
         root = container
+        runCatching { context.registerComponentCallbacks(configurationCallback) }
         setControlsVisible(true)
         onVisibilityChanged(true)
     }
@@ -224,6 +236,7 @@ internal class OverlayMiniWindow(
     fun dismiss() {
         val view = root ?: return
         hideHandler.removeCallbacks(hideControls)
+        runCatching { context.unregisterComponentCallbacks(configurationCallback) }
         runCatching { windowManager.removeView(view) }
         contentView?.player = null
         root = null
@@ -269,9 +282,13 @@ internal class OverlayMiniWindow(
         setBackgroundColor(Color.TRANSPARENT)
         setColorFilter(Color.WHITE)
         imageAlpha = 255
-        // The transport buttons are the ones people stab at, so they are a
-        // little larger than the two corner buttons.
-        val size = ((if (gravity == 0) 52 else 42) * density).roundToInt()
+        // Every button looks the same: same size, same white, no background and
+        // no state-list elevation.
+        val size = (46 * density).roundToInt()
+        stateListAnimator = null
+        elevation = 0f
+        isFocusable = false
+        setPadding(0, 0, 0, 0)
         layoutParams = if (gravity == 0) {
             LinearLayout.LayoutParams(size, size).apply {
                 marginStart = (6 * density).roundToInt()
@@ -313,10 +330,11 @@ internal class OverlayMiniWindow(
      */
     private fun applyResize(
         params: WindowManager.LayoutParams,
-        edges: Int,
         dx: Float,
         dy: Float,
         density: Float,
+        startRawX: Float,
+        startRawY: Float,
         startWindowX: Int,
         startWindowY: Int,
         startWidth: Int,
@@ -325,20 +343,42 @@ internal class OverlayMiniWindow(
         val screenWidth = context.resources.displayMetrics.widthPixels
         val minWidth = (160 * density).roundToInt()
         val maxWidth = (screenWidth - 16 * density).roundToInt().coerceAtLeast(minWidth)
-        val horizontal = edges and (EDGE_LEFT or EDGE_RIGHT) != 0
-        val vertical = edges and (EDGE_TOP or EDGE_BOTTOM) != 0
-        val widthDelta = when {
-            horizontal && vertical -> maxOf(dx, dy * 16f / 9f)
-            horizontal -> dx
-            else -> dy * 16f / 9f
+        val centerX = startWindowX + startWidth / 2f
+        val centerY = startWindowY + startHeight / 2f
+        // Dragging away from the centre grows the window, dragging towards it
+        // shrinks; that holds for every border and corner, which fixed the case
+        // where both directions shrank the window.
+        val horizontalGrowth = if (startRawX < centerX) -dx else dx
+        val verticalGrowth = if (startRawY < centerY) -dy else dy
+        val growth = if (abs(horizontalGrowth) >= abs(verticalGrowth)) {
+            horizontalGrowth
+        } else {
+            verticalGrowth * 16f / 9f
         }
-        val newWidth = (
-            if (edges and EDGE_LEFT != 0) startWidth - widthDelta else startWidth + widthDelta
-            ).roundToInt().coerceIn(minWidth, maxWidth)
+        val newWidth = (startWidth + growth).roundToInt().coerceIn(minWidth, maxWidth)
         val newHeight = (newWidth * 9f / 16f).roundToInt()
-        if (edges and EDGE_LEFT != 0) params.x = startWindowX + (startWidth - newWidth)
-        if (edges and EDGE_TOP != 0) params.y = startWindowY + (startHeight - newHeight)
+        // Keep the opposite side pinned, so the window grows away from the
+        // finger instead of sliding around.
+        if (startRawX < centerX) params.x = startWindowX + (startWidth - newWidth)
+        if (startRawY < centerY) params.y = startWindowY + (startHeight - newHeight)
         params.width = newWidth
         params.height = newHeight
+    }
+
+    /** Keeps the window inside the current screen bounds. */
+    private fun clampToScreen() {
+        val view = root ?: return
+        val params = layoutParams ?: return
+        val metrics = context.resources.displayMetrics
+        val density = metrics.density
+        val maxWidth = (metrics.widthPixels - 16 * density).roundToInt()
+            .coerceAtLeast((160 * density).roundToInt())
+        if (params.width > maxWidth) {
+            params.width = maxWidth
+            params.height = (maxWidth * 9f / 16f).roundToInt()
+        }
+        params.x = params.x.coerceIn(0, (metrics.widthPixels - params.width).coerceAtLeast(0))
+        params.y = params.y.coerceIn(0, (metrics.heightPixels - params.height).coerceAtLeast(0))
+        runCatching { windowManager.updateViewLayout(view, params) }
     }
 }

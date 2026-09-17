@@ -280,6 +280,9 @@ fun MediaViewer(
     var videoSettingsVersion by remember { mutableIntStateOf(0) }
     var imageScale by remember { mutableFloatStateOf(1f) }
     var imageOffset by remember { mutableStateOf(Offset.Zero) }
+    // A page drag in progress: the slideshow timer must not fire in the middle
+    // of a swipe (two page changes at once made the page flash).
+    var pagerDragging by remember { mutableStateOf(false) }
     var imageViewport by remember { mutableStateOf(IntSize.Zero) }
     var imageControlsVisible by remember { mutableStateOf(!startImmersive) }
     // Fade the background with the same timing as the controls so entering and
@@ -395,8 +398,8 @@ fun MediaViewer(
     // Slideshow playback uses this same viewer: it advances only while the
     // full-screen (controls hidden) state is active, so opening the preview
     // pauses it and closing the preview resumes.
-    LaunchedEffect(slideshowActive, imageControlsVisible, currentIndex, viewerItems.size, current.uri) {
-        if (!slideshowActive || current.isVideo || imageControlsVisible || viewerItems.size <= 1) return@LaunchedEffect
+    LaunchedEffect(slideshowActive, imageControlsVisible, currentIndex, viewerItems.size, current.uri, pagerDragging) {
+        if (!slideshowActive || pagerDragging || current.isVideo || imageControlsVisible || viewerItems.size <= 1) return@LaunchedEffect
         delay(slideshowIntervalMs.coerceAtLeast(500L))
         viewerDirection = 1
         val next = if (currentIndex >= viewerItems.lastIndex) 0 else currentIndex + 1
@@ -492,6 +495,9 @@ fun MediaViewer(
                 // page follows the finger and the neighbour is pulled in from
                 // the edge; releasing past the middle switches pages.
                 var pagerOffset by remember { mutableFloatStateOf(0f) }
+                // True while a page drag is in progress: the slideshow timer
+                // must not fire in the middle of a swipe, which made the page
+                // flash as two page changes landed at once.
                 // Suppresses the slide transition for the frame in which a drag
                 // turns into a page change: the animation already happened
                 // under the finger.
@@ -507,9 +513,10 @@ fun MediaViewer(
                     val maxY = imageViewport.height * (nextScale - 1f) / 2f
                     imageScale = nextScale
                     imageOffset = if (nextScale <= 1.01f) Offset.Zero else Offset(
-                        // A damped overshoot past the edge is allowed; letting
-                        // go there switches to the neighbouring picture.
-                        overshootingOffset(imageOffset.x + panChange.x, maxX),
+                        // The picture stops at its edge; continuing the drag
+                        // there is what pulls the neighbouring page in (see the
+                        // pager gesture below).
+                        (imageOffset.x + panChange.x).coerceIn(-maxX, maxX),
                         (imageOffset.y + panChange.y).coerceIn(-maxY, maxY)
                     )
                 }
@@ -543,44 +550,6 @@ fun MediaViewer(
                             .clipToBounds()
                         .onSizeChanged { imageViewport = it }
                         .transformable(state = transformState, canPan = { imageScale > 1.01f })
-                        .pointerInput(imageScale, currentIndex, viewerItems.size) {
-                            // A zoomed picture pans under the finger; when it is
-                            // released past its edge, the neighbouring picture
-                            // takes over.
-                            if (imageScale <= 1.01f) return@pointerInput
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                val threshold = size.width * .12f
-                                var overpan = 0f
-                                var pressed = true
-                                while (pressed) {
-                                    val event = awaitPointerEvent()
-                                    event.changes.firstOrNull()?.let { change ->
-                                        val dx = change.position.x - change.previousPosition.x
-                                        val maxX = size.width * (imageScale - 1f) / 2f
-                                        val atLeftEdge = imageOffset.x >= maxX - 1f
-                                        val atRightEdge = imageOffset.x <= -maxX + 1f
-                                        // Only movement that keeps pushing past
-                                        // an edge counts towards the switch.
-                                        overpan = when {
-                                            atLeftEdge && dx > 0f -> overpan + dx
-                                            atRightEdge && dx < 0f -> overpan + dx
-                                            else -> 0f
-                                        }
-                                    }
-                                    pressed = event.changes.any { it.pressed }
-                                }
-                                if (overpan >= threshold) {
-                                    imageScale = 1f
-                                    imageOffset = Offset.Zero
-                                    moveViewer(-1)
-                                } else if (overpan <= -threshold) {
-                                    imageScale = 1f
-                                    imageOffset = Offset.Zero
-                                    moveViewer(1)
-                                }
-                            }
-                        }
                     ) {
                     // The page the finger is pulling in, drawn under the
                     // current one so both edges of the drag are visible.
@@ -618,10 +587,23 @@ fun MediaViewer(
                         modifier = Modifier.fillMaxSize()
                             .graphicsLayer { translationX = pagerOffset }
                             .pointerInput(currentIndex, viewerItems.size, imageScale) {
-                                if (imageScale > 1.01f) return@pointerInput
                                 val width = size.width.toFloat().coerceAtLeast(1f)
                                 fun hasNeighbour(direction: Int): Boolean =
                                     currentIndex + direction in viewerItems.indices
+                                /**
+                                 * True when the finger is pushing past an edge
+                                 * of the zoomed picture, which means the page
+                                 * (not the picture) should move.
+                                 */
+                                fun pushingPastEdge(amount: Float): Boolean {
+                                    if (imageScale <= 1.01f) return true
+                                    val maxX = size.width * (imageScale - 1f) / 2f
+                                    return when {
+                                        amount > 0f -> imageOffset.x >= maxX - 1f
+                                        amount < 0f -> imageOffset.x <= -maxX + 1f
+                                        else -> false
+                                    }
+                                }
                                 fun slideTo(target: Float, durationMs: Int, onFinished: () -> Unit = {}) {
                                     scope.launch {
                                         val animation = Animatable(pagerOffset)
@@ -631,7 +613,12 @@ fun MediaViewer(
                                 }
                                 fun settle() = slideTo(0f, 150)
                                 detectHorizontalDragGestures(
+                                    onDragStart = { pagerDragging = true },
                                     onHorizontalDrag = { change, amount ->
+                                        // While zoomed the picture pans first;
+                                        // only movement that keeps pushing past
+                                        // its edge turns into a page drag.
+                                        if (!pushingPastEdge(amount)) return@detectHorizontalDragGestures
                                         change.consume()
                                         val next = pagerOffset + amount
                                         pagerOffset = when {
@@ -643,15 +630,22 @@ fun MediaViewer(
                                         }
                                     },
                                     onDragEnd = {
+                                        pagerDragging = false
+                                        if (pagerOffset == 0f) return@detectHorizontalDragGestures
                                         val direction = if (pagerOffset < 0f) 1 else -1
                                         // A quarter of the page is enough to
                                         // commit, the way a swipe should feel.
-                                        if (abs(pagerOffset) >= width * .25f && hasNeighbour(direction)) {
+                                        if (abs(pagerOffset) >= width * .2f && hasNeighbour(direction)) {
                                             slideTo(if (direction > 0) -width else width, 170) {
                                                 // The neighbour is centred now:
                                                 // hand the page over without a
                                                 // second slide.
                                                 pagerCommit = true
+                                                // Leave the zoomed state behind:
+                                                // the next picture opens as it
+                                                // was, not zoomed at an offset.
+                                                imageScale = 1f
+                                                imageOffset = Offset.Zero
                                                 moveViewer(direction)
                                                 pagerOffset = 0f
                                             }
@@ -659,7 +653,10 @@ fun MediaViewer(
                                             settle()
                                         }
                                     },
-                                    onDragCancel = { settle() }
+                                    onDragCancel = {
+                                        pagerDragging = false
+                                        settle()
+                                    }
                                 )
                             }
                     ) { shown ->
@@ -1263,15 +1260,6 @@ private fun formatPlayerTime(milliseconds: Long): String {
 
 private fun roundToInt(value: Float): Int = value.toInt()
 
-/**
- * Allows a damped drag past the edge of a zoomed picture, so releasing there
- * can be read as "go to the neighbouring picture".
- */
-private fun overshootingOffset(value: Float, limit: Float): Float = when {
-    value > limit -> limit + (value - limit) * .35f
-    value < -limit -> -limit + (value + limit) * .35f
-    else -> value
-}
 
 @Composable
 private fun MediaInfoPanel(item: MediaItem, modifier: Modifier = Modifier, playerStyle: Boolean = false) {

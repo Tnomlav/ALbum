@@ -263,7 +263,7 @@ private fun OptimizedTimelineGrid(
         if (scrollRequest != null && scrollRequest.token > 0L) {
             val count = state.layoutInfo.totalItemsCount
             if (count > 0) {
-                state.scrollToItem(
+                state.requestScrollToItem(
                     scrollRequest.index.coerceIn(0, count - 1),
                     scrollRequest.offset.coerceAtLeast(0)
                 )
@@ -453,7 +453,7 @@ private fun AdaptiveTimeline(
         if (scrollRequest != null && scrollRequest.token > 0L) {
             val count = state.layoutInfo.totalItemsCount
             if (count > 0) {
-                state.scrollToItem(
+                state.requestScrollToItem(
                     scrollRequest.index.coerceIn(0, count - 1),
                     scrollRequest.offset.coerceAtLeast(0)
                 )

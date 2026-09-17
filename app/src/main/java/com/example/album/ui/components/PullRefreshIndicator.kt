@@ -116,6 +116,27 @@ class PullToRefresh(
     val connection: NestedScrollConnection
 )
 
+/**
+ * Keeps track of which pull-to-refresh request has already been played.
+ *
+ * The request travels as a token from the bottom bar down to whichever grid is
+ * on screen. Without this, every grid that composed later saw the last token
+ * again and replayed the pull — opening or closing any page triggered a refresh.
+ */
+internal object PullRefreshRequests {
+    @Volatile
+    private var handled = 0L
+
+    fun claim(token: Long): Boolean {
+        if (token <= 0L) return false
+        synchronized(this) {
+            if (token == handled) return false
+            handled = token
+            return true
+        }
+    }
+}
+
 @Composable
 fun rememberPullToRefresh(
     refreshing: Boolean,
@@ -141,6 +162,9 @@ fun rememberPullToRefresh(
     }
     androidx.compose.runtime.LaunchedEffect(requestToken) {
         if (requestToken <= 0L || !enabled || !atTop()) return@LaunchedEffect
+        // A request is a one-shot signal: a grid that composes later (a folder
+        // being opened, a page being switched) must not replay it.
+        if (!PullRefreshRequests.claim(requestToken)) return@LaunchedEffect
         val animation = androidx.compose.animation.core.Animatable(distance)
         animation.animateTo(
             trigger,

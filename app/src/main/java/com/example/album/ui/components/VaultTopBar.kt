@@ -125,6 +125,12 @@ fun VaultTopBar(
      * on that side of the bar.
      */
     titleSwitchAtEnd: Boolean = false,
+    /**
+     * Whether the page-type switch stays visible while a search is open (the P
+     * page needs it, because its switch decides what the search searches);
+     * library pages hide it while searching.
+     */
+    titleSwitchWhileSearching: Boolean = false,
     /** Description of the back button; name the page it returns to. */
     backLabel: String? = null,
     onTitleSwitchChange: (Int) -> Unit = {}
@@ -182,7 +188,10 @@ fun VaultTopBar(
                             Text(title, style = VaultText.TopBarTitle, maxLines = 1)
                         }
                     }
-                } else if (titleSwitch != null && titleSwitch.isNotEmpty() && !titleSwitchAtEnd) {
+                } else if (
+                    titleSwitchWhileSearching &&
+                    titleSwitch != null && titleSwitch.isNotEmpty() && !titleSwitchAtEnd
+                ) {
                     // A suspended search keeps its back arrow, and the P page
                     // still needs its artist/tag switch there: without this the
                     // switch disappeared as soon as a tag query was typed and

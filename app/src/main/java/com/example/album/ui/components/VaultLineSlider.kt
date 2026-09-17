@@ -13,6 +13,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -89,12 +90,21 @@ fun VaultLineSlider(
             disabledInactiveTickColor = Color.Transparent
         ),
         thumb = {
+            // The band around the thumb uses the unplayed track colour (its
+            // exact colour and transparency) instead of a black or white
+            // border, which used to show as a block next to the thumb.
             Box(
                 Modifier.size(16.dp)
                     .clip(CircleShape)
-                    .background(thumbColor, CircleShape)
-                    .border(4.dp, thumbBorderColor, CircleShape)
-            )
+                    .background(thumbBorderColor, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    Modifier.size(10.dp)
+                        .clip(CircleShape)
+                        .background(thumbColor, CircleShape)
+                )
+            }
         }
     )
 }

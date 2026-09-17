@@ -2716,6 +2716,10 @@ fun AlbumApp(
                     )
                     else -> null
                 },
+                // Only the P page keeps its switch while searching; on the
+                // library pages the switch belongs to the home view and used to
+                // reappear next to the search's back arrow.
+                titleSwitchWhileSearching = tab == MainTab.Pixiv,
                 onTitleSwitchChange = { index ->
                     if (tab == MainTab.Albums) {
                         val showVideos = index == 1
@@ -2734,7 +2738,15 @@ fun AlbumApp(
                         }
                     } else if (tab == MainTab.Pixiv) {
                         val mode = if (index == 0) PixivSearchMode.Artist else PixivSearchMode.Tag
-                        if (mode != pixivSearchMode) pixivSearchMode = mode
+                        if (mode != pixivSearchMode) {
+                            pixivSearchMode = mode
+                            // Leave the folder the previous mode was showing:
+                            // inside a folder the bar shows the folder name and
+                            // the switch disappears with it, so the mode could
+                            // not be changed back.
+                            openedFolder = null
+                            folderScope = null
+                        }
                     }
                 },
                 onSearchModeChange = { index ->
@@ -3582,7 +3594,9 @@ fun AlbumApp(
                             // swiped to another picture.
                             viewerMedia = changed
                             selectedMedia = changed
-                            if (changed.isVideo) activeSharedMediaKey = null
+                            // No shared-element hand-over between slideshow
+                            // pictures: it made the page flash while swiping.
+                            activeSharedMediaKey = null
                         } else {
                             openMedia(changed)
                         }

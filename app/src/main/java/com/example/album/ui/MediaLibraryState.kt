@@ -104,7 +104,10 @@ class MediaLibraryState(context: Context) {
         private set
     var localVideos by mutableStateOf<List<MediaItem>>(emptyList())
         private set
-    var loading by mutableStateOf(false)
+    // Starts true: the very first frame is already "loading", so the library
+    // pages show their progress indicator instead of a blank page while the
+    // first scan is being scheduled.
+    var loading by mutableStateOf(true)
         private set
     /** False until the first library scan finishes. */
     var initialLoadComplete by mutableStateOf(false)

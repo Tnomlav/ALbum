@@ -64,6 +64,9 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 
+/** Height reserved for the angle ruler, so it never covers the preview. */
+private val AngleBarHeight = 76.dp
+
 @Composable
 fun WallpaperCropScreen(
     item: MediaItem,
@@ -167,8 +170,12 @@ fun WallpaperCropScreen(
                         if (editorGeometry !== source && !editorGeometry.isRecycled) editorGeometry.recycle()
                     }
                 }
+                // The angle bar sits at the bottom of the screen, so the
+                // preview has to reserve its height; otherwise the bar covers
+                // the bottom of the picture.
                 BoxWithConstraints(
-                    Modifier.fillMaxSize().statusBarsPadding().padding(top = 58.dp, bottom = 20.dp),
+                    Modifier.fillMaxSize().statusBarsPadding()
+                        .padding(top = 58.dp, bottom = AngleBarHeight),
                     contentAlignment = Alignment.Center
                 ) {
                     val imageRatio = (editorGeometry.width.toFloat() / editorGeometry.height.coerceAtLeast(1))

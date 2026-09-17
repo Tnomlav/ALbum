@@ -316,21 +316,10 @@ fun AlbumsScreen(
 private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolean, onOpenAlbum: (String) -> Unit, onLongPressAlbum: (MediaAlbum, Int, Int) -> Unit, onSelectionGestureStartAlbum: ((MediaAlbum) -> Unit)?, onBatchSelectAlbums: (List<MediaAlbum>) -> Unit, onSelectionGestureEnd: () -> Unit, onRefresh: () -> Unit, sharedElementEnabled: Boolean = true, favoriteUris: Set<String> = emptySet(), selectionPreview: Boolean = false, selectedFolders: Set<String> = emptySet(), initialFirstVisibleItem: Int = 0, initialFirstVisibleOffset: Int = 0, onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }, onFirstVisibleFolderChanged: (String?) -> Unit = {}, scrollToTopToken: Long = 0L, scrollRequest: com.example.album.ui.PageScrollRequest? = null, pullRequestToken: Long = 0L) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
-    // A page-scroll request (coming back from a folder, or after a delete) is
-    // applied while the list state is created instead of one frame later, so
-    // the page does not visibly move after it appears.
-    val gridState = key(scrollRequest?.token) {
-        val requestedIndex = scrollRequest?.let { request ->
-            request.key?.let { anchor -> albums.indexOfFirst { it.name == anchor }.takeIf { it >= 0 } }
-                ?: request.index
-        }
-        rememberLazyGridState(
-            initialFirstVisibleItemIndex = (requestedIndex ?: initialFirstVisibleItem).coerceAtLeast(0),
-            initialFirstVisibleItemScrollOffset = (
-                scrollRequest?.offset ?: initialFirstVisibleOffset
-                ).coerceAtLeast(0)
-        )
-    }
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
+    )
     LaunchedEffect(scrollToTopToken) {
         if (scrollToTopToken > 0L) gridState.scrollToItem(0)
     }
@@ -341,7 +330,10 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
                 val anchored = scrollRequest.key
                     ?.let { key -> albums.indexOfFirst { it.name == key } }
                     ?.takeIf { it >= 0 }
-                gridState.scrollToItem(
+                // requestScrollToItem applies on the next measure pass, so the
+                // list never draws the old position first (that was the visible
+                // jump when coming back from a folder).
+                gridState.requestScrollToItem(
                     (anchored ?: scrollRequest.index).coerceIn(0, count - 1),
                     scrollRequest.offset.coerceAtLeast(0)
                 )
@@ -469,22 +461,10 @@ private fun FolderGrid(
 ) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
-    // See AlbumGrid: the anchor of a page-scroll request is resolved before the
-    // list is first laid out, so returning from a nested folder or a delete
-    // does not jump.
-    val gridState = key(scrollRequest?.token) {
-        val requestedIndex = scrollRequest?.let { request ->
-            request.key?.let { anchor ->
-                album.items.indexOfFirst { it.uri.toString() == anchor }.takeIf { it >= 0 }
-            } ?: request.index
-        }
-        rememberLazyGridState(
-            initialFirstVisibleItemIndex = (requestedIndex ?: initialFirstVisibleItem).coerceAtLeast(0),
-            initialFirstVisibleItemScrollOffset = (
-                scrollRequest?.offset ?: initialFirstVisibleOffset
-                ).coerceAtLeast(0)
-        )
-    }
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = initialFirstVisibleItem.coerceAtLeast(0),
+        initialFirstVisibleItemScrollOffset = initialFirstVisibleOffset.coerceAtLeast(0)
+    )
     LaunchedEffect(scrollToTopToken) {
         if (scrollToTopToken > 0L) gridState.scrollToItem(0)
     }
@@ -495,7 +475,7 @@ private fun FolderGrid(
                 val anchored = scrollRequest.key
                     ?.let { key -> album.items.indexOfFirst { it.uri.toString() == key } }
                     ?.takeIf { it >= 0 }
-                gridState.scrollToItem(
+                gridState.requestScrollToItem(
                     (anchored ?: scrollRequest.index).coerceIn(0, count - 1),
                     scrollRequest.offset.coerceAtLeast(0)
                 )
@@ -634,7 +614,7 @@ private fun AdaptiveFolderGrid(
                 val anchored = scrollRequest.key
                     ?.let { key -> album.items.indexOfFirst { it.uri.toString() == key } }
                     ?.takeIf { it >= 0 }
-                state.scrollToItem(
+                state.requestScrollToItem(
                     (anchored ?: scrollRequest.index).coerceIn(0, count - 1),
                     scrollRequest.offset.coerceAtLeast(0)
                 )
