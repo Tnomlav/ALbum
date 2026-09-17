@@ -89,6 +89,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SettingsScreen(
     language: String,
+    settingsSection: String?,
+    onSettingsSectionChange: (String?) -> Unit,
     onOpenCleanup: () -> Unit,
     onThemeModeChange: (String) -> Unit,
     onThemeColorChange: (String) -> Unit,
@@ -163,10 +165,10 @@ fun SettingsScreen(
     }
     // Settings are grouped into sub-pages: the main page keeps the theme and
     // one row per group, and tapping a row opens that group on its own page.
-    var settingsSection by remember { mutableStateOf<String?>(null) }
-    // A sub-page owns the back gesture: it returns to the Settings list rather
-    // than leaving Settings (or the app).
-    BackHandler(enabled = settingsSection != null) { settingsSection = null }
+    // The selection is owned by the caller so the app-level back handler can
+    // close the sub-page as well; this local handler stays as a fallback for
+    // hosts that compose this screen on its own.
+    BackHandler(enabled = settingsSection != null) { onSettingsSectionChange(null) }
 
     val choiceValues = remember { mutableStateMapOf<String, String>() }
     val isEnglish = language == "English"
@@ -294,7 +296,7 @@ fun SettingsScreen(
             item {
                 Row(
                     Modifier.fillMaxWidth()
-                        .clickable { settingsSection = null }
+                        .clickable { onSettingsSectionChange(null) }
                         .padding(start = 6.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -312,14 +314,14 @@ fun SettingsScreen(
             }
         }
         if (settingsSection == null) {
-        item { SettingsHeader("主题", settingsSection == "主题") { settingsSection = if (settingsSection == "主题") null else "主题" } }
-        item { SettingsHeader("文件操作", settingsSection == "文件操作") { settingsSection = if (settingsSection == "文件操作") null else "文件操作" } }
-        item { SettingsHeader("显示", settingsSection == "显示") { settingsSection = if (settingsSection == "显示") null else "显示" } }
-        item { SettingsHeader("视频", settingsSection == "视频") { settingsSection = if (settingsSection == "视频") null else "视频" } }
-        item { SettingsHeader("滚动条", settingsSection == "滚动条") { settingsSection = if (settingsSection == "滚动条") null else "滚动条" } }
-        item { SettingsHeader("幻灯片", settingsSection == "幻灯片") { settingsSection = if (settingsSection == "幻灯片") null else "幻灯片" } }
-        item { SettingsHeader("缓存", settingsSection == "缓存") { settingsSection = if (settingsSection == "缓存") null else "缓存" } }
-        item { SettingsHeader("关于", settingsSection == "关于") { settingsSection = if (settingsSection == "关于") null else "关于" } }
+        item { SettingsHeader("主题", settingsSection == "主题") { onSettingsSectionChange(if (settingsSection == "主题") null else "主题") } }
+        item { SettingsHeader("文件操作", settingsSection == "文件操作") { onSettingsSectionChange(if (settingsSection == "文件操作") null else "文件操作") } }
+        item { SettingsHeader("显示", settingsSection == "显示") { onSettingsSectionChange(if (settingsSection == "显示") null else "显示") } }
+        item { SettingsHeader("视频", settingsSection == "视频") { onSettingsSectionChange(if (settingsSection == "视频") null else "视频") } }
+        item { SettingsHeader("滚动条", settingsSection == "滚动条") { onSettingsSectionChange(if (settingsSection == "滚动条") null else "滚动条") } }
+        item { SettingsHeader("幻灯片", settingsSection == "幻灯片") { onSettingsSectionChange(if (settingsSection == "幻灯片") null else "幻灯片") } }
+        item { SettingsHeader("缓存", settingsSection == "缓存") { onSettingsSectionChange(if (settingsSection == "缓存") null else "缓存") } }
+        item { SettingsHeader("关于", settingsSection == "关于") { onSettingsSectionChange(if (settingsSection == "关于") null else "关于") } }
         }
         if (settingsSection == "主题") {
         item { ValueRow("主题模式", if (isEnglish && themeMode == "自动") "System" else themeMode) { choose("主题模式", "theme_mode", listOf("自动", "浅色", "深色"), themeMode) { themeMode = it; onThemeModeChange(it) } } }

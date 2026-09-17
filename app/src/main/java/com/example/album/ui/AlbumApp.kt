@@ -505,6 +505,11 @@ fun AlbumApp(
     var pendingTrashDelete by remember { mutableStateOf<List<com.example.album.data.RecycleEntry>>(emptyList()) }
     var cleanupOpen by rememberSaveable { mutableStateOf(false) }
     var wallpaperManagerOpen by rememberSaveable { mutableStateOf(false) }
+    // Settings are a list page plus one sub-page per group. The open sub-page
+    // lives here instead of inside SettingsScreen so that the app-level back
+    // handler can see it: otherwise back closed the whole tab (and reset the
+    // album page's folder/filter state) before the sub-page could react.
+    var settingsSection by rememberSaveable { mutableStateOf<String?>(null) }
     var wallpaperShowVideos by rememberSaveable { mutableStateOf(false) }
     var wallpaperQuery by rememberSaveable { mutableStateOf("") }
     var wallpaperSelectionMode by rememberSaveable { mutableStateOf(false) }
@@ -1566,10 +1571,17 @@ fun AlbumApp(
         searchOpen = true
     }
 
+    // Leaving the Settings tab drops whatever sub-page was open, so coming
+    // back to Settings always starts from the settings list.
+    LaunchedEffect(selectedTab) {
+        if (selectedTab != MainTab.Settings) settingsSection = null
+    }
+
     val appBackEnabled by remember {
         derivedStateOf {
             val standalonePageOpen = transferRequest != null || pixivArchiveOpen || cleanupOpen || wallpaperManagerOpen
-            (standalonePageOpen || (selectedMedia == null && editingMedia == null && selectionSlideshow.isEmpty())) &&
+            (settingsSection != null || standalonePageOpen ||
+                (selectedMedia == null && editingMedia == null && selectionSlideshow.isEmpty())) &&
                 pendingAppDelete == null &&
                 selectionRenameItem == null &&
                 selectionInfoItem == null &&
@@ -1623,6 +1635,18 @@ fun AlbumApp(
                 }
             }
             wallpaperManagerOpen -> wallpaperManagerOpen = false
+            // The Settings tab owns the back gesture while it is showing: a
+            // sub-page closes into the list, and the list leaves Settings. This
+            // has to come before the folder and tab rules below, otherwise the
+            // gesture silently changed the album page underneath (or jumped
+            // straight home) instead of closing the sub-page.
+            selectedTab == MainTab.Settings -> {
+                if (settingsSection != null) {
+                    settingsSection = null
+                } else {
+                    returnToPrimaryTab()
+                }
+            }
             openedFolder != null -> navigateFolderBack()
             query.isNotBlank() -> suspendSearch()
             favoriteFilter -> favoriteFilter = false
@@ -3474,6 +3498,8 @@ fun AlbumApp(
                 )
                 MainTab.Settings -> SettingsScreen(
                     language = appLanguage,
+                    settingsSection = settingsSection,
+                    onSettingsSectionChange = { settingsSection = it },
                     onOpenCleanup = { cleanupOpen = true },
                     onThemeModeChange = onThemeModeChange,
                     onThemeColorChange = onThemeColorChange,
