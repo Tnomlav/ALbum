@@ -969,7 +969,7 @@ fun AlbumApp(
             .filter { it.folder.equals("Pixiv", ignoreCase = true) }
             .distinctBy { it.uri.toString() }
     } }
-    suspend fun reloadPixivPage() {
+    suspend fun reloadPixivPage(forceWalk: Boolean = true) {
         if (selectedTab != MainTab.Pixiv || cleanupOpen) return
         val generation = ++pixivReloadGeneration
         pixivPageRefreshing = true
@@ -984,6 +984,13 @@ fun AlbumApp(
                     pixivSourceFolderName = cached.sourceFolderName
                     pixivLibraryVersion++
                 }
+            }
+            if (!forceWalk && pixivLibraryImages != null) {
+                // Nothing to do: the cached snapshot (which survives app
+                // restarts) is what the page shows. Walking the SAF tree again
+                // on every entry is exactly what made opening the page feel
+                // like a load.
+                return
             }
             // A full SAF walk can take several seconds. Partial snapshots are
             // streamed through a conflated channel so folders appear as soon as
@@ -1015,35 +1022,29 @@ fun AlbumApp(
             if (generation == pixivReloadGeneration) pixivPageRefreshing = false
         }
     }
-    fun requestPixivReload() {
+    fun requestPixivReload(forceWalk: Boolean = true) {
         pixivReloadJob?.cancel()
         pixivReloadJob = scope.launch {
             // Triggers often arrive together (a library refresh plus an explicit
             // request); the short wait collapses them into one SAF walk instead
             // of cancelling and restarting a walk that just started.
             delay(350L)
-            reloadPixivPage()
+            reloadPixivPage(forceWalk)
         }
     }
-    // A fingerprint that only changes when the Pixiv source actually changes.
-    // Keying on the list itself meant every library refresh (including the one
-    // on app start) started a SAF walk, which is why simply opening the P page
-    // showed a loading state.
-    val pixivSourceFingerprint by remember { derivedStateOf {
-        val source = defaultPixivImages
-        source.size to (source.maxOfOrNull { it.dateModified } ?: 0L)
-    } }
-    LaunchedEffect(pixivTabEnabled, pixivRefreshKey, cleanupOpen, pixivSourceFingerprint) {
-        // Include archived artist folders in the P page; Pixiv itself is
-        // pinned separately below so it remains the first folder. This walks
-        // the SAF trees, so it is driven by the explicit refresh, by a change
-        // in the local library, and by the first visit only.
-        requestPixivReload()
+    LaunchedEffect(pixivTabEnabled, cleanupOpen) {
+        // Show the cached snapshot only. The SAF walk is driven by the explicit
+        // refresh below or by the first visit when nothing is cached, never by
+        // opening the app or another page.
+        requestPixivReload(forceWalk = false)
+    }
+    LaunchedEffect(pixivRefreshKey) {
+        if (pixivRefreshKey > 0) requestPixivReload(forceWalk = true)
     }
     LaunchedEffect(selectedTab) {
         // Entering the page again must not start another walk: the snapshot
         // that is already loaded stays on screen until the user refreshes.
-        if (selectedTab == MainTab.Pixiv && pixivLibraryImages == null) requestPixivReload()
+        if (selectedTab == MainTab.Pixiv && pixivLibraryImages == null) requestPixivReload(forceWalk = false)
     }
     val needsFolderSearchIndex by remember {
         derivedStateOf {

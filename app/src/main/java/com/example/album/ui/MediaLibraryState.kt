@@ -104,10 +104,10 @@ class MediaLibraryState(context: Context) {
         private set
     var localVideos by mutableStateOf<List<MediaItem>>(emptyList())
         private set
-    // Starts true: the very first frame is already "loading", so the library
-    // pages show their progress indicator instead of a blank page while the
-    // first scan is being scheduled.
-    var loading by mutableStateOf(true)
+    // Starts false: when a cached snapshot exists the library appears straight
+    // away and the refresh stays invisible. An empty library still shows the
+    // progress indicator (see initialLoadComplete in the screens).
+    var loading by mutableStateOf(false)
         private set
     /** False until the first library scan finishes. */
     var initialLoadComplete by mutableStateOf(false)

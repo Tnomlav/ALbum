@@ -1133,18 +1133,22 @@ internal fun Media3VideoPlayer(
             val oldRight = miniOffset.x + oldWidth
             val oldBottom = miniOffset.y + oldHeight
             val minimum = min(with(miniDensity) { 180.dp.toPx() }, (viewportSize.width - 16f).coerceAtLeast(1f))
+            // The room available on the side that is *not* pinned. Clamping the
+            // offset afterwards was what made a bottom-left drag push the
+            // top-right corner around; limiting the size instead keeps the
+            // pinned corner exactly where it is.
+            val horizontalRoom = if (fromLeft) oldRight - 8f else viewportSize.width - 8f - miniOffset.x
+            val verticalRoom = if (fromTop) oldBottom - 8f else viewportSize.height - 8f - miniOffset.y
             val maximum = min(
-                (viewportSize.width - 16f).coerceAtLeast(minimum),
-                ((viewportSize.height - 16f) * ratio).coerceAtLeast(minimum)
+                horizontalRoom.coerceAtLeast(minimum),
+                (verticalRoom * ratio).coerceAtLeast(minimum)
             )
             val newWidth = (oldWidth + sizeDelta).coerceIn(minimum, maximum)
             val newHeight = newWidth / ratio
             miniWidthPx = newWidth
             miniOffset = Offset(
-                (if (fromLeft) oldRight - newWidth else miniOffset.x)
-                    .coerceIn(8f, (viewportSize.width - newWidth - 8f).coerceAtLeast(8f)),
-                (if (fromTop) oldBottom - newHeight else miniOffset.y)
-                    .coerceIn(8f, (viewportSize.height - newHeight - 8f).coerceAtLeast(8f))
+                if (fromLeft) oldRight - newWidth else miniOffset.x,
+                if (fromTop) oldBottom - newHeight else miniOffset.y
             )
         }
         Box(
@@ -1693,14 +1697,16 @@ internal fun MiniWindowOverlay(
             Modifier.align(Alignment.TopEnd).padding(top = topInset).zIndex(1000f),
             onClose
         )
-        MiniVideoButton(Icons.Outlined.FastRewind, appText("快退", english), Modifier.align(Alignment.CenterStart).zIndex(1000f), seekBack)
+        // The transport row sits slightly below the vertical centre.
+        val transportOffset = Modifier.offset(y = 14.dp)
+        MiniVideoButton(Icons.Outlined.FastRewind, appText("快退", english), Modifier.align(Alignment.CenterStart).then(transportOffset).zIndex(1000f), seekBack)
         MiniVideoButton(
             if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
             appText(if (playing) "暂停" else "播放", english),
-            Modifier.align(Alignment.Center).zIndex(1000f),
+            Modifier.align(Alignment.Center).then(transportOffset).zIndex(1000f),
             onTogglePlay
         )
-        MiniVideoButton(Icons.Outlined.FastForward, appText("快进", english), Modifier.align(Alignment.CenterEnd).zIndex(1000f), seekForward)
+        MiniVideoButton(Icons.Outlined.FastForward, appText("快进", english), Modifier.align(Alignment.CenterEnd).then(transportOffset).zIndex(1000f), seekForward)
     }
 }
 

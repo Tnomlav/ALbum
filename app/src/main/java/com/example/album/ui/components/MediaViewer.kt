@@ -509,10 +509,34 @@ fun MediaViewer(
                 LaunchedEffect(currentIndex) {
                     if (pagerCommit) pagerCommit = false
                 }
+                /** Half of the pan room the *fitted* picture has at [scale]. */
+                fun panLimit(scale: Float): Offset {
+                    val viewportAspect = imageViewport.width.toFloat()
+                        .takeIf { it > 0f && imageViewport.height > 0 }?.div(imageViewport.height.toFloat())
+                        ?: (16f / 9f)
+                    val mediaAspect = if (current.width > 0 && current.height > 0) {
+                        (current.width.toFloat() / current.height).coerceIn(.05f, 20f)
+                    } else {
+                        viewportAspect
+                    }
+                    val fittedWidth = if (mediaAspect > viewportAspect) imageViewport.width.toFloat()
+                    else imageViewport.height * mediaAspect
+                    val fittedHeight = if (mediaAspect > viewportAspect) imageViewport.width / mediaAspect
+                    else imageViewport.height.toFloat()
+                    return Offset(
+                        ((fittedWidth * scale - imageViewport.width) / 2f).coerceAtLeast(0f),
+                        ((fittedHeight * scale - imageViewport.height) / 2f).coerceAtLeast(0f)
+                    )
+                }
                 val transformState = rememberTransformableState { zoomChange, panChange, _ ->
                     val nextScale = (imageScale * zoomChange).coerceIn(1f, 5f)
-                    val maxX = imageViewport.width * (nextScale - 1f) / 2f
-                    val maxY = imageViewport.height * (nextScale - 1f) / 2f
+                    // Bounds come from the *fitted* picture, not the viewport:
+                    // a picture that is shorter than the viewport must not be
+                    // draggable up and down at all, otherwise its edges could be
+                    // pulled inside the visible area.
+                    val limits = panLimit(nextScale)
+                    val maxX = limits.x
+                    val maxY = limits.y
                     imageScale = nextScale
                     imageOffset = if (nextScale <= 1.01f) Offset.Zero else Offset(
                         // The picture stops at its edge; continuing the drag
@@ -606,7 +630,7 @@ fun MediaViewer(
                                  */
                                 fun pushingPastEdge(amount: Float): Boolean {
                                     if (imageScale <= 1.01f) return true
-                                    val maxX = size.width * (imageScale - 1f) / 2f
+                                    val maxX = panLimit(imageScale).x
                                     return when {
                                         amount > 0f -> imageOffset.x >= maxX - 1f
                                         amount < 0f -> imageOffset.x <= -maxX + 1f

@@ -46,6 +46,7 @@ fun VaultLineSlider(
 ) {
     val trackStrokeWidth = with(LocalDensity.current) { 12.dp.toPx() }
     val thumbTrackGap = with(LocalDensity.current) { thumbGap.toPx() }
+    val thumbInsetPx = with(LocalDensity.current) { (thumbBandSize / 2).toPx() }
     Slider(
         value = value.coerceIn(valueRange.start, valueRange.endInclusive),
         onValueChange = onValueChange,
@@ -59,7 +60,12 @@ fun VaultLineSlider(
                 val span = (sliderState.valueRange.endInclusive - sliderState.valueRange.start)
                     .takeIf { it > 0f } ?: 1f
                 val fraction = ((sliderState.value - sliderState.valueRange.start) / span).coerceIn(0f, 1f)
-                val thumbCenter = size.width * fraction
+                // Material3 insets the track by half the thumb, so the thumb's
+                // centre travels between those insets -- not across the full
+                // width. Using the full width put the separator off-centre from
+                // the thumb.
+                val travel = (size.width - thumbInsetPx * 2f).coerceAtLeast(0f)
+                val thumbCenter = thumbInsetPx + travel * fraction
                 // Paint the whole track with the unplayed colour first, so the
                 // band around the thumb shows the track instead of whatever is
                 // behind the slider. On the video player that background is
