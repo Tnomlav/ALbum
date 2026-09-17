@@ -215,8 +215,13 @@ fun AlbumsScreen(
         // Before the first scan finishes an empty library means "not loaded
         // yet": showing the empty state (or the permission prompt) first is
         // what made the app flash an empty page on launch.
-        media.isEmpty() && !initialLoadComplete -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        media.isEmpty() && refreshing -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        // Starting the app used to show a progress circle here until the first
+        // scan finished. A blank page for a moment is less noticeable than a
+        // spinner that appears out of nowhere, so this case renders nothing
+        // (the pull-to-refresh indicator still covers refreshes the user asks
+        // for).
+        media.isEmpty() && !initialLoadComplete -> Box(Modifier.fillMaxSize())
+        media.isEmpty() && refreshing -> Box(Modifier.fillMaxSize())
         !permissionGranted && media.isEmpty() -> PermissionEmpty(onRequestPermission)
         media.isEmpty() && openedFolder.equals("Pixiv", ignoreCase = true) && onOpenPixivArchive != null ->
             FolderGrid(

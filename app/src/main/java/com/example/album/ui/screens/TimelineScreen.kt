@@ -107,7 +107,8 @@ fun TimelineScreen(
     // See AlbumsScreen: until the first scan finishes, an empty timeline means
     // "not loaded yet", not "no media" (and not "no permission").
     if ((refreshing || !initialLoadComplete) && media.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        // See AlbumsScreen: no spinner while the library is still being read.
+        Box(Modifier.fillMaxSize())
         return
     }
     if (!permissionGranted && media.isEmpty()) {

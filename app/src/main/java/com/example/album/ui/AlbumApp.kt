@@ -3379,7 +3379,10 @@ fun AlbumApp(
                     isVideo = false,
                     query = if (pixivSearchMode == PixivSearchMode.Tag) "" else appliedQuery,
                     searchingFolders = false,
-                    loading = library.loading || pixivTagsLoading || pixivPageRefreshing,
+                    // The P page streams its folders as the walk progresses, so
+                    // it does not need a blocking spinner; the library refresh
+                    // (what its pull-to-refresh asks for) still shows one.
+                    loading = library.loading,
                     scanning = library.scanning,
                     permissionGranted = true,
                     sort = mediaSort,
