@@ -817,7 +817,13 @@ internal fun Media3VideoPlayer(
                         player.play()
                     }
                 }
-                Lifecycle.Event.ON_STOP -> floatingWindow?.setCompact(true)
+                Lifecycle.Event.ON_STOP -> {
+                    // Optional: some users want the window out of the way while
+                    // the phone is in the background / multi-task view.
+                    if (preferences.getBoolean("mini_shrink_on_background", false)) {
+                        floatingWindow?.setCompact(true)
+                    }
+                }
                 else -> Unit
             }
         }

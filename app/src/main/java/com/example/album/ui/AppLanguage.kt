@@ -162,6 +162,8 @@ private val APP_ENGLISH = mapOf(
     "同名文件处理" to "Duplicate filename handling",
     "播放中无操作 3 秒后隐藏控件" to "Hide controls after 3 seconds of inactivity",
     "在播放器中显示长快退和长快进按钮" to "Show long rewind and fast-forward buttons",
+    "小窗在后台缩小" to "Shrink the mini window in the background",
+    "应用切到后台或多任务时把悬浮小窗缩小" to "Shrink the floating window while the app is in the background or multi-task view",
     "全屏手势" to "Full-screen gestures",
     "横向滑满整个屏幕对应的进度" to "Time covered by a full-width horizontal swipe",
     "在屏幕边缘松手时取消当次跳转" to "Cancel seeking when released at a screen edge",

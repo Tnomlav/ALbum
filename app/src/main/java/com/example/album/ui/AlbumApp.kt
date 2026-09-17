@@ -2205,7 +2205,15 @@ fun AlbumApp(
                 favoriteUris = if (keys.all { it in favoriteUris }) favoriteUris - keys else favoriteUris + keys
                 preferences.edit().putStringSet("favorites", favoriteUris).apply()
             },
-            onCopy = { items -> if (items.isNotEmpty()) transferRequest = TransferRequest(items, TransferMode.Copy) },
+            onCopy = { items ->
+                if (items.isNotEmpty()) {
+                    // The archive page is rendered as a standalone page (the rest
+                    // of the UI, including the destination screen, is not
+                    // composed while it is open), so leave it first.
+                    pixivArchiveOpen = false
+                    transferRequest = TransferRequest(items, TransferMode.Copy)
+                }
+            },
             onRename = { item, newName ->
                 val renamed = library.rename(item, newName)
                 if (renamed == null) {
@@ -2220,11 +2228,15 @@ fun AlbumApp(
             onMove = { items ->
                 if (items.isNotEmpty()) {
                     pixivArchiveMoveUris = items.mapTo(hashSetOf()) { it.uri.toString() }
+                    pixivArchiveOpen = false
                     transferRequest = TransferRequest(items, TransferMode.Move)
                 }
             },
             onDelete = { items ->
                 pixivArchivePendingDeleteUris = items.mapTo(hashSetOf()) { it.uri.toString() }
+                // The delete confirmation lives in the main UI, which is not
+                // composed while the archive page is open.
+                pixivArchiveOpen = false
                 requestDelete(items)
             }
         )

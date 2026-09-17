@@ -58,6 +58,7 @@ internal fun DeferredVideoSeekSlider(
     // Back to the archive page's geometry (only the bar width stays at 12dp):
     // 3dp between the track ends and the thumb centre.
     val trackGapPx = with(LocalDensity.current) { 3.dp.toPx() }
+    val thumbInsetPx = with(LocalDensity.current) { 6.dp.toPx() }
     var displayedValue by remember { mutableFloatStateOf(valueMs.toFloat()) }
     var dragging by remember { mutableStateOf(false) }
     val latestOnSeek = rememberUpdatedState(onSeek)
@@ -135,7 +136,11 @@ internal fun DeferredVideoSeekSlider(
                 val fraction = ((sliderState.value - sliderState.valueRange.start) /
                     (sliderState.valueRange.endInclusive - sliderState.valueRange.start))
                     .coerceIn(0f, 1f)
-                val thumbCenter = size.width * fraction
+                // Material3 keeps half a thumb of padding at both ends, so the
+                // thumb travels between those insets. Using the full width put
+                // the split off-centre from the thumb.
+                val inset = thumbInsetPx
+                val thumbCenter = inset + (size.width - inset * 2f).coerceAtLeast(0f) * fraction
                 drawLine(
                     color = inactiveColor,
                     start = Offset(thumbCenter + trackGapPx, centerY),

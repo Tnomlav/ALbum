@@ -424,10 +424,9 @@ internal class OverlayMiniWindow(
         }
         val newWidth = (startWidth + growth).roundToInt().coerceIn(minWidth, maxWidth)
         val newHeight = (newWidth * 9f / 16f).roundToInt()
-        // Keep the opposite side pinned, so the window grows away from the
-        // finger instead of sliding around.
-        if (startRawX < centerX) params.x = startWindowX + (startWidth - newWidth)
-        if (startRawY < centerY) params.y = startWindowY + (startHeight - newHeight)
+        // The window keeps its top-left corner while it is resized: pinning the
+        // opposite corner moved the window itself, which read as "dragging the
+        // corner also moves the window".
         params.width = newWidth
         params.height = newHeight
     }

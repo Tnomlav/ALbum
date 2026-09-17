@@ -145,6 +145,7 @@ fun SettingsScreen(
     var rememberProgress by remember { mutableStateOf(preferences.getBoolean("video_progress", true)) }
     var autoHidePlayer by remember { mutableStateOf(preferences.getBoolean("video_auto_hide", true)) }
     var longSkip by remember { mutableStateOf(preferences.getBoolean("long_skip", false)) }
+    var miniShrink by remember { mutableStateOf(preferences.getBoolean("mini_shrink_on_background", false)) }
     var tapPause by remember { mutableStateOf(preferences.getBoolean("video_tap_pause", false)) }
     var portraitTapPause by remember { mutableStateOf(preferences.getBoolean("video_portrait_tap_pause", false)) }
     var autoMini by remember { mutableStateOf(preferences.getBoolean("video_auto_mini", false)) }
@@ -413,6 +414,11 @@ fun SettingsScreen(
         item { ToggleRow("记住最后一次播放进度", null, rememberProgress) { setBoolean("video_progress", it) { rememberProgress = it } } }
         item { ToggleRow("自动隐藏播放器界面", "播放中无操作 3 秒后隐藏控件", autoHidePlayer) { setBoolean("video_auto_hide", it) { autoHidePlayer = it } } }
         item { ToggleRow("长快进", "在播放器中显示长快退和长快进按钮", longSkip) { setBoolean("long_skip", it) { longSkip = it } } }
+        item {
+            ToggleRow("小窗在后台缩小", "应用切到后台或多任务时把悬浮小窗缩小", miniShrink) {
+                setBoolean("mini_shrink_on_background", it) { miniShrink = it }
+            }
+        }
         item { ValueRow("快进长度", value("normal_skip", "10秒")) { choose("快进长度", "normal_skip", listOf("3秒", "5秒", "10秒", "15秒", "30秒"), value("normal_skip", "10秒")) } }
         item { ValueRow("满屏滑动跳过时间", value("gesture_seek", "90秒"), "横向滑满整个屏幕对应的进度") { choose("满屏滑动跳过时间", "gesture_seek", listOf("30秒", "60秒", "90秒", "120秒", "150秒"), value("gesture_seek", "90秒")) } }
         item { ToggleRow("边缘误触保护", "在屏幕边缘松手时取消当次跳转", edgeProtection) { setBoolean("edge_protection", it) { edgeProtection = it } } }
