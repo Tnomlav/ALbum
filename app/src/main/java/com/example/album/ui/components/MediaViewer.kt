@@ -518,8 +518,12 @@ fun MediaViewer(
                         // The picture stops at its edge; continuing the drag
                         // there is what pulls the neighbouring page in (see the
                         // pager gesture below).
-                        (imageOffset.x + panChange.x).coerceIn(-maxX, maxX),
-                        (imageOffset.y + panChange.y).coerceIn(-maxY, maxY)
+                        //
+                        // Panning is scaled by the zoom level: at 2.5x the
+                        // content travels 2.5x as far for the finger to cover
+                        // the same part of the picture.
+                        (imageOffset.x + panChange.x * nextScale).coerceIn(-maxX, maxX),
+                        (imageOffset.y + panChange.y * nextScale).coerceIn(-maxY, maxY)
                     )
                 }
                 Box(
@@ -660,7 +664,7 @@ fun MediaViewer(
                                         pagerDragging = false
                                         val direction = if (pagerOffset < 0f) 1 else -1
                                         // 15% of the page commits the swipe.
-                                        if (abs(pagerOffset) >= width * .12f && hasNeighbour(direction)) {
+                                        if (abs(pagerOffset) >= width * .1f && hasNeighbour(direction)) {
                                             slideTo(if (direction > 0) -width else width, 170) {
                                                 // The neighbour is centred now: hand
                                                 // the page over without a second slide.

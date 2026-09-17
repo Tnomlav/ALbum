@@ -117,6 +117,12 @@ internal fun DeferredVideoSeekSlider(
         // exactly instead of reading as an outline.
         thumbBorderColor = inactiveColor,
         thumbGap = 3.dp
+        ,
+        // The band is exactly as thick as the bar (12dp) and the dot keeps the
+        // archive slider's dot-to-track proportion, so the separator reads as
+        // part of the bar instead of a disc sitting on top of it.
+        thumbBandSize = 12.dp,
+        thumbDotSize = 9.dp
     )
 }
 

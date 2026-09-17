@@ -38,7 +38,11 @@ fun VaultLineSlider(
     thumbBorderColor: Color = Color.White,
     enabled: Boolean = true,
     steps: Int = 0,
-    thumbGap: androidx.compose.ui.unit.Dp = 3.dp
+    thumbGap: androidx.compose.ui.unit.Dp = 3.dp,
+    /** Diameter of the band around the thumb. */
+    thumbBandSize: androidx.compose.ui.unit.Dp = 16.dp,
+    /** Diameter of the thumb itself, inside the band. */
+    thumbDotSize: androidx.compose.ui.unit.Dp = 10.dp
 ) {
     val trackStrokeWidth = with(LocalDensity.current) { 12.dp.toPx() }
     val thumbTrackGap = with(LocalDensity.current) { thumbGap.toPx() }
@@ -94,13 +98,13 @@ fun VaultLineSlider(
             // exact colour and transparency) instead of a black or white
             // border, which used to show as a block next to the thumb.
             Box(
-                Modifier.size(16.dp)
+                Modifier.size(thumbBandSize)
                     .clip(CircleShape)
                     .background(thumbBorderColor, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Box(
-                    Modifier.size(10.dp)
+                    Modifier.size(thumbDotSize)
                         .clip(CircleShape)
                         .background(thumbColor, CircleShape)
                 )

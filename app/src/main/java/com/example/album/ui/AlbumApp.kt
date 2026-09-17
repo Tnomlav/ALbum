@@ -24,6 +24,7 @@ import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -1024,7 +1025,15 @@ fun AlbumApp(
             reloadPixivPage()
         }
     }
-    LaunchedEffect(pixivTabEnabled, pixivRefreshKey, cleanupOpen, defaultPixivImages) {
+    // A fingerprint that only changes when the Pixiv source actually changes.
+    // Keying on the list itself meant every library refresh (including the one
+    // on app start) started a SAF walk, which is why simply opening the P page
+    // showed a loading state.
+    val pixivSourceFingerprint by remember { derivedStateOf {
+        val source = defaultPixivImages
+        source.size to (source.maxOfOrNull { it.dateModified } ?: 0L)
+    } }
+    LaunchedEffect(pixivTabEnabled, pixivRefreshKey, cleanupOpen, pixivSourceFingerprint) {
         // Include archived artist folders in the P page; Pixiv itself is
         // pinned separately below so it remains the first folder. This walks
         // the SAF trees, so it is driven by the explicit refresh, by a change
@@ -1057,22 +1066,22 @@ fun AlbumApp(
         val allowedFolders = pixivFolderNames + pixivSourceFolderName
         pixivImages.filter { it.folder in allowedFolders }
     } }
-    LaunchedEffect(pixivSearchMode, pixivLibraryVersion, favoriteFilter) {
+    LaunchedEffect(pixivSearchMode, appliedQuery, pixivLibraryVersion, favoriteFilter) {
         // Load the tag index once for the current Pixiv library. Searching is
         // local filtering; tying this job to every keystroke cancels the
         // full read repeatedly on large archives and can leave no results.
         // The key is the completed-walk version, not the image list, so the
         // partial snapshots streamed while walking do not rebuild the index.
-        if (pixivSearchMode == PixivSearchMode.Tag) {
+        // Switching the mode alone must not load anything: the index is only
+        // read once the user actually searches by tag.
+        if (pixivSearchMode == PixivSearchMode.Tag && appliedQuery.isNotBlank()) {
             pixivTagsLoading = true
             try {
                 pixivTagsByUri = pixivRepository.loadTags(pixivImages)
             } finally {
                 pixivTagsLoading = false
             }
-        } else if (pixivSearchMode == PixivSearchMode.Tag) {
-            pixivTagsLoading = false
-        } else if (pixivSearchMode != PixivSearchMode.Tag) {
+        } else {
             pixivTagsByUri = emptyMap()
             pixivTagsLoading = false
         }
@@ -1535,6 +1544,14 @@ fun AlbumApp(
         query = ""
         appliedQuery = ""
         searchOpen = false
+        // Return to where the page was before the search started, in the same
+        // snapshot the results disappear in.
+        pageScrollRequest = com.example.album.ui.PageScrollRequest(
+            searchReturnAlbumFirstVisibleItem,
+            searchReturnAlbumFirstVisibleOffset,
+            System.nanoTime(),
+            key = searchReturnAnchorFolder
+        )
     }
 
     fun resumeSearch() {
@@ -2583,6 +2600,13 @@ fun AlbumApp(
                 onQueryChange = {
                     suspendedSearchQuery = null
                     searchOpen = true
+                    if (query.isBlank() && it.isNotBlank()) {
+                        // Remember where the page was before the search so
+                        // leaving the search returns there.
+                        searchReturnAlbumFirstVisibleItem = albumFirstVisibleItem
+                        searchReturnAlbumFirstVisibleOffset = albumFirstVisibleOffset
+                        searchReturnAnchorFolder = selectionAnchorFolder
+                    }
                     query = it
                     if (tab == MainTab.Pixiv && it.isNotBlank()) {
                         openedFolder = null
@@ -2814,7 +2838,9 @@ fun AlbumApp(
             AnimatedVisibility(
                 visible = openedFolder == null && !wallpaperManagerOpen,
                 enter = slideInVertically(tween(240, easing = CubicBezierEasing(.22f, .8f, .28f, 1f))) { it } + fadeIn(tween(160)),
-                exit = slideOutVertically(tween(200, easing = CubicBezierEasing(.22f, .8f, .28f, 1f))) { it } + fadeOut(tween(140))
+                // Leaving the page hides the bar at once: the slide-out used to
+                // still be running while the folder page was already visible.
+                exit = ExitTransition.None
             ) {
             Surface(
                 modifier = Modifier.alpha(pageChromeAlpha),

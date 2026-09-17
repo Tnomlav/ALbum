@@ -291,14 +291,14 @@ fun SettingsScreen(
             choose("语言", "language", listOf("简体中文", "English"), language, onLanguageChange)
         } }
         item { ToggleRow("下拉刷新", "在支持扫描的页面顶部下拉触发扫描", pullRefresh) { setBoolean("pull_refresh", it) { pullRefresh = it } } }
-        item { ToggleRow("长按移动底栏图标", "开启后可长按并拖动底栏图标调整顺序", navReorder) { setBoolean("nav_reorder", it) { navReorder = it; onNavReorderChange(it) } } }
+        item { ToggleRow("长按移动底栏图标", "长按拖动底栏图标排序", navReorder) { setBoolean("nav_reorder", it) { navReorder = it; onNavReorderChange(it) } } }
         item { ToggleRow("长按移动工具箱组件", "开启后可长按并拖动工具箱内的条目调整顺序", toolsReorder) { setBoolean("tools_reorder", it) { toolsReorder = it; onToolsReorderChange(it) } } }
         // The gesture list is shown once on first launch; keep it reachable.
         item {
             ClickableRow("使用提示", "查看长按、拖动、播放器手势等隐藏操作") { onShowHints() }
         }
         item {
-            ToggleRow("显示 Pixiv 底栏页面", "将 Pixiv 文件夹作为独立页面显示在底栏", pixivTabEnabled) { enabled ->
+            ToggleRow("显示 Pixiv 底栏页面", "在底栏显示 Pixiv 页面", pixivTabEnabled) { enabled ->
                 setBoolean("pixiv_tab_enabled", enabled) {
                     pixivTabEnabled = it
                     if (!it && value("default_home", "相册") == "Pixiv") {
@@ -312,18 +312,18 @@ fun SettingsScreen(
 
         item { SettingsHeader("文件操作") }
         item { ToggleRow("回收站", "开启后，删除的文件将进入回收站", recycleBin) { setBoolean("recycle_bin", it) { recycleBin = it } } }
-        item { ValueRow("回收站文件保留期限", value("retention", "60天"), "回收站保存在应用私有目录：保留期结束后自动清空，卸载或清除应用数据会同时删除其中文件") {
+        item { ValueRow("回收站文件保留期限", value("retention", "60天"), "保存在应用私有目录，卸载时会一并删除") {
             choose("回收站文件保留期限", "retention", listOf("10天", "30天", "60天", "90天"), value("retention", "60天")) { selected ->
                 onRetentionChange(selected.filter(Char::isDigit).toIntOrNull() ?: 60)
             }
         } }
         item {
-            ClickableRow("导出应用数据", "收藏、队列、排除文件夹与偏好设置；不含媒体、缩略图和 Pixiv 登录信息") {
+            ClickableRow("导出应用数据", "收藏、队列与偏好设置，不含媒体和账号") {
                 exportLauncher.launch(UserDataBackup.defaultFileName())
             }
         }
         item {
-            ClickableRow("导入应用数据", "从备份文件恢复，会覆盖当前的收藏、队列与偏好设置") {
+            ClickableRow("导入应用数据", "会覆盖当前数据") {
                 importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
             }
         }
@@ -344,19 +344,19 @@ fun SettingsScreen(
         item {
             ToggleRow(
                 "删除前确认",
-                "控制普通文件删除确认，回收站还原和彻底删除始终需要确认",
+                "普通删除是否二次确认",
                 deleteConfirmation
             ) { setBoolean("delete_confirmation", it) { deleteConfirmation = it } }
         }
-        item { ToggleRow("复制/移动/编辑文件时保留原修改日期", null, preserveDate) { setBoolean("preserve_date", it) { preserveDate = it } } }
+        item { ToggleRow("复制/移动/编辑时保留原日期", null, preserveDate) { setBoolean("preserve_date", it) { preserveDate = it } } }
         item { ToggleRow("重命名时显示后缀", "关闭后只编辑文件名，原后缀会自动保留", showRenameExtension) { setBoolean("rename_show_extension", it) { showRenameExtension = it; onRenameExtensionChange(it) } } }
         item { ValueRow("编辑后保存方式", value("edit_save", "每次询问"), "保留编辑副本或替换当前版本，保存前均需确认") { choose("编辑后保存方式", "edit_save", listOf("每次询问", "保留二者", "替换原图"), value("edit_save", "每次询问")) } }
         item { ValueRow("复制/移动文件已存在", value("conflict", "保留两者")) { choose("同名文件处理", "conflict", listOf("保留两者", "覆盖", "跳过"), value("conflict", "保留两者")) } }
 
         item { SettingsHeader("显示") }
         item { ToggleRow("播放 GIF 缩略图", "仅控制缩略图，预览和全屏始终播放", gifThumbnails) { setBoolean("gif_thumbnails", it) { gifThumbnails = it } } }
-        item { ToggleRow("预览页显示原图", "开启后先显示缩略图，再加载原始图片；关闭可减少内存占用", previewOriginal) { setBoolean("preview_original", it) { previewOriginal = it } } }
-        item { ToggleRow("显示收藏星标", "在图片和视频缩略图右上角显示收藏星标", showFavoriteBadge) { setBoolean("show_favorite_badge", it) { onShowFavoriteBadgeChange(it) } } }
+        item { ToggleRow("预览页显示原图", "先显示缩略图再加载原图", previewOriginal) { setBoolean("preview_original", it) { previewOriginal = it } } }
+        item { ToggleRow("显示收藏星标", "在缩略图右上角显示收藏星标", showFavoriteBadge) { setBoolean("show_favorite_badge", it) { onShowFavoriteBadgeChange(it) } } }
         item { ToggleRow("显示点号开头的图片", "显示文件名以 . 开头的图片文件", showHiddenMedia) {
             setBoolean("show_hidden_media", it) {
                 showHiddenMedia = it

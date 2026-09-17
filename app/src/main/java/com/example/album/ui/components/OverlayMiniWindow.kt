@@ -108,21 +108,21 @@ internal class OverlayMiniWindow(
                 Gravity.CENTER
             )
         }
-        val rewind = overlayButton(android.R.drawable.ic_media_rew, density) { onSeekBack() }
-        val playPause = overlayButton(android.R.drawable.ic_media_pause, density) {
+        val rewind = overlayButton(com.example.album.R.drawable.ic_mw_rewind, density) { onSeekBack() }
+        val playPause = overlayButton(com.example.album.R.drawable.ic_mw_pause, density) {
             onTogglePlay()
             playPauseButton?.setImageResource(
-                if (isPlaying()) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+                if (isPlaying()) com.example.album.R.drawable.ic_mw_pause else com.example.album.R.drawable.ic_mw_play
             )
         }
-        val forward = overlayButton(android.R.drawable.ic_media_ff, density) { onSeekForward() }
+        val forward = overlayButton(com.example.album.R.drawable.ic_mw_forward, density) { onSeekForward() }
         playPauseButton = playPause
         listOf(rewind, playPause, forward).forEach { controls.addView(it) }
         container.addView(controls)
         // Back to full screen sits in the top-left corner, close in the
         // top-right; the transport controls stay in the middle.
         val restore = overlayButton(
-            android.R.drawable.ic_menu_crop,
+            com.example.album.R.drawable.ic_mw_fullscreen,
             density,
             gravity = Gravity.TOP or Gravity.START
         ) {
@@ -130,7 +130,7 @@ internal class OverlayMiniWindow(
             onRestore()
         }
         val close = overlayButton(
-            android.R.drawable.ic_menu_close_clear_cancel,
+            com.example.album.R.drawable.ic_mw_close,
             density,
             gravity = Gravity.TOP or Gravity.END
         ) {
@@ -265,7 +265,7 @@ internal class OverlayMiniWindow(
 
     fun syncPlayState() {
         playPauseButton?.setImageResource(
-            if (isPlaying()) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+            if (isPlaying()) com.example.album.R.drawable.ic_mw_pause else com.example.album.R.drawable.ic_mw_play
         )
     }
 

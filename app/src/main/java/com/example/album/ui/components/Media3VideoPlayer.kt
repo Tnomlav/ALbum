@@ -1642,10 +1642,14 @@ internal fun MiniWindowOverlay(
                 detectDragGestures(
                     onDragStart = { start ->
                         val edge = 28.dp.toPx()
-                        val fromLeft = start.x <= edge
-                        val fromRight = start.x >= size.width - edge
-                        val fromTop = start.y <= edge
-                        val fromBottom = start.y >= size.height - edge
+                        // Each axis is decided on its own half, so a small
+                        // window cannot report "left and right" (or "top and
+                        // bottom") at once -- that was what made a bottom-left
+                        // drag move the top-right corner.
+                        val fromLeft = start.x <= edge && start.x < size.width / 2f
+                        val fromRight = start.x >= size.width - edge && start.x > size.width / 2f
+                        val fromTop = start.y <= edge && start.y < size.height / 2f
+                        val fromBottom = start.y >= size.height - edge && start.y > size.height / 2f
                         // Any border or corner resizes (a bare edge pins the
                         // other axis); only the middle moves the window.
                         resizeHorizontal = fromLeft || fromRight
