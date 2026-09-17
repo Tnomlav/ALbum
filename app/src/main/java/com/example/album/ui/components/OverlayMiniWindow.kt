@@ -380,10 +380,22 @@ internal class OverlayMiniWindow(
         startHeight: Int
     ) {
         val screenWidth = context.resources.displayMetrics.widthPixels
+        val screenHeight = context.resources.displayMetrics.heightPixels
         val minWidth = (160 * density).roundToInt()
-        val maxWidth = (screenWidth - 16 * density).roundToInt().coerceAtLeast(minWidth)
         val centerX = startWindowX + startWidth / 2f
         val centerY = startWindowY + startHeight / 2f
+        // Room left on the side that is *not* pinned. Limiting the size here is
+        // what keeps the pinned corner exactly in place; clamping the position
+        // afterwards used to drag the opposite corner around.
+        val right = startWindowX + startWidth
+        val bottom = startWindowY + startHeight
+        val horizontalRoom = if (startRawX < centerX) right - 8f * density else screenWidth - 8f * density - startWindowX
+        val verticalRoom = if (startRawY < centerY) bottom - 8f * density else screenHeight - 8f * density - startWindowY
+        val maxWidth = minOf(
+            (screenWidth - 16 * density).roundToInt(),
+            horizontalRoom.roundToInt(),
+            (verticalRoom * 16f / 9f).roundToInt()
+        ).coerceAtLeast(minWidth)
         // Dragging away from the centre grows the window, dragging towards it
         // shrinks; that holds for every border and corner, which fixed the case
         // where both directions shrank the window.
