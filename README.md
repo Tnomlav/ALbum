@@ -34,7 +34,7 @@ Album 主要服务于希望直接管理本机媒体文件的用户：不上传�
 本地签名构建产物位于 `app/release/`，仅用于交付前验证，不纳入版本控制（历史上的提交把每个版本的 APK 都存进了仓库，仓库因此膨胀到 200 MB 以上）。当前本地验证构建为 `1.2.10`（arm64-v8a 分包，其余架构见构建输出目录 `app/build/outputs/apk/release/`），其 SHA-256 为：
 
 ```text
-6B2E6C8AE10EF953F23539B4A297CD44EE66249FBFD1B4CF7F3D74D642CF5824
+E8B90F2A8958EB461E47B42FE4A24B5D7519E19CBFA9D5467395E479BACCE38F
 ```
 
 安装前请确认文件来自本仓库，并通过 SHA-256 校验下载完整性。正式发布版本和发布说明会优先放在 GitHub Releases。
