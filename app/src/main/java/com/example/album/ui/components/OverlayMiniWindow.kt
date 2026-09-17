@@ -1,4 +1,6 @@
-@file:Suppress("UnsafeOptInUsageError")
+// The buttons are ordinary ImageButtons that keep their own performClick; the
+// extra touch listener only forwards drags to the window's move/resize code.
+@file:Suppress("UnsafeOptInUsageError", "ClickableViewAccessibility")
 
 package com.example.album.ui.components
 
@@ -58,6 +60,17 @@ internal class OverlayMiniWindow(
     private var playPauseButton: ImageButton? = null
     private var contentView: PlayerView? = null
     private var buttonViews: List<View> = emptyList()
+    // Gesture state, shared by the container and the buttons so a drag that
+    // starts on a button still moves/resizes the window.
+    private var gestureStartX = 0f
+    private var gestureStartY = 0f
+    private var gestureStartWindowX = 0
+    private var gestureStartWindowY = 0
+    private var gestureStartWidth = 0
+    private var gestureStartHeight = 0
+    private var gestureEdges = 0
+    private var gestureMoved = false
+    private var buttonDragListener: View.OnTouchListener? = null
     private val hideHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val hideControls = Runnable { setControlsVisible(false) }
     private var controlsVisible = true
@@ -144,77 +157,93 @@ internal class OverlayMiniWindow(
         container.addView(close)
         buttonViews = listOf(restore, close, controls)
 
-        container.setOnTouchListener(object : View.OnTouchListener {
-            private var startX = 0f
-            private var startY = 0f
-            private var startWindowX = 0
-            private var startWindowY = 0
-            private var startWidth = 0
-            private var startHeight = 0
-            private var edges = 0
-            private var moved = false
-            override fun onTouch(view: View, event: MotionEvent): Boolean {
-                val params = layoutParams ?: return false
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        startX = event.rawX
-                        startY = event.rawY
-                        moved = false
-                        startWindowX = params.x
-                        startWindowY = params.y
-                        startWidth = params.width
-                        startHeight = params.height
-                        // Grabbing a border resizes, grabbing the middle moves.
-                        edges = touchedEdges(event.rawX, event.rawY, params, density)
-                        return true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        val dx = (event.rawX - startX)
-                        val dy = (event.rawY - startY)
-                        if (abs(dx) > 8f * density || abs(dy) > 8f * density) moved = true
-                        if (edges != 0) {
-                            applyResize(
-                                params = params,
-                                edges = edges,
-                                dx = dx,
-                                dy = dy,
-                                density = density,
-                                startRawX = startX,
-                                startRawY = startY,
-                                startWindowX = startWindowX,
-                                startWindowY = startWindowY,
-                                startWidth = startWidth,
-                                startHeight = startHeight
-                            )
-                        } else {
-                            val screenHeight = context.resources.displayMetrics.heightPixels
-                            params.x = (startWindowX + dx).roundToInt()
-                                .coerceIn(-params.width / 3, screenWidth - params.width / 3)
-                            params.y = (startWindowY + dy).roundToInt()
-                                .coerceIn(0, (screenHeight - params.height / 3).coerceAtLeast(0))
-                        }
-                        runCatching { windowManager.updateViewLayout(view, params) }
-                        return true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        edges = 0
-                        // A tap on the empty area toggles the controls, the
-                        // same way it does inside the app's player.
-                        if (!moved) setControlsVisible(!controlsVisible) else touchControls()
-                        // Overlay windows are not reachable by the usual
-                        // accessibility path, so report the gesture as a click
-                        // to keep the touch handling observable.
-                        view.performClick()
-                        return true
-                    }
-                    MotionEvent.ACTION_CANCEL -> {
-                        edges = 0
-                        return true
-                    }
-                }
-                return false
+        // Dragging anywhere -- including from a button -- moves or resizes the
+        // window. A tap that never moves still reaches the button's own click.
+        fun beginGesture(event: MotionEvent): Boolean {
+            val params = layoutParams ?: return false
+            gestureStartX = event.rawX
+            gestureStartY = event.rawY
+            gestureMoved = false
+            gestureStartWindowX = params.x
+            gestureStartWindowY = params.y
+            gestureStartWidth = params.width
+            gestureStartHeight = params.height
+            gestureEdges = touchedEdges(event.rawX, event.rawY, params, density)
+            return true
+        }
+
+        fun continueGesture(view: View, event: MotionEvent): Boolean {
+            val params = layoutParams ?: return false
+            val dx = event.rawX - gestureStartX
+            val dy = event.rawY - gestureStartY
+            if (abs(dx) > 8f * density || abs(dy) > 8f * density) gestureMoved = true
+            if (!gestureMoved) return true
+            if (gestureEdges != 0) {
+                applyResize(
+                    params = params,
+                    edges = gestureEdges,
+                    dx = dx,
+                    dy = dy,
+                    density = density,
+                    startRawX = gestureStartX,
+                    startRawY = gestureStartY,
+                    startWindowX = gestureStartWindowX,
+                    startWindowY = gestureStartWindowY,
+                    startWidth = gestureStartWidth,
+                    startHeight = gestureStartHeight
+                )
+            } else {
+                val screenHeight = context.resources.displayMetrics.heightPixels
+                params.x = (gestureStartWindowX + dx).roundToInt()
+                    .coerceIn(-params.width / 3, screenWidth - params.width / 3)
+                params.y = (gestureStartWindowY + dy).roundToInt()
+                    .coerceIn(0, (screenHeight - params.height / 3).coerceAtLeast(0))
             }
-        })
+            runCatching { windowManager.updateViewLayout(view, params) }
+            return true
+        }
+
+        container.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> beginGesture(event)
+                MotionEvent.ACTION_MOVE -> continueGesture(view, event)
+                MotionEvent.ACTION_UP -> {
+                    val wasTap = !gestureMoved
+                    gestureEdges = 0
+                    // A tap on the empty area toggles the controls, the same way
+                    // it does inside the app's player.
+                    if (wasTap) setControlsVisible(!controlsVisible)
+                    view.performClick()
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    gestureEdges = 0
+                    true
+                }
+                else -> false
+            }
+        }
+        // Buttons keep their click, but a drag that starts on one is handed to
+        // the same gesture code (the zones used to overlap and the buttons ate
+        // every drag).
+        buttonDragListener = View.OnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    beginGesture(event)
+                    false
+                }
+                MotionEvent.ACTION_MOVE -> if (gestureMoved) continueGesture(view, event) else false
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    gestureEdges = 0
+                    false
+                }
+                else -> false
+            }
+        }
+        buttonViews.filterIsInstance<ImageButton>().forEach { it.setOnTouchListener(buttonDragListener) }
+        // The transport buttons live inside their row, so they are not part of
+        // buttonViews; give them the same drag handling.
+        listOf(rewind, playPause, forward).forEach { it.setOnTouchListener(buttonDragListener) }
 
         val type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         val params = WindowManager.LayoutParams(
@@ -310,6 +339,7 @@ internal class OverlayMiniWindow(
             touchControls()
             onClick()
         }
+        setOnTouchListener(buttonDragListener)
     }
 
     /** Which borders the finger grabbed, as a bitmask (0 = the middle). */

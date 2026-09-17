@@ -1,13 +1,18 @@
 package com.example.album.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderColors
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -18,9 +23,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.roundToLong
@@ -39,9 +48,13 @@ internal fun DeferredVideoSeekSlider(
     colors: SliderColors,
     thumb: (@Composable (() -> Unit))? = null,
     activeColor: Color = Color.White,
-    inactiveColor: Color = Color.White.copy(alpha = .35f)
+    inactiveColor: Color = Color.White.copy(alpha = .35f),
+    thumbColor: Color = Color.White,
+    thumbBorderColor: Color = Color.White
 ) {
     val duration = durationMs.coerceAtLeast(1L)
+    val trackStrokeWidthPx = with(LocalDensity.current) { 12.dp.toPx() }
+    val trackGapPx = with(LocalDensity.current) { 3.dp.toPx() }
     var displayedValue by remember { mutableFloatStateOf(valueMs.toFloat()) }
     var dragging by remember { mutableStateOf(false) }
     val latestOnSeek = rememberUpdatedState(onSeek)
@@ -95,7 +108,11 @@ internal fun DeferredVideoSeekSlider(
         }
     }
 
-    VaultLineSlider(
+    // 1:1 with the Pixiv archive page's scan-limit slider: a 12dp rounded track
+    // whose played and unplayed segments stop 3dp short of the thumb centre,
+    // and a 16dp thumb with a 4dp ring. Only the colours differ (white on the
+    // player's black background instead of the theme accent).
+    Slider(
         value = displayedValue.coerceIn(0f, duration.toFloat()),
         // During touch gestures the custom handler owns the interaction. Keep
         // the callback for semantic/keyboard actions, which have no pointer
@@ -109,15 +126,49 @@ internal fun DeferredVideoSeekSlider(
         },
         valueRange = 0f..duration.toFloat(),
         modifier = modifier.then(gestureModifier),
-        activeColor = activeColor,
-        inactiveColor = inactiveColor,
-        thumbColor = Color.White,
-        // 1:1 with the archive page's slider (the same call the VLC player
-        // makes): white track, plain white thumb, default band and gap.
-        thumbBorderColor = Color.White,
-        thumbGap = 3.dp,
-        thumbBandSize = 16.dp,
-        thumbDotSize = 10.dp
+        track = { sliderState ->
+            Canvas(Modifier.fillMaxWidth().height(6.dp)) {
+                val centerY = size.height / 2f
+                val fraction = ((sliderState.value - sliderState.valueRange.start) /
+                    (sliderState.valueRange.endInclusive - sliderState.valueRange.start))
+                    .coerceIn(0f, 1f)
+                val thumbCenter = size.width * fraction
+                drawLine(
+                    color = inactiveColor,
+                    start = Offset(thumbCenter + trackGapPx, centerY),
+                    end = Offset(size.width, centerY),
+                    strokeWidth = trackStrokeWidthPx,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = activeColor,
+                    start = Offset(0f, centerY),
+                    end = Offset(thumbCenter - trackGapPx, centerY),
+                    strokeWidth = trackStrokeWidthPx,
+                    cap = StrokeCap.Round
+                )
+            }
+        },
+        colors = SliderDefaults.colors(
+            activeTrackColor = activeColor,
+            inactiveTrackColor = inactiveColor,
+            thumbColor = thumbColor,
+            disabledActiveTrackColor = activeColor,
+            disabledInactiveTrackColor = inactiveColor,
+            disabledThumbColor = thumbColor,
+            activeTickColor = Color.Transparent,
+            inactiveTickColor = Color.Transparent,
+            disabledActiveTickColor = Color.Transparent,
+            disabledInactiveTickColor = Color.Transparent
+        ),
+        thumb = {
+            Box(
+                Modifier.size(16.dp)
+                    .clip(CircleShape)
+                    .background(thumbColor, CircleShape)
+                    .border(4.dp, thumbBorderColor, CircleShape)
+            )
+        }
     )
 }
 
