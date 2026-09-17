@@ -669,7 +669,7 @@ private fun DuplicateContent(
                             .mapTo(mutableSetOf()) { it.uri.toString() }
                             .intersect(selectedUris)
                         CleanupCommand(
-                            label = "清理所选",
+                            label = if (english) "Clean up selected" else "清理所选",
                             color = Color(0xFFFF453A),
                             enabled = selectedInGroup.isNotEmpty(),
                             onClick = { onDelete(selectedInGroup) }

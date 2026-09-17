@@ -280,17 +280,11 @@ fun AlbumsScreen(
             // follow them moved the page up and down while switching.
             modifier = Modifier.fillMaxSize(),
             transitionSpec = {
-                // Keep the cover as the shared element while the old grid
-                // disappears and the destination grid arrives underneath it.
-                // The container size must not animate: the album list and the
-                // folder grid have different heights, and the default size
-                // transform made the page slide up or down while opening and
-                // closing a folder.
-                fadeIn(
-                    animationSpec = tween(360, easing = CubicBezierEasing(.22f, .78f, .24f, 1f))
-                ) togetherWith fadeOut(
-                    animationSpec = tween(360, easing = CubicBezierEasing(.22f, .78f, .24f, 1f))
-                ) using SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> snap() })
+                // A straight swap. Cross-fading the album list and the folder
+                // grid made the page flash (both were drawn at once, at
+                // different heights), and every variation of the fade was
+                // still reported as a flash.
+                EnterTransition.None togetherWith ExitTransition.None
             },
             label = "album-folder"
         ) { shownAlbum ->
@@ -337,10 +331,17 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
                 // requestScrollToItem applies on the next measure pass, so the
                 // list never draws the old position first (that was the visible
                 // jump when coming back from a folder).
-                gridState.requestScrollToItem(
-                    (anchored ?: scrollRequest.index).coerceIn(0, count - 1),
-                    scrollRequest.offset.coerceAtLeast(0)
-                )
+                val target = anchored ?: scrollRequest.index
+                // Deleting the anchored folder used to clamp the request to the
+                // last item, which looked like the page jumping to the bottom;
+                // in that case keep the page where it is instead.
+                val anchorGone = scrollRequest.key != null && anchored == null && target > count - 1
+                if (!anchorGone) {
+                    gridState.requestScrollToItem(
+                        target.coerceIn(0, count - 1),
+                        scrollRequest.offset.coerceAtLeast(0)
+                    )
+                }
             }
         }
     }

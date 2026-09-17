@@ -1634,8 +1634,11 @@ internal fun MiniWindowOverlay(
         }
         Box(
             Modifier.fillMaxSize().zIndex(0f).pointerInput(Unit) {
-                var resizeFromLeft: Boolean? = null
-                var resizeFromTop: Boolean? = null
+                var resizing = false
+                var resizeHorizontal = false
+                var resizeVertical = false
+                var resizeFromLeft = false
+                var resizeFromTop = false
                 detectDragGestures(
                     onDragStart = { start ->
                         val edge = 28.dp.toPx()
@@ -1643,19 +1646,27 @@ internal fun MiniWindowOverlay(
                         val fromRight = start.x >= size.width - edge
                         val fromTop = start.y <= edge
                         val fromBottom = start.y >= size.height - edge
-                        if ((fromLeft || fromRight) && (fromTop || fromBottom)) {
-                            resizeFromLeft = fromLeft
-                            resizeFromTop = fromTop
-                        }
+                        // Any border or corner resizes (a bare edge pins the
+                        // other axis); only the middle moves the window.
+                        resizeHorizontal = fromLeft || fromRight
+                        resizeVertical = fromTop || fromBottom
+                        resizeFromLeft = fromLeft
+                        resizeFromTop = fromTop
+                        resizing = resizeHorizontal || resizeVertical
                     },
-                    onDragEnd = { resizeFromLeft = null; resizeFromTop = null },
-                    onDragCancel = { resizeFromLeft = null; resizeFromTop = null },
+                    onDragEnd = { resizing = false },
+                    onDragCancel = { resizing = false },
                     onDrag = { change, dragAmount ->
                         change.consume()
-                        val fromLeft = resizeFromLeft
-                        val fromTop = resizeFromTop
-                        if (fromLeft != null && fromTop != null) {
-                            currentOnResize(Offset(dragAmount.x, dragAmount.y), fromLeft, fromTop)
+                        if (resizing) {
+                            currentOnResize(
+                                Offset(
+                                    if (resizeHorizontal) dragAmount.x else 0f,
+                                    if (resizeVertical) dragAmount.y else 0f
+                                ),
+                                resizeFromLeft,
+                                resizeFromTop
+                            )
                         } else {
                             currentOnMove(Offset(dragAmount.x, dragAmount.y))
                         }

@@ -720,7 +720,7 @@ private fun ClickableRow(label: String, note: String?, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = VaultDimens.SettingsRowMinHeight)
             .clickable(onClick = onClick)
-            .padding(horizontal = 15.dp, vertical = 9.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -746,9 +746,9 @@ private fun ValueRow(label: String, value: String, note: String? = null, onClick
             .padding(horizontal = 15.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(settingsText(label, english), style = MaterialTheme.typography.bodyMedium)
-            note?.let { Text(settingsText(it, english), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            note?.let { Text(settingsText(it, english), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         Text(settingsText(value, english), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
     }
@@ -777,12 +777,12 @@ private fun ToggleRow(label: String, note: String?, checked: Boolean, onCheckedC
         Modifier.fillMaxWidth().heightIn(min = VaultDimens.SettingsRowMinHeight)
             .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
             .semantics { stateDescription = if (checked) settingsText("已开启", english) else settingsText("已关闭", english) }
-            .padding(horizontal = 15.dp, vertical = 5.dp),
+            .padding(horizontal = 16.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(settingsText(label, english), style = MaterialTheme.typography.bodyMedium)
-            note?.let { Text(settingsText(it, english), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            note?.let { Text(settingsText(it, english), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         // The row owns the switch semantics and click target. Keeping the
         // visual switch non-interactive avoids exposing two switches to

@@ -112,10 +112,10 @@ internal fun DeferredVideoSeekSlider(
         activeColor = activeColor,
         inactiveColor = inactiveColor,
         thumbColor = Color.White,
-        // Exactly the archive page's slider: white track, white thumb with a
-        // white ring and the same 3dp separation band. The band now shows the
-        // unplayed track colour (painted underneath) instead of the window.
-        thumbBorderColor = Color.White,
+        // The band around the thumb is filled with the unplayed track colour
+        // and its transparency, so it matches the right-hand part of the bar
+        // exactly instead of reading as an outline.
+        thumbBorderColor = inactiveColor,
         thumbGap = 3.dp
     )
 }

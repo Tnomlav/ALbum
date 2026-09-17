@@ -13,7 +13,8 @@ object VaultDimens {
     val ImageGap = 3.dp
     val AlbumRadius = 8.dp
     val BottomBarHeight = 68.dp
-    val SettingsRowMinHeight = 58.dp
+    // Roomy enough that labels and their notes are not cramped.
+    val SettingsRowMinHeight = 66.dp
     val CleanupEntryMinHeight = 82.dp
     val SelectionMarkSize = 23.dp
 

@@ -1197,9 +1197,14 @@ fun AlbumApp(
         val lifecycleObserver = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> {
-                    // Re-check permissions after returning from Settings; users
-                    // can revoke image/video access while this activity is stopped.
-                    scope.launch { library.refresh(hasMediaPermission(context)) }
+                    // Re-check permissions after returning from Settings (users
+                    // can revoke image/video access while this activity is
+                    // stopped), but do not rescan the library: coming back from
+                    // the background used to trigger a full reload every time.
+                    val granted = hasMediaPermission(context)
+                    if (granted != library.permissionGranted) {
+                        scope.launch { library.refresh(granted) }
+                    }
                 }
                 Lifecycle.Event.ON_STOP -> {
                     // Do not keep decoding thumbnails while the app is in the

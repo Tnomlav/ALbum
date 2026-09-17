@@ -660,7 +660,7 @@ fun MediaViewer(
                                         pagerDragging = false
                                         val direction = if (pagerOffset < 0f) 1 else -1
                                         // 15% of the page commits the swipe.
-                                        if (abs(pagerOffset) >= width * .15f && hasNeighbour(direction)) {
+                                        if (abs(pagerOffset) >= width * .12f && hasNeighbour(direction)) {
                                             slideTo(if (direction > 0) -width else width, 170) {
                                                 // The neighbour is centred now: hand
                                                 // the page over without a second slide.
@@ -1246,9 +1246,11 @@ private fun LegacyMiniVideoButton(
 ) {
     IconButton(
         onClick = onClick,
-        modifier = modifier.size(40.dp).background(Color.Black.copy(alpha = .48f), CircleShape)
+        // Flat white icon like the other mini windows: the black disc made this
+        // one look like a different design.
+        modifier = modifier.size(44.dp)
     ) {
-        Icon(icon, label, tint = Color.White, modifier = Modifier.size(23.dp))
+        Icon(icon, label, tint = Color.White, modifier = Modifier.size(26.dp))
     }
 }
 
