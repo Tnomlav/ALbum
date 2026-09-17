@@ -621,10 +621,16 @@ fun AlbumApp(
         }
         wallpaperRestoreAttempted = true
         preferences.edit().putInt("wallpaper_restore_version", com.example.album.BuildConfig.VERSION_CODE).apply()
-        // The backup stays available for a manual restore from the wallpaper
-        // manager, but the app no longer re-applies it on launch: doing that
-        // silently replaced a wallpaper the user had chosen by themselves, and
-        // a live wallpaper that could not play left them with a dead one.
+        // Installing an update replaces the package, and the system unbinds our
+        // live wallpaper with it. Re-bind it here, but only while the still
+        // wallpaper is still the one we left behind: if the user has picked a
+        // wallpaper of their own since, it must not be touched.
+        val fallbackId = WallpaperAppliedStore.fallbackStaticId(context)
+        val currentId = WallpaperAppliedStore.currentStaticId(context)
+        val userPickedOwnWallpaper = fallbackId != -1 && currentId != -1 && currentId != fallbackId
+        if (appliedKind != null && !stillActive && !userPickedOwnWallpaper) {
+            withContext(Dispatchers.IO) { WallpaperAppliedStore.rebind(context, appliedKind) }
+        }
     }
     LaunchedEffect(context) {
         val loaded = withContext(Dispatchers.IO) { SlideshowQueueStore.load(context) }

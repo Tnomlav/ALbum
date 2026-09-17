@@ -178,6 +178,9 @@ fun setStaticWallpaper(
                 imageItems.map { it.uri.toString() }
             )
             applySystemWallpaperFromQueue(context, it)
+            // Remember which still wallpaper we left behind, so a later launch
+            // can tell whether the user has changed it themselves.
+            WallpaperAppliedStore.recordFallbackStaticId(context)
             if (openSettings) openStaticWallpaperSettings(context, english)
         }
     )
@@ -251,6 +254,7 @@ fun setDynamicWallpaper(
                 videoItems.map { it.uri.toString() }
             )
             applySystemWallpaperFromVideoQueue(context, it)
+            WallpaperAppliedStore.recordFallbackStaticId(context)
             if (openSettings) openDynamicWallpaperSettings(context, english)
         }
     )
