@@ -98,10 +98,18 @@ fun TimelineScreen(
     scrollToToken: Long = 0L,
     scrollToTopToken: Long = 0L,
     scrollRequest: com.example.album.ui.PageScrollRequest? = null,
+    /** See [com.example.album.ui.components.rememberPullToRefresh]. */
+    pullRequestToken: Long = 0L,
     onClearQuery: () -> Unit = {}
 ) {
     val refreshing = loading || scanning
     val english = LocalAppEnglish.current
+    // See AlbumsScreen: until the first scan finishes, an empty timeline means
+    // "not loaded yet", not "no media" (and not "no permission").
+    if ((refreshing || !initialLoadComplete) && media.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
     if (!permissionGranted && media.isEmpty()) {
         Column(
             Modifier.fillMaxSize().padding(32.dp),
@@ -123,11 +131,6 @@ fun TimelineScreen(
         }
         return
     }
-    if ((refreshing || !initialLoadComplete) && media.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        return
-    }
-
     if (searchingFolders && query.isNotBlank()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
@@ -179,7 +182,8 @@ fun TimelineScreen(
             scrollToUri = scrollToUri,
             scrollToToken = scrollToToken,
             scrollToTopToken = scrollToTopToken,
-            scrollRequest = scrollRequest
+            scrollRequest = scrollRequest,
+            pullRequestToken = pullRequestToken
         )
         return
     }
@@ -210,7 +214,8 @@ fun TimelineScreen(
         scrollToUri = scrollToUri,
         scrollToToken = scrollToToken,
         scrollToTopToken = scrollToTopToken,
-        scrollRequest = scrollRequest
+        scrollRequest = scrollRequest,
+        pullRequestToken = pullRequestToken
     )
     return
 }
@@ -242,7 +247,8 @@ private fun OptimizedTimelineGrid(
     scrollToUri: String? = null,
     scrollToToken: Long = 0L,
     scrollToTopToken: Long = 0L,
-    scrollRequest: com.example.album.ui.PageScrollRequest? = null
+    scrollRequest: com.example.album.ui.PageScrollRequest? = null,
+    pullRequestToken: Long = 0L
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current
@@ -304,7 +310,8 @@ private fun OptimizedTimelineGrid(
         enabled = pullEnabled,
         atTop = { !state.canScrollBackward },
         onRefresh = onRefresh,
-        label = "timeline-grid-pull"
+        label = "timeline-grid-pull",
+        requestToken = pullRequestToken
     )
     LaunchedEffect(jumpToDate, groupedDates) {
         val target = jumpToDate ?: return@LaunchedEffect
@@ -429,7 +436,8 @@ private fun AdaptiveTimeline(
     scrollToUri: String? = null,
     scrollToToken: Long = 0L,
     scrollToTopToken: Long = 0L,
-    scrollRequest: com.example.album.ui.PageScrollRequest? = null
+    scrollRequest: com.example.album.ui.PageScrollRequest? = null,
+    pullRequestToken: Long = 0L
 ) {
     val english = LocalAppEnglish.current
     val context = LocalContext.current
@@ -489,7 +497,8 @@ private fun AdaptiveTimeline(
         enabled = pullEnabled,
         atTop = { !state.canScrollBackward },
         onRefresh = onRefresh,
-        label = "adaptive-timeline-pull"
+        label = "adaptive-timeline-pull",
+        requestToken = pullRequestToken
     )
     LaunchedEffect(jumpToDate, groupedDates) {
         val target = jumpToDate ?: return@LaunchedEffect

@@ -7,6 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
@@ -124,6 +125,8 @@ fun AlbumsScreen(
     onBatchSelectAlbums: (List<MediaAlbum>) -> Unit = {},
     onAlbumSelectionGestureEnd: () -> Unit = {},
     onRefresh: () -> Unit,
+    /** See [com.example.album.ui.components.rememberPullToRefresh]. */
+    pullRequestToken: Long = 0L,
     openedFolder: String?,
     onOpenedFolderChange: (String?) -> Unit,
     onVisibleScopeChanged: (List<MediaItem>?) -> Unit = {},
@@ -208,8 +211,12 @@ fun AlbumsScreen(
     }
 
     when {
+        // Before the first scan finishes an empty library means "not loaded
+        // yet": showing the empty state (or the permission prompt) first is
+        // what made the app flash an empty page on launch.
+        media.isEmpty() && !initialLoadComplete -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        media.isEmpty() && refreshing -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         !permissionGranted && media.isEmpty() -> PermissionEmpty(onRequestPermission)
-        (refreshing || !initialLoadComplete) && media.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         media.isEmpty() && openedFolder.equals("Pixiv", ignoreCase = true) && onOpenPixivArchive != null ->
             FolderGrid(
                 MediaAlbum("Pixiv", emptyList(), null),
@@ -226,7 +233,8 @@ fun AlbumsScreen(
                 onOpenPixivArchive = onOpenPixivArchive,
                 favoriteUris = favoriteUris,
                 selectionPreview = selectionPreview,
-                selectedUris = selectedUris
+                selectedUris = selectedUris,
+                pullRequestToken = pullRequestToken
             )
         // Media matches can be shown immediately while the background folder
         // index continues. Only wait when there is no result yet; otherwise
@@ -255,7 +263,8 @@ fun AlbumsScreen(
                 selectionPreview = selectionPreview,
                 selectedFolders = selectedFolders,
                 scrollToTopToken = scrollToTopToken,
-                scrollRequest = scrollRequest
+                scrollRequest = scrollRequest,
+                pullRequestToken = pullRequestToken
             )
         media.isEmpty() && pinnedAlbumName == null -> EmptyMessage(
             emptyMessage ?: if (query.isBlank()) appText(if (isVideo) "还没有视频" else "还没有图片", english) else appText("没有匹配的内容", english),
@@ -269,11 +278,15 @@ fun AlbumsScreen(
             transitionSpec = {
                 // Keep the cover as the shared element while the old grid
                 // disappears and the destination grid arrives underneath it.
+                // The container size must not animate: the album list and the
+                // folder grid have different heights, and the default size
+                // transform made the page slide up or down while opening and
+                // closing a folder.
                 fadeIn(
                     animationSpec = tween(360, easing = CubicBezierEasing(.22f, .78f, .24f, 1f))
                 ) togetherWith fadeOut(
                     animationSpec = tween(360, easing = CubicBezierEasing(.22f, .78f, .24f, 1f))
-                )
+                ) using SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> snap() })
             },
             label = "album-folder"
         ) { shownAlbum ->
@@ -289,9 +302,10 @@ fun AlbumsScreen(
                     scrollToToken = scrollToToken,
                     scrollToTopToken = scrollToTopToken,
                     scrollRequest = scrollRequest,
-                    onFirstVisibleMediaChanged = onFirstVisibleMediaChanged)
+                    onFirstVisibleMediaChanged = onFirstVisibleMediaChanged,
+                    pullRequestToken = pullRequestToken)
                 } else {
-                    AlbumGrid(albums, albumColumns, refreshing = refreshing, onOpenAlbum = onOpenedFolderChange, onLongPressAlbum = onLongPressAlbum, onSelectionGestureStartAlbum = onSelectionGestureStartAlbum, onBatchSelectAlbums = onBatchSelectAlbums, onSelectionGestureEnd = onAlbumSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, favoriteUris = favoriteUris, selectionPreview = selectionPreview, selectedFolders = selectedFolders, initialFirstVisibleItem = initialAlbumFirstVisibleItem, initialFirstVisibleOffset = initialAlbumFirstVisibleOffset, onScrollPositionChanged = onAlbumScrollPositionChanged, onFirstVisibleFolderChanged = onFirstVisibleFolderChanged, scrollToTopToken = scrollToTopToken, scrollRequest = scrollRequest)
+                    AlbumGrid(albums, albumColumns, refreshing = refreshing, onOpenAlbum = onOpenedFolderChange, onLongPressAlbum = onLongPressAlbum, onSelectionGestureStartAlbum = onSelectionGestureStartAlbum, onBatchSelectAlbums = onBatchSelectAlbums, onSelectionGestureEnd = onAlbumSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, favoriteUris = favoriteUris, selectionPreview = selectionPreview, selectedFolders = selectedFolders, initialFirstVisibleItem = initialAlbumFirstVisibleItem, initialFirstVisibleOffset = initialAlbumFirstVisibleOffset, onScrollPositionChanged = onAlbumScrollPositionChanged, onFirstVisibleFolderChanged = onFirstVisibleFolderChanged, scrollToTopToken = scrollToTopToken, scrollRequest = scrollRequest, pullRequestToken = pullRequestToken)
                 }
             }
         }
@@ -299,7 +313,7 @@ fun AlbumsScreen(
 }
 
 @Composable
-private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolean, onOpenAlbum: (String) -> Unit, onLongPressAlbum: (MediaAlbum, Int, Int) -> Unit, onSelectionGestureStartAlbum: ((MediaAlbum) -> Unit)?, onBatchSelectAlbums: (List<MediaAlbum>) -> Unit, onSelectionGestureEnd: () -> Unit, onRefresh: () -> Unit, sharedElementEnabled: Boolean = true, favoriteUris: Set<String> = emptySet(), selectionPreview: Boolean = false, selectedFolders: Set<String> = emptySet(), initialFirstVisibleItem: Int = 0, initialFirstVisibleOffset: Int = 0, onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }, onFirstVisibleFolderChanged: (String?) -> Unit = {}, scrollToTopToken: Long = 0L, scrollRequest: com.example.album.ui.PageScrollRequest? = null) {
+private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolean, onOpenAlbum: (String) -> Unit, onLongPressAlbum: (MediaAlbum, Int, Int) -> Unit, onSelectionGestureStartAlbum: ((MediaAlbum) -> Unit)?, onBatchSelectAlbums: (List<MediaAlbum>) -> Unit, onSelectionGestureEnd: () -> Unit, onRefresh: () -> Unit, sharedElementEnabled: Boolean = true, favoriteUris: Set<String> = emptySet(), selectionPreview: Boolean = false, selectedFolders: Set<String> = emptySet(), initialFirstVisibleItem: Int = 0, initialFirstVisibleOffset: Int = 0, onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }, onFirstVisibleFolderChanged: (String?) -> Unit = {}, scrollToTopToken: Long = 0L, scrollRequest: com.example.album.ui.PageScrollRequest? = null, pullRequestToken: Long = 0L) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
     // A page-scroll request (coming back from a folder, or after a delete) is
@@ -357,7 +371,8 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
         enabled = pullEnabled,
         atTop = { !gridState.canScrollBackward },
         onRefresh = onRefresh,
-        label = "album-pull"
+        label = "album-pull",
+        requestToken = pullRequestToken
     )
     Box(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
@@ -449,7 +464,8 @@ private fun FolderGrid(
     scrollToUri: String? = null,
     scrollToToken: Long = 0L,
     scrollToTopToken: Long = 0L,
-    scrollRequest: com.example.album.ui.PageScrollRequest? = null
+    scrollRequest: com.example.album.ui.PageScrollRequest? = null,
+    pullRequestToken: Long = 0L
 ) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
@@ -513,10 +529,11 @@ private fun FolderGrid(
         enabled = pullEnabled,
         atTop = { !gridState.canScrollBackward },
         onRefresh = onRefresh,
-        label = "folder-pull"
+        label = "folder-pull",
+        requestToken = pullRequestToken
     )
     if (layout == MediaLayout.Adaptive) {
-        AdaptiveFolderGrid(album, columns, refreshing, onOpenMedia, onLongPressMedia, onSelectionGestureStartMedia, onBatchSelectMedia, onSelectionGestureEnd, onRefresh, sharedElementEnabled, onOpenPixivArchive, favoriteUris, showFavoriteBadge, selectionPreview, selectedUris, initialFirstVisibleItem, initialFirstVisibleOffset, onScrollPositionChanged, onFirstVisibleMediaChanged, scrollToUri, scrollToToken, scrollToTopToken, scrollRequest)
+        AdaptiveFolderGrid(album, columns, refreshing, onOpenMedia, onLongPressMedia, onSelectionGestureStartMedia, onBatchSelectMedia, onSelectionGestureEnd, onRefresh, sharedElementEnabled, onOpenPixivArchive, favoriteUris, showFavoriteBadge, selectionPreview, selectedUris, initialFirstVisibleItem, initialFirstVisibleOffset, onScrollPositionChanged, onFirstVisibleMediaChanged, scrollToUri, scrollToToken, scrollToTopToken, scrollRequest, pullRequestToken)
         return
     }
     Box(Modifier.fillMaxSize()) {
@@ -598,7 +615,8 @@ private fun AdaptiveFolderGrid(
     scrollToUri: String? = null,
     scrollToToken: Long = 0L,
     scrollToTopToken: Long = 0L,
-    scrollRequest: com.example.album.ui.PageScrollRequest? = null
+    scrollRequest: com.example.album.ui.PageScrollRequest? = null,
+    pullRequestToken: Long = 0L
 ) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
@@ -650,7 +668,8 @@ private fun AdaptiveFolderGrid(
         enabled = pullEnabled,
         atTop = { !state.canScrollBackward },
         onRefresh = onRefresh,
-        label = "adaptive-folder-pull"
+        label = "adaptive-folder-pull",
+        requestToken = pullRequestToken
     )
     Box(Modifier.fillMaxSize()) {
         LazyVerticalStaggeredGrid(

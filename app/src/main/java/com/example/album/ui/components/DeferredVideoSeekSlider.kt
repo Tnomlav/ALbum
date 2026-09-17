@@ -112,10 +112,10 @@ internal fun DeferredVideoSeekSlider(
         activeColor = activeColor,
         inactiveColor = inactiveColor,
         thumbColor = Color.White,
-        // The archive slider separates the thumb from the track with a ring.
-        // On the player the track is white on black, so the ring has to be
-        // dark for that separation to be visible.
-        thumbBorderColor = Color.Black,
+        // The ring around the thumb uses the unplayed track colour: it still
+        // separates the white thumb from the played track, without painting the
+        // black window background next to the thumb.
+        thumbBorderColor = inactiveColor,
         // The player renders white on black, so the separation band between
         // the thumb and the track needs to be wide enough to stay visible
         // (the archive slider relies on its colour contrast instead).

@@ -122,7 +122,13 @@ fun rememberPullToRefresh(
     enabled: Boolean,
     atTop: () -> Boolean,
     onRefresh: () -> Unit,
-    label: String
+    label: String,
+    /**
+     * Bumped by the caller to ask for a refresh that looks like a pull: the
+     * indicator is dragged down to the trigger distance and only then does the
+     * reload start. Tapping the current tab in the bottom bar uses this.
+     */
+    requestToken: Long = 0L
 ): PullToRefresh {
     var distance by androidx.compose.runtime.remember { mutableFloatStateOf(0f) }
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -132,6 +138,15 @@ fun rememberPullToRefresh(
     val pullRefreshing = refreshing && distance > 0f
     androidx.compose.runtime.LaunchedEffect(refreshing) {
         if (!refreshing) distance = 0f
+    }
+    androidx.compose.runtime.LaunchedEffect(requestToken) {
+        if (requestToken <= 0L || !enabled || !atTop()) return@LaunchedEffect
+        val animation = androidx.compose.animation.core.Animatable(distance)
+        animation.animateTo(
+            trigger,
+            tween(220, easing = CubicBezierEasing(.22f, .8f, .28f, 1f))
+        ) { distance = value }
+        onRefresh()
     }
     val offset by androidx.compose.animation.core.animateFloatAsState(
         targetValue = if (pullRefreshing) trigger else distance,

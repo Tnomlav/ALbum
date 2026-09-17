@@ -496,6 +496,11 @@ fun MediaViewer(
                 // turns into a page change: the animation already happened
                 // under the finger.
                 var pagerCommit by remember { mutableStateOf(false) }
+                // Cleared one frame after a drag handed the page over, so the
+                // regular slide transition is available again.
+                LaunchedEffect(currentIndex) {
+                    if (pagerCommit) pagerCommit = false
+                }
                 val transformState = rememberTransformableState { zoomChange, panChange, _ ->
                     val nextScale = (imageScale * zoomChange).coerceIn(1f, 5f)
                     val maxX = imageViewport.width * (nextScale - 1f) / 2f
@@ -507,24 +512,6 @@ fun MediaViewer(
                         overshootingOffset(imageOffset.x + panChange.x, maxX),
                         (imageOffset.y + panChange.y).coerceIn(-maxY, maxY)
                     )
-                }
-                fun leaveZoomedPicture() {
-                    val maxX = imageViewport.width * (imageScale - 1f) / 2f
-                    val threshold = imageViewport.width * .16f
-                    val overRight = imageOffset.x - maxX
-                    val overLeft = -imageOffset.x - maxX
-                    when {
-                        overRight > threshold -> {
-                            imageScale = 1f
-                            imageOffset = Offset.Zero
-                            moveViewer(-1)
-                        }
-                        overLeft > threshold -> {
-                            imageScale = 1f
-                            imageOffset = Offset.Zero
-                            moveViewer(1)
-                        }
-                    }
                 }
                 Box(
                     Modifier.fillMaxSize().pointerInput(current.uri, showInfo, showMenu) {
@@ -563,12 +550,35 @@ fun MediaViewer(
                             if (imageScale <= 1.01f) return@pointerInput
                             awaitEachGesture {
                                 awaitFirstDown(requireUnconsumed = false)
+                                val threshold = size.width * .12f
+                                var overpan = 0f
                                 var pressed = true
                                 while (pressed) {
                                     val event = awaitPointerEvent()
+                                    event.changes.firstOrNull()?.let { change ->
+                                        val dx = change.position.x - change.previousPosition.x
+                                        val maxX = size.width * (imageScale - 1f) / 2f
+                                        val atLeftEdge = imageOffset.x >= maxX - 1f
+                                        val atRightEdge = imageOffset.x <= -maxX + 1f
+                                        // Only movement that keeps pushing past
+                                        // an edge counts towards the switch.
+                                        overpan = when {
+                                            atLeftEdge && dx > 0f -> overpan + dx
+                                            atRightEdge && dx < 0f -> overpan + dx
+                                            else -> 0f
+                                        }
+                                    }
                                     pressed = event.changes.any { it.pressed }
                                 }
-                                leaveZoomedPicture()
+                                if (overpan >= threshold) {
+                                    imageScale = 1f
+                                    imageOffset = Offset.Zero
+                                    moveViewer(-1)
+                                } else if (overpan <= -threshold) {
+                                    imageScale = 1f
+                                    imageOffset = Offset.Zero
+                                    moveViewer(1)
+                                }
                             }
                         }
                     ) {
@@ -634,7 +644,9 @@ fun MediaViewer(
                                     },
                                     onDragEnd = {
                                         val direction = if (pagerOffset < 0f) 1 else -1
-                                        if (abs(pagerOffset) >= width * .5f && hasNeighbour(direction)) {
+                                        // A quarter of the page is enough to
+                                        // commit, the way a swipe should feel.
+                                        if (abs(pagerOffset) >= width * .25f && hasNeighbour(direction)) {
                                             slideTo(if (direction > 0) -width else width, 170) {
                                                 // The neighbour is centred now:
                                                 // hand the page over without a
@@ -642,7 +654,6 @@ fun MediaViewer(
                                                 pagerCommit = true
                                                 moveViewer(direction)
                                                 pagerOffset = 0f
-                                                pagerCommit = false
                                             }
                                         } else {
                                             settle()

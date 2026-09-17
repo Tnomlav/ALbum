@@ -682,6 +682,18 @@ internal fun Media3VideoPlayer(
         )
     }
 
+    /** Reopens the app task that was sent to the back for the mini window. */
+    fun bringAppToFront() {
+        val intent = Intent(context, com.example.album.MainActivity::class.java).apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            )
+        }
+        runCatching { context.startActivity(intent) }
+    }
+
     fun showFloatingWindow() {
         if (floatingWindow?.isShowing == true) return
         if (!OverlayMiniWindow.canShow(context)) {
@@ -708,10 +720,20 @@ internal fun Media3VideoPlayer(
                 // rebuilding the in-app surface is what brings the picture back
                 // instead of audio only.
                 videoSurfaceToken++
+                // The task was moved to the back when the window appeared, so
+                // returning to full screen has to bring it forward again.
+                bringAppToFront()
             },
             onClose = {
                 floatingWindow = null
                 pictureInPictureRequested = false
+                // Closing the window is the user asking for playback to stop;
+                // when "pause in the background" is on, the video must not keep
+                // playing behind the launcher.
+                if (preferences.getBoolean("video_pause_on_background", true)) {
+                    pausedForBackground = false
+                    player.pause()
+                }
                 exitPlayer()
             },
             onTogglePlay = {
@@ -745,7 +767,16 @@ internal fun Media3VideoPlayer(
         }
     }
     DisposableEffect(Unit) {
-        onDispose { floatingWindow?.dismiss() }
+        onDispose {
+            val activity = hostActivity
+            val activityAlive = activity != null && !activity.isFinishing && !activity.isDestroyed
+            // Leaving the player normally closes the window. If the system
+            // destroys the backgrounded activity instead (which is what made
+            // the window vanish in landscape), the window stays visible: it is
+            // the only thing on screen, and its full-screen button brings the
+            // app back.
+            if (activityAlive) floatingWindow?.dismiss()
+        }
     }
     DisposableEffect(player) {
         val lifecycle = (hostActivity as? ComponentActivity)?.lifecycle
@@ -829,11 +860,16 @@ internal fun Media3VideoPlayer(
                     requestedIndex = changedIndex
                     currentIndex = changedIndex
                     onCurrentChanged(changed)
-                    // Pick up where this video was left off, the same way a
-                    // freshly opened player does.
-                    val resumeAt = startPositionFor(changed)
-                    if (resumeAt > 0L && player.currentPosition < resumeAt) {
-                        seekToVideoFrame(player, resumeAt)
+                // Pick up where this video was left off, the same way a
+                // freshly opened player does.
+                    // The very first item already starts at its saved position
+                    // (see setMediaItems); seeking again here made the picture
+                    // stutter right after the player opened.
+                    if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+                        val resumeAt = startPositionFor(changed)
+                        if (resumeAt > 0L && player.currentPosition < resumeAt) {
+                            seekToVideoFrame(player, resumeAt)
+                        }
                     }
                 }
             }

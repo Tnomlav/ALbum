@@ -147,7 +147,16 @@ fun launchWallpaperAppChooser(context: Context, item: MediaItem, english: Boolea
     }
 }
 
-fun setStaticWallpaper(context: Context, items: List<MediaItem>, english: Boolean) {
+fun setStaticWallpaper(
+    context: Context,
+    items: List<MediaItem>,
+    english: Boolean,
+    /**
+     * False when the queue is only being restored in the background: the
+     * system wallpaper picker must not appear on its own.
+     */
+    openSettings: Boolean = true
+) {
     val imageItems = items.filterNot { it.isVideo }.distinctBy { it.uri.toString() }
     if (imageItems.isEmpty()) return
     WallpaperImportCoordinator.start(
@@ -169,7 +178,7 @@ fun setStaticWallpaper(context: Context, items: List<MediaItem>, english: Boolea
                 imageItems.map { it.uri.toString() }
             )
             applySystemWallpaperFromQueue(context, it)
-            openStaticWallpaperSettings(context, english)
+            if (openSettings) openStaticWallpaperSettings(context, english)
         }
     )
 }
@@ -214,7 +223,13 @@ fun setStaticWallpaperBitmap(context: Context, bitmap: Bitmap, english: Boolean)
     if (!accepted && !bitmap.isRecycled) bitmap.recycle()
 }
 
-fun setDynamicWallpaper(context: Context, items: List<MediaItem>, english: Boolean) {
+fun setDynamicWallpaper(
+    context: Context,
+    items: List<MediaItem>,
+    english: Boolean,
+    /** See [setStaticWallpaper]: a background restore never opens the picker. */
+    openSettings: Boolean = true
+) {
     val videoItems = items.filter { it.isVideo }.distinctBy { it.uri.toString() }
     if (videoItems.isEmpty()) return
     WallpaperImportCoordinator.start(
@@ -236,7 +251,7 @@ fun setDynamicWallpaper(context: Context, items: List<MediaItem>, english: Boole
                 videoItems.map { it.uri.toString() }
             )
             applySystemWallpaperFromVideoQueue(context, it)
-            openDynamicWallpaperSettings(context, english)
+            if (openSettings) openDynamicWallpaperSettings(context, english)
         }
     )
 }

@@ -182,6 +182,14 @@ fun VaultTopBar(
                             Text(title, style = VaultText.TopBarTitle, maxLines = 1)
                         }
                     }
+                } else if (titleSwitch != null && titleSwitch.isNotEmpty() && !titleSwitchAtEnd) {
+                    // A suspended search keeps its back arrow, and the P page
+                    // still needs its artist/tag switch there: without this the
+                    // switch disappeared as soon as a tag query was typed and
+                    // the mode could not be changed back.
+                    Box(Modifier.padding(start = 4.dp)) {
+                        TitleSwitchMark(titleSwitch, selectedSearchMode, onTitleSwitchChange, english)
+                    }
                 }
             } else if (titleSwitch != null && titleSwitch.isNotEmpty() && !titleSwitchAtEnd) {
                 TitleSwitchMark(titleSwitch, selectedSearchMode, onTitleSwitchChange, english)

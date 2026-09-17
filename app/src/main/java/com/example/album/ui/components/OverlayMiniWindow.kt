@@ -16,6 +16,7 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -46,6 +47,9 @@ internal class OverlayMiniWindow(
 
         /** How far from a border the finger counts as "grab the border". */
         private const val BORDER_DP = 30f
+
+        /** Controls hide themselves after this long, like the in-app player. */
+        private const val CONTROLS_TIMEOUT_MS = 3_000L
     }
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -53,6 +57,10 @@ internal class OverlayMiniWindow(
     private var layoutParams: WindowManager.LayoutParams? = null
     private var playPauseButton: ImageButton? = null
     private var contentView: PlayerView? = null
+    private var buttonViews: List<View> = emptyList()
+    private val hideHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val hideControls = Runnable { setControlsVisible(false) }
+    private var controlsVisible = true
 
     val isShowing: Boolean get() = root != null
 
@@ -103,26 +111,25 @@ internal class OverlayMiniWindow(
         container.addView(controls)
         // Back to full screen sits in the top-left corner, close in the
         // top-right; the transport controls stay in the middle.
-        container.addView(
-            overlayButton(
-                android.R.drawable.ic_menu_crop,
-                density,
-                gravity = Gravity.TOP or Gravity.START
-            ) {
-                dismiss()
-                onRestore()
-            }
-        )
-        container.addView(
-            overlayButton(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                density,
-                gravity = Gravity.TOP or Gravity.END
-            ) {
-                dismiss()
-                onClose()
-            }
-        )
+        val restore = overlayButton(
+            android.R.drawable.ic_menu_crop,
+            density,
+            gravity = Gravity.TOP or Gravity.START
+        ) {
+            dismiss()
+            onRestore()
+        }
+        val close = overlayButton(
+            android.R.drawable.ic_menu_close_clear_cancel,
+            density,
+            gravity = Gravity.TOP or Gravity.END
+        ) {
+            dismiss()
+            onClose()
+        }
+        container.addView(restore)
+        container.addView(close)
+        buttonViews = listOf(restore, close, controls)
 
         container.setOnTouchListener(object : View.OnTouchListener {
             private var startX = 0f
@@ -132,12 +139,14 @@ internal class OverlayMiniWindow(
             private var startWidth = 0
             private var startHeight = 0
             private var edges = 0
+            private var moved = false
             override fun onTouch(view: View, event: MotionEvent): Boolean {
                 val params = layoutParams ?: return false
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         startX = event.rawX
                         startY = event.rawY
+                        moved = false
                         startWindowX = params.x
                         startWindowY = params.y
                         startWidth = params.width
@@ -149,6 +158,7 @@ internal class OverlayMiniWindow(
                     MotionEvent.ACTION_MOVE -> {
                         val dx = (event.rawX - startX)
                         val dy = (event.rawY - startY)
+                        if (abs(dx) > 8f * density || abs(dy) > 8f * density) moved = true
                         if (edges != 0) {
                             applyResize(
                                 params = params,
@@ -173,6 +183,9 @@ internal class OverlayMiniWindow(
                     }
                     MotionEvent.ACTION_UP -> {
                         edges = 0
+                        // A tap on the empty area toggles the controls, the
+                        // same way it does inside the app's player.
+                        if (!moved) setControlsVisible(!controlsVisible) else touchControls()
                         // Overlay windows are not reachable by the usual
                         // accessibility path, so report the gesture as a click
                         // to keep the touch handling observable.
@@ -204,17 +217,36 @@ internal class OverlayMiniWindow(
         layoutParams = params
         runCatching { windowManager.addView(container, params) }
         root = container
+        setControlsVisible(true)
         onVisibilityChanged(true)
     }
 
     fun dismiss() {
         val view = root ?: return
+        hideHandler.removeCallbacks(hideControls)
         runCatching { windowManager.removeView(view) }
         contentView?.player = null
         root = null
         contentView = null
         playPauseButton = null
+        buttonViews = emptyList()
         onVisibilityChanged(false)
+    }
+
+    /**
+     * Shows or hides the controls, exactly like the in-app player: a tap on the
+     * video toggles them and they fade away after a few seconds of no use.
+     */
+    private fun setControlsVisible(visible: Boolean) {
+        controlsVisible = visible
+        buttonViews.forEach { it.visibility = if (visible) View.VISIBLE else View.GONE }
+        hideHandler.removeCallbacks(hideControls)
+        if (visible) hideHandler.postDelayed(hideControls, CONTROLS_TIMEOUT_MS)
+    }
+
+    /** Keeps the controls on screen while the user is interacting with them. */
+    private fun touchControls() {
+        if (controlsVisible) setControlsVisible(true)
     }
 
     fun syncPlayState() {
@@ -236,7 +268,10 @@ internal class OverlayMiniWindow(
         setImageResource(iconRes)
         setBackgroundColor(Color.TRANSPARENT)
         setColorFilter(Color.WHITE)
-        val size = (40 * density).roundToInt()
+        imageAlpha = 255
+        // The transport buttons are the ones people stab at, so they are a
+        // little larger than the two corner buttons.
+        val size = ((if (gravity == 0) 52 else 42) * density).roundToInt()
         layoutParams = if (gravity == 0) {
             LinearLayout.LayoutParams(size, size).apply {
                 marginStart = (6 * density).roundToInt()
@@ -244,13 +279,16 @@ internal class OverlayMiniWindow(
             }
         } else {
             FrameLayout.LayoutParams(size, size, gravity).apply {
-                val margin = (6 * density).roundToInt()
+                val margin = (2 * density).roundToInt()
                 if (gravity and Gravity.START != 0) marginStart = margin
                 if (gravity and Gravity.END != 0) marginEnd = margin
                 topMargin = margin
             }
         }
-        setOnClickListener { onClick() }
+        setOnClickListener {
+            touchControls()
+            onClick()
+        }
     }
 
     /** Which borders the finger grabbed, as a bitmask (0 = the middle). */

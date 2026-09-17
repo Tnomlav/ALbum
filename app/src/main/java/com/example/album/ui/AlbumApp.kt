@@ -624,9 +624,11 @@ fun AlbumApp(
         wallpaperRestoreAttempted = true
         preferences.edit().putInt("wallpaper_restore_version", com.example.album.BuildConfig.VERSION_CODE).apply()
         if (backup.kind == WallpaperAppliedStore.KIND_DYNAMIC) {
-            setDynamicWallpaper(context, restored.filter { it.isVideo }, english)
+            // Restore silently: opening the system wallpaper picker on launch
+            // looked like the app starting something by itself.
+            setDynamicWallpaper(context, restored.filter { it.isVideo }, english, openSettings = false)
         } else {
-            setStaticWallpaper(context, restored.filterNot { it.isVideo }, english)
+            setStaticWallpaper(context, restored.filterNot { it.isVideo }, english, openSettings = false)
         }
     }
     LaunchedEffect(context) {
@@ -800,6 +802,9 @@ fun AlbumApp(
     var navReorderEnabled by remember { mutableStateOf(albumSettings.getBoolean("nav_reorder", false)) }
     var toolsReorderEnabled by remember { mutableStateOf(albumSettings.getBoolean("tools_reorder", false)) }
     var scrollToTopToken by remember { mutableLongStateOf(0L) }
+    // Tapping the icon of the page you are already on asks for a refresh; the
+    // grids play the pull gesture first instead of reloading invisibly.
+    var pullRefreshToken by remember { mutableLongStateOf(0L) }
     var searchReturnAlbumFirstVisibleItem by remember { mutableIntStateOf(0) }
     var searchReturnAlbumFirstVisibleOffset by remember { mutableIntStateOf(0) }
     var searchReturnMediaFirstVisibleItem by remember { mutableIntStateOf(0) }
@@ -2883,11 +2888,13 @@ fun AlbumApp(
                                 scrollToTopToken = System.nanoTime()
                             } else {
                                 // Already at the top: a second tap refreshes.
-                                // The grids show their refresh indicator while
-                                // the reload runs, so no extra toast is needed.
+                                // The library pages replay the pull-to-refresh
+                                // gesture so the reload is visible and matches
+                                // what a finger pull does.
                                 when (tab) {
                                     MainTab.Pixiv -> requestPixivReload()
-                                    MainTab.Albums, MainTab.Videos, MainTab.Timeline -> refreshLibrary()
+                                    MainTab.Albums, MainTab.Videos, MainTab.Timeline ->
+                                        pullRefreshToken = System.nanoTime()
                                     else -> Unit
                                 }
                             }
@@ -3094,6 +3101,7 @@ fun AlbumApp(
                     initialMediaFirstVisibleOffset = 0,
                     onFirstVisibleMediaChanged = { selectionAnchorUri = it },
                     scrollToTopToken = scrollToTopToken,
+                    pullRequestToken = pullRefreshToken,
                     scrollToUri = viewerScrollUri,
                     scrollToToken = viewerScrollToken,
                     scrollRequest = pageScrollRequest,
@@ -3174,6 +3182,7 @@ fun AlbumApp(
                     initialMediaFirstVisibleOffset = selectionMediaFirstVisibleOffset,
                     onFirstVisibleMediaChanged = { selectionAnchorUri = it },
                     scrollToTopToken = scrollToTopToken,
+                    pullRequestToken = pullRefreshToken,
                     scrollToUri = viewerScrollUri,
                     scrollToToken = viewerScrollToken,
                     scrollRequest = pageScrollRequest,
@@ -3241,6 +3250,7 @@ fun AlbumApp(
                     onFirstVisibleMediaChanged = { selectionAnchorUri = it },
                     onVisibleScopeChanged = { pageScope = it },
                     scrollToTopToken = scrollToTopToken,
+                    pullRequestToken = pullRefreshToken,
                     scrollToUri = viewerScrollUri,
                     scrollToToken = viewerScrollToken,
                     scrollRequest = pageScrollRequest,
@@ -3342,6 +3352,7 @@ fun AlbumApp(
                     albumQueryMatchesItems = pixivSearchMode != PixivSearchMode.Artist,
                     flatMode = pixivSearchMode == PixivSearchMode.Tag && appliedQuery.isNotBlank(),
                     scrollToTopToken = scrollToTopToken,
+                    pullRequestToken = pullRefreshToken,
                     scrollToUri = viewerScrollUri,
                     scrollToToken = viewerScrollToken,
                     scrollRequest = pageScrollRequest,
@@ -3564,7 +3575,17 @@ fun AlbumApp(
                         // actually looking at, so closing returns there.
                         viewerScrollUri = changed.uri.toString()
                         viewerScrollToken = System.nanoTime()
-                        openMedia(changed)
+                        if (selectionSlideshow.isNotEmpty()) {
+                            // Stay inside the slideshow playlist. openMedia()
+                            // would rebuild the scope from the page underneath,
+                            // which ended the slideshow as soon as the user
+                            // swiped to another picture.
+                            viewerMedia = changed
+                            selectedMedia = changed
+                            if (changed.isVideo) activeSharedMediaKey = null
+                        } else {
+                            openMedia(changed)
+                        }
                     },
                             onClose = {
                                 selectedMedia = null
