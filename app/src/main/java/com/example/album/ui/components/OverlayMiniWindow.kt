@@ -90,6 +90,12 @@ internal class OverlayMiniWindow(
     private var gestureStartHeight = 0
     private var gestureEdges = 0
     private var gestureMoved = false
+    /**
+     * Set when a drag started on a button: the button must not also fire its
+     * click on release, otherwise dragging the window by its top-right corner
+     * closed the window instead of resizing it.
+     */
+    private var suppressNextClick = false
     private var buttonDragListener: View.OnTouchListener? = null
     private var compact = false
     private var savedWidth = 0
@@ -240,26 +246,22 @@ internal class OverlayMiniWindow(
             gestureStartWindowY = params.y
             gestureStartWidth = params.width
             gestureStartHeight = params.height
-            // A shrunk window is only moved: its corners are too close together
-            // to resize, and a tap on it restores the previous size.
-            //
             // Hit-testing uses coordinates inside the window: the layout params
             // are relative to the display frame, which sits below the status bar,
             // so comparing them with raw screen coordinates shifted the corner
             // zones vertically.
             val origin = IntArray(2)
             root?.getLocationOnScreen(origin)
-            gestureEdges = if (compact) {
-                0
-            } else {
-                touchedEdges(
-                    insideX = event.rawX - origin[0],
-                    insideY = event.rawY - origin[1],
-                    width = params.width,
-                    height = params.height,
-                    density = density
-                )
-            }
+            // A shrunk window resizes from its corners like any other: dragging
+            // its bottom-left corner has to pin the top-right there too. A tap
+            // (no movement) still restores the size the window opened with.
+            gestureEdges = touchedEdges(
+                insideX = event.rawX - origin[0],
+                insideY = event.rawY - origin[1],
+                width = params.width,
+                height = params.height,
+                density = density
+            )
             return true
         }
 
@@ -333,12 +335,15 @@ internal class OverlayMiniWindow(
         buttonDragListener = View.OnTouchListener { view, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    suppressNextClick = false
                     beginGesture(event)
                     false
                 }
                 MotionEvent.ACTION_MOVE -> if (gestureMoved) continueGesture(view, event) else false
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     gestureEdges = 0
+                    if (gestureMoved) suppressNextClick = true
+                    gestureMoved = false
                     false
                 }
                 else -> false
@@ -453,6 +458,12 @@ internal class OverlayMiniWindow(
             }
         }
         setOnClickListener {
+            // A drag that started on this button is a window gesture, not a
+            // click, even though the view's own click detection still fires.
+            if (suppressNextClick) {
+                suppressNextClick = false
+                return@setOnClickListener
+            }
             touchControls()
             onClick()
         }

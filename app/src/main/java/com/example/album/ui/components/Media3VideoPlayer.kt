@@ -810,7 +810,18 @@ internal fun Media3VideoPlayer(
                     }
                 }
                 Lifecycle.Event.ON_RESUME -> {
-                    floatingWindow?.setCompact(false)
+                    // Coming back to the app -- by tapping its icon, its task in
+                    // the switcher or any other route -- means the user wants the
+                    // player, so the floating window goes away instead of
+                    // hovering over the app the window came from. The video
+                    // surface has to be rebuilt, because the window owned it.
+                    floatingWindow?.let { window ->
+                        floatingWindow = null
+                        window.dismiss()
+                        controlsVisible = true
+                        controlsInteraction++
+                        videoSurfaceToken++
+                    }
                     pictureInPictureRequested = false
                     if (pausedForBackground) {
                         pausedForBackground = false

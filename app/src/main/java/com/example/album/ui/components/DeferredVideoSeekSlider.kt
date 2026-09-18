@@ -23,9 +23,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -135,42 +138,60 @@ internal fun DeferredVideoSeekSlider(
                 val fraction = ((sliderState.value - sliderState.valueRange.start) /
                     (sliderState.valueRange.endInclusive - sliderState.valueRange.start))
                     .coerceIn(0f, 1f)
-                // Material3 keeps half a thumb of padding at both ends, so the
-                // thumb travels between those insets. Using the full width put
-                // the split off-centre from the thumb.
-                val inset = thumbInsetPx
-                val thumbCenter = inset + (size.width - inset * 2f).coerceAtLeast(0f) * fraction
-                val separatorOuter = (thumbCenter - thumbRadiusPx).coerceAtLeast(0f)
-                // The whole track is painted in the unplayed colour first: the
-                // separator ring around the thumb is that same colour and
-                // transparency, so it merges with the unplayed track instead of
-                // showing a black notch next to the thumb.
-                drawLine(
+                // Material3 lays the track out one half-thumb short at each end
+                // and puts the thumb's left edge at `width * fraction`. Measured
+                // in this canvas (whose x = 0 sits half a thumb inside the
+                // control) that means:
+                //   * the bar itself has to be drawn half a thumb wider on both
+                //     sides, so its ends reach the ends of the control and the
+                //     thumb's edge touches them instead of leaving a gap;
+                //   * the thumb's centre is exactly `width * fraction`.
+                val radius = thumbRadiusPx
+                val barLeft = -thumbInsetPx
+                val barRight = size.width + thumbInsetPx
+                val thumbCenter = size.width * fraction
+                // The unplayed track spans the whole control: the ring around the
+                // thumb is that same colour and transparency, so it merges with
+                // the unplayed bar instead of showing a black notch.
+                drawRoundRect(
                     color = inactiveColor,
-                    start = Offset(0f, centerY),
-                    end = Offset(size.width, centerY),
-                    strokeWidth = trackStrokeWidthPx,
-                    cap = StrokeCap.Round
+                    topLeft = Offset(barLeft, centerY - radius),
+                    size = Size(barRight - barLeft, radius * 2f),
+                    cornerRadius = CornerRadius(radius, radius)
                 )
-                // The played part keeps the bar's own rounded shape and stops at
-                // the ring's outer edge: only the thumb carries the separator,
-                // the bar itself is never notched or cut square. Ring plus dot
-                // are exactly the thumb's old 12dp.
-                if (separatorOuter > 0f) {
-                    drawRoundRect(
-                        color = activeColor,
-                        topLeft = Offset(0f, centerY - trackStrokeWidthPx / 2f),
-                        size = Size(separatorOuter, trackStrokeWidthPx),
-                        cornerRadius = CornerRadius(thumbRadiusPx, thumbRadiusPx)
+                // The played part ends in a bite the size of the thumb: its end
+                // is a half-circle that opens to the left, so the thumb sits in
+                // it exactly. The bite shows the unplayed track underneath.
+                val played = Path().apply {
+                    addRoundRect(
+                        RoundRect(
+                            left = barLeft,
+                            top = centerY - radius,
+                            right = thumbCenter,
+                            bottom = centerY + radius,
+                            cornerRadius = CornerRadius(radius, radius)
+                        )
                     )
                 }
+                val thumbCircle = Path().apply {
+                    addOval(
+                        Rect(
+                            left = thumbCenter - radius,
+                            top = centerY - radius,
+                            right = thumbCenter + radius,
+                            bottom = centerY + radius
+                        )
+                    )
+                }
+                played.op(played, thumbCircle, PathOperation.Difference)
+                drawPath(played, activeColor)
                 // The thumb is drawn here, in the same coordinate space as the
                 // track, so its centre always sits on the track's centre line.
                 // A separate thumb slot is measured and placed by Material3,
                 // which left it a few pixels off the track's middle.
                 drawCircle(
                     color = thumbColor,
-                    radius = (thumbRadiusPx - thumbRingWidthPx).coerceAtLeast(0f),
+                    radius = (radius - thumbRingWidthPx).coerceAtLeast(0f),
                     center = Offset(thumbCenter, centerY)
                 )
             }
