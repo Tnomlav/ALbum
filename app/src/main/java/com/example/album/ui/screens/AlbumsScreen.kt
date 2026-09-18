@@ -105,6 +105,11 @@ fun AlbumsScreen(
     loading: Boolean,
     scanning: Boolean = false,
     /**
+     * True while the app is doing the library read it starts by itself: that
+     * read must not light up the pull-to-refresh indicator.
+     */
+    suppressRefreshIndicator: Boolean = false,
+    /**
      * False until the first library scan finishes. An empty library must show
      * the loading state then, instead of briefly claiming there is no media.
      */
@@ -162,7 +167,7 @@ fun AlbumsScreen(
     // The pull-to-refresh indicator is for refreshes the user asked for. The
     // first scan of a fresh start used to light it up, which looked like the
     // album page was loading something behind the user's back.
-    val refreshing = (loading || scanning) && initialLoadComplete
+    val refreshing = (loading || scanning) && initialLoadComplete && !suppressRefreshIndicator
     val english = LocalAppEnglish.current
     fun itemsInDisplayOrder(items: List<MediaItem>): List<MediaItem> {
         return sortMediaItems(items, sort, sortDirection)

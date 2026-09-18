@@ -33,20 +33,24 @@ internal val PixivPMark = ImageVector.Builder("pixiv-p", 24.dp, 24.dp, 120f, 120
     )
 }.build()
 
-/** A small white tile with the Pixiv mark, drawn on top of a folder cover. */
+/**
+ * The Pixiv tile: a theme-coloured square with the mark punched into it in
+ * translucent white. Used for the pinned folder's corner badge, the archive
+ * entry on the P page and the archive tool in the toolbox.
+ */
 @Composable
 internal fun PixivMarkBadge(size: Dp, modifier: Modifier = Modifier) {
     Box(
         modifier
             .size(size)
-            .background(Color.White.copy(alpha = .88f), RoundedCornerShape(5.dp)),
+            .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(size * 0.24f)),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             PixivPMark,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.fillMaxSize(.78f).graphicsLayer { scaleX = 1.1f; scaleY = 1.1f }
+            tint = Color.White.copy(alpha = .62f),
+            modifier = Modifier.fillMaxSize(.74f).graphicsLayer { scaleX = 1.15f; scaleY = 1.15f }
         )
     }
 }

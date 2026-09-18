@@ -77,7 +77,10 @@ private fun TitleSwitchMark(
             modifier = Modifier
                 .clip(RoundedCornerShape(10.dp))
                 .background(MaterialTheme.colorScheme.primary.copy(alpha = .14f))
-                .padding(horizontal = 8.dp, vertical = 5.dp),
+                // 20% taller than the original 5dp padding: the pill is the
+                // page's main switch and used to look flatter than the rest of
+                // the top bar.
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {

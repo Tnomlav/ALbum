@@ -24,7 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -158,16 +157,21 @@ internal fun DeferredVideoSeekSlider(
                 // track, so its centre always sits on the track's centre line.
                 // A separate thumb slot is measured and placed by Material3,
                 // which left it a few pixels off the track's middle.
+                //
+                // The whole footprint stays the size the thumb always had
+                // (12dp): the outer band is the separator ring in the unplayed
+                // track's own colour, with the thumb dot inside it. Ring plus
+                // dot therefore add up to the old thumb size instead of growing
+                // the thumb.
                 drawCircle(
-                    color = thumbColor,
+                    color = inactiveColor,
                     radius = thumbRadiusPx,
                     center = Offset(thumbCenter, centerY)
                 )
                 drawCircle(
-                    color = thumbBorderColor,
-                    radius = (thumbRadiusPx - thumbRingWidthPx / 2f).coerceAtLeast(0f),
-                    center = Offset(thumbCenter, centerY),
-                    style = Stroke(width = thumbRingWidthPx)
+                    color = thumbColor,
+                    radius = (thumbRadiusPx - thumbRingWidthPx).coerceAtLeast(0f),
+                    center = Offset(thumbCenter, centerY)
                 )
             }
         },

@@ -68,6 +68,8 @@ fun TimelineScreen(
     query: String,
     loading: Boolean,
     scanning: Boolean = false,
+    /** See [AlbumsScreen]: the start-up library read stays invisible. */
+    suppressRefreshIndicator: Boolean = false,
     /** False until the first library scan finishes; see AlbumsScreen. */
     initialLoadComplete: Boolean = true,
     searchingFolders: Boolean = false,
@@ -102,7 +104,7 @@ fun TimelineScreen(
     pullRequestToken: Long = 0L,
     onClearQuery: () -> Unit = {}
 ) {
-    val refreshing = loading || scanning
+    val refreshing = (loading || scanning) && !suppressRefreshIndicator
     val english = LocalAppEnglish.current
     // See AlbumsScreen: until the first scan finishes, an empty timeline means
     // "not loaded yet", not "no media" (and not "no permission").

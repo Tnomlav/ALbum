@@ -332,7 +332,15 @@ fun SettingsScreen(
             choose(
                 "主页",
                 "default_home",
-                buildList { add("相册"); add("视频"); add("时间轴"); if (pixivTabEnabled) add("Pixiv") },
+                // Videos are part of Albums now, so the list only offers pages
+                // that exist as tabs.
+                buildList {
+                    add("相册")
+                    add("时间轴")
+                    if (pixivTabEnabled) add("Pixiv")
+                    add("工具箱")
+                    add("设置")
+                },
                 value("default_home", "相册")
             )
         } }

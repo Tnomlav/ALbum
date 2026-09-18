@@ -167,6 +167,7 @@ import com.example.album.ui.editor.ImageEditorDialog
 import com.example.album.ui.screens.AlbumsScreen
 import com.example.album.ui.screens.SettingsScreen
 import com.example.album.ui.components.PixivPMark
+import com.example.album.ui.components.PixivMarkBadge
 import com.example.album.ui.screens.TimelineScreen
 import com.example.album.ui.screens.CleanupScreen
 import com.example.album.ui.screens.WallpaperManagerScreen
@@ -220,16 +221,9 @@ internal fun PixivArchiveNavigation(onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
-                Modifier.width(30.dp).height(30.dp).background(Color.White, RoundedCornerShape(6.dp)),
+                Modifier.width(30.dp).height(30.dp),
                 contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    PixivPMark,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = 1.35f; scaleY = 1.35f }
-                )
-            }
+            ) { PixivMarkBadge(30.dp) }
             Text(
                 if (english) "Pixiv archive" else "Pixiv 文件归档",
                 modifier = Modifier.weight(1f).padding(start = 10.dp),
@@ -315,6 +309,13 @@ private fun ToolsScreen(
                     icon = entry.first,
                     title = entry.second,
                     subtitle = entry.third,
+                    // The archive tool wears the Pixiv mark instead of a plain
+                    // outline icon, the same tile the pinned folder shows.
+                    mark = if (id == "pixiv") {
+                        { markModifier -> PixivMarkBadge(40.dp, markModifier) }
+                    } else {
+                        null
+                    },
                     reorderEnabled = reorderEnabled,
                     onMoveUp = {
                         if (index > 0 && index - 1 < order.size) {
@@ -340,6 +341,7 @@ private fun ReorderableToolEntry(
     icon: ImageVector,
     title: String,
     subtitle: String,
+    mark: (@Composable (Modifier) -> Unit)? = null,
     reorderEnabled: Boolean,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
@@ -379,7 +381,7 @@ private fun ReorderableToolEntry(
                 )
             }
     ) {
-        ToolEntry(icon = icon, title = title, subtitle = subtitle, onClick = onClick)
+        ToolEntry(icon = icon, title = title, subtitle = subtitle, mark = mark, onClick = onClick)
     }
 }
 
@@ -388,6 +390,7 @@ private fun ToolEntry(
     icon: ImageVector,
     title: String,
     subtitle: String,
+    mark: (@Composable (Modifier) -> Unit)? = null,
     onClick: () -> Unit
 ) {
     Surface(
@@ -400,8 +403,12 @@ private fun ToolEntry(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Surface(color = MaterialTheme.colorScheme.primary, shape = androidx.compose.foundation.shape.RoundedCornerShape(7.dp)) {
-                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.padding(9.dp).size(22.dp))
+            if (mark != null) {
+                mark(Modifier)
+            } else {
+                Surface(color = MaterialTheme.colorScheme.primary, shape = androidx.compose.foundation.shape.RoundedCornerShape(7.dp)) {
+                    Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.padding(9.dp).size(22.dp))
+                }
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(title, style = MaterialTheme.typography.bodyLarge)
@@ -447,12 +454,17 @@ fun AlbumApp(
     var showRenameExtension by remember { mutableStateOf(albumSettings.getBoolean("rename_show_extension", false)) }
     val transferPreferences = remember { context.getSharedPreferences("transfer_preferences", android.content.Context.MODE_PRIVATE) }
     val pixivEnabledAtStart = albumSettings.getBoolean("pixiv_tab_enabled", false)
-    val initialTab = when (albumSettings.getString("default_home", "相册")) {
-        "视频" -> MainTab.Albums
+    // The Home setting: the page a cold start lands on and the page the back
+    // gesture ends up on. Videos became part of Albums, so the list is the tabs
+    // the user can actually reach; a disabled Pixiv falls back to Albums.
+    fun homeTabFor(stored: String?): MainTab = when (stored) {
         "时间轴" -> MainTab.Timeline
         "Pixiv" -> if (pixivEnabledAtStart) MainTab.Pixiv else MainTab.Albums
+        "工具箱" -> MainTab.Tools
+        "设置" -> MainTab.Settings
         else -> MainTab.Albums
     }
+    val initialTab = homeTabFor(albumSettings.getString("default_home", "相册"))
     val initialSort = when (albumSettings.getString("default_sort", "时间")) {
         "名称" -> MediaSort.Name
         "大小" -> MediaSort.Size
@@ -827,6 +839,10 @@ fun AlbumApp(
     var pixivRefreshKey by remember { mutableIntStateOf(0) }
     var archiveMediaRefreshPending by remember { mutableStateOf(false) }
     var archiveMediaRefreshing by remember { mutableStateOf(false) }
+    // The library read the app runs on its own at start-up is invisible: the
+    // user did not ask for it, and the pull-to-refresh spinner it lit up is
+    // what made every cold start look like a reload.
+    var startupLibraryReadDone by remember { mutableStateOf(false) }
     // True while a page that can change files has actually changed something.
     // Leaving such a page only re-walks the Pixiv library when this is set, so
     // simply opening and closing the archive page no longer rescans it.
@@ -937,7 +953,14 @@ fun AlbumApp(
         normalizedTabOrder(stored, pixivEnabledAtStart)
     }
     var tabOrder by remember { mutableStateOf(initialTabOrder) }
-    val primaryTab = tabOrder.firstOrNull { it in enabledMainTabs(pixivTabEnabled) } ?: MainTab.Albums
+    // The configured Home page is where the back gesture ends. It used to be
+    // "the first tab in the bottom bar", which ignored the setting entirely
+    // when the bar had been reordered.
+    val homeTab = homeTabFor(albumSettings.getString("default_home", "相册"))
+        .takeIf { it in enabledMainTabs(pixivTabEnabled) }
+        ?: tabOrder.firstOrNull { it in enabledMainTabs(pixivTabEnabled) }
+        ?: MainTab.Albums
+    val primaryTab = homeTab
     var lastRootBackAt by rememberSaveable { mutableLongStateOf(0L) }
     var bottomBarWidth by remember { mutableIntStateOf(0) }
     var draggedNavTab by remember { mutableStateOf<MainTab?>(null) }
@@ -1947,6 +1970,7 @@ fun AlbumApp(
     LaunchedEffect(library.permissionGranted) {
         val granted = hasMediaPermission(context)
         library.refresh(granted)
+        startupLibraryReadDone = true
         val initialPermissionsPrompted = albumSettings.getBoolean("runtime_permissions_prompted", false)
         val missingInitialPermissions = missingPermissions(context, requiredAppPermissions())
         if (!initialPermissionsPrompted && missingInitialPermissions.isNotEmpty()) {
@@ -3223,6 +3247,7 @@ fun AlbumApp(
                     searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                     loading = library.loading,
                     scanning = library.scanning,
+                    suppressRefreshIndicator = !startupLibraryReadDone,
                     initialLoadComplete = library.initialLoadComplete,
                     permissionGranted = if (albumShowsVideos) library.videoPermissionGranted else library.imagePermissionGranted,
                     sort = mediaSort,
@@ -3308,6 +3333,7 @@ fun AlbumApp(
                     searchingFolders = library.searchableFoldersLoading || !library.searchableFoldersReady,
                     loading = library.loading,
                     scanning = library.scanning,
+                    suppressRefreshIndicator = !startupLibraryReadDone,
                     initialLoadComplete = library.initialLoadComplete,
                     permissionGranted = library.videoPermissionGranted,
                     sort = mediaSort,
@@ -3383,6 +3409,7 @@ fun AlbumApp(
                     query = appliedQuery,
                     loading = library.loading,
                     scanning = library.scanning,
+                    suppressRefreshIndicator = !startupLibraryReadDone,
                     initialLoadComplete = library.initialLoadComplete,
                     permissionGranted = if (timelineShowsVideos) library.videoPermissionGranted else library.imagePermissionGranted,
                     isVideo = timelineShowsVideos,
@@ -3450,6 +3477,7 @@ fun AlbumApp(
                     // (what its pull-to-refresh asks for) still shows one.
                     loading = library.loading,
                     scanning = library.scanning,
+                    suppressRefreshIndicator = !startupLibraryReadDone,
                     permissionGranted = true,
                     sort = mediaSort,
                     sortDirection = sortDirection,
