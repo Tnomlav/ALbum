@@ -179,13 +179,24 @@ internal class OverlayMiniWindow(
             }
             clipToOutline = true
         }
-        val video = PlayerView(context).apply {
+        val video = (
+            android.view.LayoutInflater.from(context)
+                .inflate(com.example.album.R.layout.mini_window_player, container, false) as PlayerView
+            ).apply {
             useController = false
             this.player = this@OverlayMiniWindow.player
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
+            // Belt and braces on top of the inflated texture view: the player
+            // view clips itself to the window's rounded corners too.
+            clipToOutline = true
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, 10f * density)
+                }
+            }
         }
         container.addView(video)
         contentView = video
