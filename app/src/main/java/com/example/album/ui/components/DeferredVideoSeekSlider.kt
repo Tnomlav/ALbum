@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -53,7 +54,6 @@ internal fun DeferredVideoSeekSlider(
     val trackStrokeWidthPx = with(LocalDensity.current) { 12.dp.toPx() }
     // Back to the archive page's geometry (only the bar width stays at 12dp):
     // 3dp between the track ends and the thumb centre.
-    val trackGapPx = with(LocalDensity.current) { 3.dp.toPx() }
     val thumbInsetPx = with(LocalDensity.current) { 6.dp.toPx() }
     val thumbRadiusPx = with(LocalDensity.current) { 6.dp.toPx() }
     val thumbRingWidthPx = with(LocalDensity.current) { 3.dp.toPx() }
@@ -139,35 +139,36 @@ internal fun DeferredVideoSeekSlider(
                 // the split off-centre from the thumb.
                 val inset = thumbInsetPx
                 val thumbCenter = inset + (size.width - inset * 2f).coerceAtLeast(0f) * fraction
+                val separatorOuter = (thumbCenter - thumbRadiusPx).coerceAtLeast(0f)
+                // The whole track is painted in the unplayed colour first: the
+                // separator ring around the thumb is that same colour and
+                // transparency, so it merges with the unplayed track instead of
+                // showing a black notch next to the thumb.
                 drawLine(
                     color = inactiveColor,
-                    start = Offset(thumbCenter + trackGapPx, centerY),
+                    start = Offset(0f, centerY),
                     end = Offset(size.width, centerY),
                     strokeWidth = trackStrokeWidthPx,
                     cap = StrokeCap.Round
                 )
-                drawLine(
-                    color = activeColor,
-                    start = Offset(0f, centerY),
-                    end = Offset(thumbCenter - trackGapPx, centerY),
-                    strokeWidth = trackStrokeWidthPx,
-                    cap = StrokeCap.Round
-                )
+                // The played part stops at the ring's outer edge. It is clipped
+                // rather than shortened so the left end keeps its round cap
+                // while the end at the thumb stays square -- that ring of the
+                // unplayed colour is what separates the played bar from the
+                // thumb. Ring plus dot are exactly the thumb's old 12dp.
+                clipRect(right = separatorOuter) {
+                    drawLine(
+                        color = activeColor,
+                        start = Offset(0f, centerY),
+                        end = Offset(size.width, centerY),
+                        strokeWidth = trackStrokeWidthPx,
+                        cap = StrokeCap.Round
+                    )
+                }
                 // The thumb is drawn here, in the same coordinate space as the
                 // track, so its centre always sits on the track's centre line.
                 // A separate thumb slot is measured and placed by Material3,
                 // which left it a few pixels off the track's middle.
-                //
-                // The whole footprint stays the size the thumb always had
-                // (12dp): the outer band is the separator ring in the unplayed
-                // track's own colour, with the thumb dot inside it. Ring plus
-                // dot therefore add up to the old thumb size instead of growing
-                // the thumb.
-                drawCircle(
-                    color = inactiveColor,
-                    radius = thumbRadiusPx,
-                    center = Offset(thumbCenter, centerY)
-                )
                 drawCircle(
                     color = thumbColor,
                     radius = (thumbRadiusPx - thumbRingWidthPx).coerceAtLeast(0f),
