@@ -1501,7 +1501,9 @@ internal fun Media3VideoPlayer(
                                 icon,
                                 appText(label, english),
                                 tint = Color.White,
-                                modifier = Modifier.size(if (label == "播放") if (longSkipEnabled) 34.dp else 42.dp else 25.dp)
+                                // One size for the whole row: the play button used
+                                // to be drawn much larger than its neighbours.
+                                modifier = Modifier.size(26.dp)
                             )
                         }
                     }

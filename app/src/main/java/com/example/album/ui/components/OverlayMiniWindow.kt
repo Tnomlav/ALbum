@@ -484,9 +484,15 @@ internal class OverlayMiniWindow(
         val horizontalEdge = edges and (EDGE_LEFT or EDGE_RIGHT) != 0
         val verticalEdge = edges and (EDGE_TOP or EDGE_BOTTOM) != 0
         val growth = when {
-            // Corners move on both axes: average the projections so the window
-            // scales smoothly instead of snapping to one axis.
-            horizontalEdge && verticalEdge -> (horizontalGrowth + verticalGrowth * 16f / 9f) / 2f
+            // Corners move on both axes. The finger is projected onto the
+            // window's own diagonal -- growing the width by 1 also moves the
+            // dragged corner by 9/16 vertically -- so the corner follows the
+            // finger 1:1 when dragged along that diagonal. The previous
+            // `(horizontal + vertical * 16/9) / 2` weighted the vertical motion
+            // almost twice as heavily as the horizontal one, so a sideways drag
+            // crawled while every wobble shot the window away: that is the
+            // "乱飘" the user saw on three corners.
+            horizontalEdge && verticalEdge -> cornerResizeGrowth(horizontalGrowth, verticalGrowth)
             horizontalEdge -> horizontalGrowth
             else -> verticalGrowth * 16f / 9f
         }
@@ -527,4 +533,22 @@ internal class OverlayMiniWindow(
         params.y = params.y.coerceIn(0, (screenHeight - params.height).coerceAtLeast(0))
         runCatching { windowManager.updateViewLayout(view, params) }
     }
+}
+
+/** Height per unit of width for the floating window (16:9). */
+internal const val MINI_WINDOW_HEIGHT_PER_WIDTH = 9f / 16f
+
+/**
+ * How much the window's width should change for a corner drag.
+ *
+ * Growing the width by one unit moves the dragged corner by
+ * `(1, MINI_WINDOW_HEIGHT_PER_WIDTH)`, so the finger displacement is projected
+ * onto that direction. Dragging exactly along the window's diagonal therefore
+ * moves the corner exactly with the finger; sideways or vertical-only motion
+ * moves it proportionally instead of being amplified into a jump.
+ */
+internal fun cornerResizeGrowth(horizontalGrowth: Float, verticalGrowth: Float): Float {
+    val verticalPerWidth = MINI_WINDOW_HEIGHT_PER_WIDTH
+    val denominator = 1f + verticalPerWidth * verticalPerWidth
+    return (horizontalGrowth + verticalGrowth * verticalPerWidth) / denominator
 }
