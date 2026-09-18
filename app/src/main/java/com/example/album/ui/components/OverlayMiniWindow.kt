@@ -603,25 +603,39 @@ internal class OverlayMiniWindow(
      * Whether the system's task switcher is on screen right now. Android sends
      * a backgrounded app no callback for it, so this asks the task list the
      * platform still exposes (which, without the system-only permission,
-     * contains only our own tasks and the launcher's). Launchers that draw the
-     * switcher themselves report it through the launcher task, which is what is
-     * matched here; the entry has to be *visible*, otherwise the leftover entry
-     * in the task history would look like an open switcher forever.
+     * contains only our own tasks and the launcher's).
+     *
+     * The test is "the launcher is visible but not showing its home screen":
+     * the switcher is exactly that on every phone seen so far, and unlike
+     * matching a class name it does not depend on how the vendor named the
+     * switcher's activity. A task that is only left over in the history is
+     * skipped via isVisible(), so it cannot latch the window shut.
      */
     @Suppress("DEPRECATION")
     private fun isTaskManagerShowing(): Boolean {
         val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
             ?: return false
         val tasks = runCatching { manager.getRecentTasks(6, 0) }.getOrNull() ?: return false
+        val home = homeComponent()
         return tasks.any { info ->
             // TaskInfo.isVisible() only exists from API 32; older releases fall
-            // back to the name match alone.
+            // back to the top-activity comparison alone.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2 && !info.isVisible()) return@any false
             val component = info.topActivity ?: info.baseActivity ?: return@any false
+            if (component.packageName == context.packageName) return@any false
             val name = "${component.packageName}.${component.className}".lowercase(Locale.ROOT)
-            name.contains("recents") || name.contains("overview") || name.contains("taskmanager")
+            name.contains("recents") || name.contains("overview") || name.contains("taskmanager") ||
+                (home != null && component != home)
         }
     }
+
+    /** The launcher's home activity, so "not the home screen" can be detected. */
+    private fun homeComponent(): android.content.ComponentName? = runCatching {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        @Suppress("DEPRECATION")
+        val resolved = context.packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+        resolved?.activityInfo?.let { android.content.ComponentName(it.packageName, it.name) }
+    }.getOrNull()
 
     private fun clampToScreen() {
         val view = root ?: return
