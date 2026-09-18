@@ -83,6 +83,8 @@ fun AlbumTile(
     onLongClick: (() -> Unit)? = null,
     sharedElementEnabled: Boolean = true,
     selected: Boolean? = null,
+    /** Draws the Pixiv mark on the cover; used by the P page's pinned folder. */
+    showPixivMark: Boolean = false,
     onClick: () -> Unit
 ) {
     val english = LocalAppEnglish.current
@@ -107,6 +109,9 @@ fun AlbumTile(
                 showVideoMark = album.cover.isVideo,
                 showVideoDuration = false
             )
+            if (showPixivMark) {
+                PixivMarkBadge(24.dp, Modifier.align(Alignment.TopStart).padding(6.dp))
+            }
             selected?.let { SelectionMark(selected = it, modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)) }
         }
         Row(

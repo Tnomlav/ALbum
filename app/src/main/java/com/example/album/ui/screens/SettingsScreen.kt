@@ -33,7 +33,7 @@ import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material3.Icon
@@ -96,10 +96,8 @@ fun SettingsScreen(
     onThemeColorChange: (String) -> Unit,
     onNavReorderChange: (Boolean) -> Unit,
     onToolsReorderChange: (Boolean) -> Unit = {},
-    onShowHints: () -> Unit = {},
     onPixivTabEnabledChange: (Boolean) -> Unit,
     onRetentionChange: (Int) -> Unit,
-    onDefaultSortChange: (String) -> Unit,
     onBackgroundOptimizationChange: (Boolean) -> Unit,
     onLanguageChange: (String) -> Unit,
     showFavoriteBadge: Boolean,
@@ -313,14 +311,16 @@ fun SettingsScreen(
             }
         }
         if (settingsSection == null) {
-        item { SettingsHeader("主题", settingsSection == "主题") { onSettingsSectionChange(if (settingsSection == "主题") null else "主题") } }
-        item { SettingsHeader("文件操作", settingsSection == "文件操作") { onSettingsSectionChange(if (settingsSection == "文件操作") null else "文件操作") } }
-        item { SettingsHeader("显示", settingsSection == "显示") { onSettingsSectionChange(if (settingsSection == "显示") null else "显示") } }
-        item { SettingsHeader("视频", settingsSection == "视频") { onSettingsSectionChange(if (settingsSection == "视频") null else "视频") } }
-        item { SettingsHeader("滚动条", settingsSection == "滚动条") { onSettingsSectionChange(if (settingsSection == "滚动条") null else "滚动条") } }
-        item { SettingsHeader("幻灯片", settingsSection == "幻灯片") { onSettingsSectionChange(if (settingsSection == "幻灯片") null else "幻灯片") } }
-        item { SettingsHeader("缓存", settingsSection == "缓存") { onSettingsSectionChange(if (settingsSection == "缓存") null else "缓存") } }
-        item { SettingsHeader("关于", settingsSection == "关于") { onSettingsSectionChange(if (settingsSection == "关于") null else "关于") } }
+        // One row per category. Tapping a row opens that category's own page;
+        // the arrow always points into the category.
+        item { SettingsHeader("主题", expanded = false) { onSettingsSectionChange("主题") } }
+        item { SettingsHeader("文件操作", expanded = false) { onSettingsSectionChange("文件操作") } }
+        item { SettingsHeader("显示", expanded = false) { onSettingsSectionChange("显示") } }
+        item { SettingsHeader("视频", expanded = false) { onSettingsSectionChange("视频") } }
+        item { SettingsHeader("滚动条", expanded = false) { onSettingsSectionChange("滚动条") } }
+        item { SettingsHeader("幻灯片", expanded = false) { onSettingsSectionChange("幻灯片") } }
+        item { SettingsHeader("缓存", expanded = false) { onSettingsSectionChange("缓存") } }
+        item { SettingsHeader("关于", expanded = false) { onSettingsSectionChange("关于") } }
         }
         if (settingsSection == "主题") {
         item { ValueRow("主题模式", if (isEnglish && themeMode == "自动") "System" else themeMode) { choose("主题模式", "theme_mode", listOf("自动", "浅色", "深色"), themeMode) { themeMode = it; onThemeModeChange(it) } } }
@@ -328,13 +328,17 @@ fun SettingsScreen(
         item { ValueRow("语言", language) {
             choose("语言", "language", listOf("简体中文", "English"), language, onLanguageChange)
         } }
+        item { ValueRow("主页", value("default_home", "相册")) {
+            choose(
+                "主页",
+                "default_home",
+                buildList { add("相册"); add("视频"); add("时间轴"); if (pixivTabEnabled) add("Pixiv") },
+                value("default_home", "相册")
+            )
+        } }
         item { ToggleRow("下拉刷新", "在支持扫描的页面顶部下拉触发扫描", pullRefresh) { setBoolean("pull_refresh", it) { pullRefresh = it } } }
         item { ToggleRow("长按移动底栏图标", "长按拖动底栏图标排序", navReorder) { setBoolean("nav_reorder", it) { navReorder = it; onNavReorderChange(it) } } }
         item { ToggleRow("长按移动工具箱组件", "开启后可长按并拖动工具箱内的条目调整顺序", toolsReorder) { setBoolean("tools_reorder", it) { toolsReorder = it; onToolsReorderChange(it) } } }
-        // The gesture list is shown once on first launch; keep it reachable.
-        item {
-            ClickableRow("使用提示", "查看长按、拖动、播放器手势等隐藏操作") { onShowHints() }
-        }
         item {
             ToggleRow("显示 Pixiv 底栏页面", "在底栏显示 Pixiv 页面", pixivTabEnabled) { enabled ->
                 setBoolean("pixiv_tab_enabled", enabled) {
@@ -349,22 +353,7 @@ fun SettingsScreen(
         }
         }
         if (settingsSection == "文件操作") {
-        item { ToggleRow("回收站", "开启后，删除的文件将进入回收站", recycleBin) { setBoolean("recycle_bin", it) { recycleBin = it } } }
-        item { ValueRow("回收站文件保留期限", value("retention", "60天"), "保存在应用私有目录，卸载时会一并删除") {
-            choose("回收站文件保留期限", "retention", listOf("10天", "30天", "60天", "90天"), value("retention", "60天")) { selected ->
-                onRetentionChange(selected.filter(Char::isDigit).toIntOrNull() ?: 60)
-            }
-        } }
-        item {
-            ClickableRow("导出应用数据", "收藏、队列与偏好设置，不含媒体和账号") {
-                exportLauncher.launch(UserDataBackup.defaultFileName())
-            }
-        }
-        item {
-            ClickableRow("导入应用数据", "会覆盖当前数据") {
-                importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
-            }
-        }
+        // Permissions are what the category is about, so they lead the page.
         item {
             ToggleRow(
                 "所有文件访问权限",
@@ -379,6 +368,12 @@ fun SettingsScreen(
                 mediaManagement
             ) { openMediaManagementSettings() }
         }
+        item { ToggleRow("回收站", "开启后，删除的文件将进入回收站", recycleBin) { setBoolean("recycle_bin", it) { recycleBin = it } } }
+        item { ValueRow("回收站文件保留期限", value("retention", "60天"), "保存在应用私有目录，卸载时会一并删除") {
+            choose("回收站文件保留期限", "retention", listOf("10天", "30天", "60天", "90天"), value("retention", "60天")) { selected ->
+                onRetentionChange(selected.filter(Char::isDigit).toIntOrNull() ?: 60)
+            }
+        } }
         item {
             ToggleRow(
                 "删除前确认",
@@ -390,6 +385,17 @@ fun SettingsScreen(
         item { ToggleRow("重命名时显示后缀", "关闭后只编辑文件名，原后缀会自动保留", showRenameExtension) { setBoolean("rename_show_extension", it) { showRenameExtension = it; onRenameExtensionChange(it) } } }
         item { ValueRow("编辑后保存方式", value("edit_save", "每次询问"), "保留编辑副本或替换当前版本，保存前均需确认") { choose("编辑后保存方式", "edit_save", listOf("每次询问", "保留二者", "替换原图"), value("edit_save", "每次询问")) } }
         item { ValueRow("复制/移动文件已存在", value("conflict", "保留两者")) { choose("同名文件处理", "conflict", listOf("保留两者", "覆盖", "跳过"), value("conflict", "保留两者")) } }
+        // Backups close the page, so they sit at its end.
+        item {
+            ClickableRow("导出应用数据", "收藏、队列与偏好设置，不含媒体和账号") {
+                exportLauncher.launch(UserDataBackup.defaultFileName())
+            }
+        }
+        item {
+            ClickableRow("导入应用数据", "会覆盖当前数据") {
+                importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+            }
+        }
         }
         if (settingsSection == "显示") {
         item { ToggleRow("播放 GIF 缩略图", "仅控制缩略图，预览和全屏始终播放", gifThumbnails) { setBoolean("gif_thumbnails", it) { gifThumbnails = it } } }
@@ -401,17 +407,6 @@ fun SettingsScreen(
                 onShowHiddenMediaChange(it)
             }
         } }
-        item { ValueRow("默认排序方式", value("default_sort", "时间")) {
-            choose("默认排序方式", "default_sort", listOf("时间", "名称", "大小"), value("default_sort", "时间"), onDefaultSortChange)
-        } }
-        item { ValueRow("默认界面", value("default_home", "相册")) {
-            choose(
-                "默认界面",
-                "default_home",
-                buildList { add("相册"); add("视频"); add("时间轴"); if (pixivTabEnabled) add("Pixiv") },
-                value("default_home", "相册")
-            )
-        } }
         }
         if (settingsSection == "视频") {
         item { ToggleRow("打开视频时自动播放", null, autoplay) { setBoolean("video_autoplay", it) { autoplay = it } } }
@@ -419,6 +414,11 @@ fun SettingsScreen(
         item { ToggleRow("记住最后一次播放进度", null, rememberProgress) { setBoolean("video_progress", it) { rememberProgress = it } } }
         item { ToggleRow("自动隐藏播放器界面", "播放中无操作 3 秒后隐藏控件", autoHidePlayer) { setBoolean("video_auto_hide", it) { autoHidePlayer = it } } }
         item { ToggleRow("长快进", "在播放器中显示长快退和长快进按钮", longSkip) { setBoolean("long_skip", it) { longSkip = it } } }
+        if (longSkip) {
+            item { ValueRow("长快进长度", value("long_skip_length", "30秒")) {
+                choose("长快进长度", "long_skip_length", listOf("15秒", "30秒", "45秒", "60秒", "90秒", "120秒"), value("long_skip_length", "30秒"))
+            } }
+        }
         item { ValueRow("快进长度", value("normal_skip", "10秒")) { choose("快进长度", "normal_skip", listOf("3秒", "5秒", "10秒", "15秒", "30秒"), value("normal_skip", "10秒")) } }
         item { ValueRow("满屏滑动跳过时间", value("gesture_seek", "90秒"), "横向滑满整个屏幕对应的进度") { choose("满屏滑动跳过时间", "gesture_seek", listOf("30秒", "60秒", "90秒", "120秒", "150秒"), value("gesture_seek", "90秒")) } }
         item { ToggleRow("边缘误触保护", "在屏幕边缘松手时取消当次跳转", edgeProtection) { setBoolean("edge_protection", it) { edgeProtection = it } } }
@@ -732,10 +732,17 @@ private fun SettingsHeader(title: String, expanded: Boolean = true, onClick: (()
             .padding(start = 15.dp, end = 15.dp, top = 17.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(settingsText(title, LocalSettingsEnglish.current), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+        // The category rows on the settings home are the page's navigation, so
+        // they read a size larger than the rows inside a category.
+        Text(
+            settingsText(title, LocalSettingsEnglish.current),
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.titleSmall
+        )
         if (onClick != null) {
             Icon(
-                imageVector = if (expanded) Icons.Outlined.KeyboardArrowDown else Icons.Outlined.KeyboardArrowRight,
+                imageVector = if (expanded) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary
             )
@@ -780,7 +787,8 @@ private fun ValueRow(label: String, value: String, note: String? = null, onClick
             Text(settingsText(label, english), style = MaterialTheme.typography.bodyMedium)
             note?.let { Text(settingsText(it, english), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        Text(settingsText(value, english), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        // The chosen option is the row's value, so it carries the theme colour.
+        Text(settingsText(value, english), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -793,7 +801,7 @@ private fun ThemeColorRow(value: String, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(settingsText("主题颜色", english), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        Text(settingsText(value, english), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 10.dp))
+        Text(settingsText(value, english), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 10.dp))
         androidx.compose.foundation.layout.Box(
             Modifier.size(28.dp).background(MaterialTheme.colorScheme.primary, CircleShape)
         )

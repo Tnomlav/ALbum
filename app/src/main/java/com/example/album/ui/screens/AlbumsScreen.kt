@@ -159,7 +159,10 @@ fun AlbumsScreen(
     scrollRequest: com.example.album.ui.PageScrollRequest? = null,
     onClearQuery: () -> Unit = {}
 ) {
-    val refreshing = loading || scanning
+    // The pull-to-refresh indicator is for refreshes the user asked for. The
+    // first scan of a fresh start used to light it up, which looked like the
+    // album page was loading something behind the user's back.
+    val refreshing = (loading || scanning) && initialLoadComplete
     val english = LocalAppEnglish.current
     fun itemsInDisplayOrder(items: List<MediaItem>): List<MediaItem> {
         return sortMediaItems(items, sort, sortDirection)
@@ -316,7 +319,7 @@ fun AlbumsScreen(
                     onFirstVisibleMediaChanged = onFirstVisibleMediaChanged,
                     pullRequestToken = pullRequestToken)
                 } else {
-                    AlbumGrid(albums, albumColumns, refreshing = refreshing, onOpenAlbum = onOpenedFolderChange, onLongPressAlbum = onLongPressAlbum, onSelectionGestureStartAlbum = onSelectionGestureStartAlbum, onBatchSelectAlbums = onBatchSelectAlbums, onSelectionGestureEnd = onAlbumSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, favoriteUris = favoriteUris, selectionPreview = selectionPreview, selectedFolders = selectedFolders, initialFirstVisibleItem = initialAlbumFirstVisibleItem, initialFirstVisibleOffset = initialAlbumFirstVisibleOffset, onScrollPositionChanged = onAlbumScrollPositionChanged, onFirstVisibleFolderChanged = onFirstVisibleFolderChanged, scrollToTopToken = scrollToTopToken, scrollRequest = scrollRequest, pullRequestToken = pullRequestToken)
+                    AlbumGrid(albums, albumColumns, refreshing = refreshing, onOpenAlbum = onOpenedFolderChange, onLongPressAlbum = onLongPressAlbum, onSelectionGestureStartAlbum = onSelectionGestureStartAlbum, onBatchSelectAlbums = onBatchSelectAlbums, onSelectionGestureEnd = onAlbumSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, favoriteUris = favoriteUris, selectionPreview = selectionPreview, selectedFolders = selectedFolders, pinnedFolderName = pinnedAlbumName, initialFirstVisibleItem = initialAlbumFirstVisibleItem, initialFirstVisibleOffset = initialAlbumFirstVisibleOffset, onScrollPositionChanged = onAlbumScrollPositionChanged, onFirstVisibleFolderChanged = onFirstVisibleFolderChanged, scrollToTopToken = scrollToTopToken, scrollRequest = scrollRequest, pullRequestToken = pullRequestToken)
                 }
             }
         }
@@ -324,7 +327,7 @@ fun AlbumsScreen(
 }
 
 @Composable
-private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolean, onOpenAlbum: (String) -> Unit, onLongPressAlbum: (MediaAlbum, Int, Int) -> Unit, onSelectionGestureStartAlbum: ((MediaAlbum) -> Unit)?, onBatchSelectAlbums: (List<MediaAlbum>) -> Unit, onSelectionGestureEnd: () -> Unit, onRefresh: () -> Unit, sharedElementEnabled: Boolean = true, favoriteUris: Set<String> = emptySet(), selectionPreview: Boolean = false, selectedFolders: Set<String> = emptySet(), initialFirstVisibleItem: Int = 0, initialFirstVisibleOffset: Int = 0, onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }, onFirstVisibleFolderChanged: (String?) -> Unit = {}, scrollToTopToken: Long = 0L, scrollRequest: com.example.album.ui.PageScrollRequest? = null, pullRequestToken: Long = 0L) {
+private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolean, onOpenAlbum: (String) -> Unit, onLongPressAlbum: (MediaAlbum, Int, Int) -> Unit, onSelectionGestureStartAlbum: ((MediaAlbum) -> Unit)?, onBatchSelectAlbums: (List<MediaAlbum>) -> Unit, onSelectionGestureEnd: () -> Unit, onRefresh: () -> Unit, sharedElementEnabled: Boolean = true, favoriteUris: Set<String> = emptySet(), selectionPreview: Boolean = false, selectedFolders: Set<String> = emptySet(), pinnedFolderName: String? = null, initialFirstVisibleItem: Int = 0, initialFirstVisibleOffset: Int = 0, onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }, onFirstVisibleFolderChanged: (String?) -> Unit = {}, scrollToTopToken: Long = 0L, scrollRequest: com.example.album.ui.PageScrollRequest? = null, pullRequestToken: Long = 0L) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
     val gridState = rememberLazyGridState(
@@ -404,14 +407,16 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
             verticalArrangement = Arrangement.spacedBy(VaultDimens.AlbumGap)
         ) {
             items(albums, key = { it.name }) { album ->
+                val pinnedPixiv = pinnedFolderName != null && album.name.equals(pinnedFolderName, ignoreCase = true)
                 if (album.items.isEmpty()) {
-                    EmptyAlbumTile(album.name) { onOpenAlbum(album.name) }
+                    EmptyAlbumTile(album.name, showPixivMark = pinnedPixiv) { onOpenAlbum(album.name) }
                 } else {
                     AlbumTile(
                         album = album,
                         onLongClick = {},
                         sharedElementEnabled = sharedElementEnabled,
-                        selected = if (selectionPreview) album.name in selectedFolders else null
+                        selected = if (selectionPreview) album.name in selectedFolders else null,
+                        showPixivMark = pinnedPixiv
                     ) { onOpenAlbum(album.name) }
                 }
             }
@@ -431,7 +436,7 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
 }
 
 @Composable
-private fun EmptyAlbumTile(name: String, onClick: () -> Unit) {
+private fun EmptyAlbumTile(name: String, showPixivMark: Boolean = false, onClick: () -> Unit) {
     Column(Modifier.clickable(onClick = onClick)) {
         Box(
             Modifier.fillMaxWidth().aspectRatio(1f)
@@ -444,6 +449,12 @@ private fun EmptyAlbumTile(name: String, onClick: () -> Unit) {
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.fillMaxSize(.34f)
             )
+            if (showPixivMark) {
+                com.example.album.ui.components.PixivMarkBadge(
+                    24.dp,
+                    Modifier.align(Alignment.TopStart).padding(6.dp)
+                )
+            }
         }
         Text(name, modifier = Modifier.fillMaxWidth().padding(start = 2.dp, top = 7.dp, end = 2.dp), maxLines = 1, fontSize = VaultDimens.AlbumName)
     }

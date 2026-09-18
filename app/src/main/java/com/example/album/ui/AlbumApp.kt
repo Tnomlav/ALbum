@@ -166,6 +166,7 @@ import com.example.album.ui.components.VaultInfoSheet
 import com.example.album.ui.editor.ImageEditorDialog
 import com.example.album.ui.screens.AlbumsScreen
 import com.example.album.ui.screens.SettingsScreen
+import com.example.album.ui.components.PixivPMark
 import com.example.album.ui.screens.TimelineScreen
 import com.example.album.ui.screens.CleanupScreen
 import com.example.album.ui.screens.WallpaperManagerScreen
@@ -203,16 +204,6 @@ private enum class MainTab(val label: String, val icon: ImageVector) {
     Tools("工具箱", Icons.Outlined.Widgets),
     Settings("设置", Icons.Outlined.Settings)
 }
-
-private val PixivPMark = ImageVector.Builder("pixiv-p", 24.dp, 24.dp, 120f, 120f).apply {
-    addPath(
-        pathData = PathParser().parsePathString(
-            "M32 28C36 28 39 27 41 29C43 31 44 34 45 37C50 30 57 27 66 27C82 27 93 40 93 58C93 76 82 89 66 89C58 89 51 85 46 79V92C46 95 44 97 41 97H32ZM62 42C52 42 46 49 46 59C46 69 52 76 62 76C72 76 79 69 79 59C79 49 72 42 62 42Z"
-        ).toNodes(),
-        pathFillType = PathFillType.EvenOdd,
-        fill = SolidColor(Color.Black)
-    )
-}.build()
 
 private enum class PixivSearchMode { Artist, Tag }
 
@@ -836,6 +827,10 @@ fun AlbumApp(
     var pixivRefreshKey by remember { mutableIntStateOf(0) }
     var archiveMediaRefreshPending by remember { mutableStateOf(false) }
     var archiveMediaRefreshing by remember { mutableStateOf(false) }
+    // True while a page that can change files has actually changed something.
+    // Leaving such a page only re-walks the Pixiv library when this is set, so
+    // simply opening and closing the archive page no longer rescans it.
+    var pixivFilesChanged by remember { mutableStateOf(false) }
     var pixivSearchMode by rememberSaveable { mutableStateOf(PixivSearchMode.Artist) }
     LaunchedEffect(selectedTab, pixivArchiveOpen, pixivTabEnabled) {
         if (pixivTabEnabled && selectedTab == MainTab.Pixiv && !pixivArchiveOpen &&
@@ -1074,8 +1069,21 @@ fun AlbumApp(
         if (favoriteFilter) source.filter { it.uri.toString() in favoriteUris } else source
     } }
     val pixivSearchImages by remember { derivedStateOf {
+        // The archive's folders (its source folder plus the artist folders it
+        // created) and the local Pixiv folder, which is what the pinned folder
+        // shows. Names are compared case-insensitively: a SAF folder and the
+        // matching MediaStore bucket rarely agree on case.
         val allowedFolders = pixivFolderNames + pixivSourceFolderName
-        pixivImages.filter { it.folder in allowedFolders }
+        val archived = pixivImages.filter { item ->
+            allowedFolders.any { it.equals(item.folder, ignoreCase = true) }
+        }
+        // The local Pixiv folder belongs on this page too: the pinned folder is
+        // that folder, not whatever the archive's source directory points at.
+        // Files the archive already lists are skipped by name, so the same
+        // picture is not shown twice under two different URIs.
+        val archivedNames = archived.mapTo(hashSetOf()) { it.name }
+        val localPixiv = defaultPixivImages.filterNot { it.name in archivedNames }
+        (archived + localPixiv).distinctBy { it.uri.toString() }
     } }
     LaunchedEffect(pixivSearchMode, appliedQuery, pixivLibraryVersion, favoriteFilter) {
         // Load the tag index once for the current Pixiv library. Searching is
@@ -1622,11 +1630,17 @@ fun AlbumApp(
             selectionMode -> clearSelection()
             pixivArchiveOpen -> {
                 pixivArchiveOpen = false
-                pixivRefreshKey++
+                if (pixivFilesChanged) {
+                    pixivFilesChanged = false
+                    pixivRefreshKey++
+                }
             }
             cleanupOpen -> {
                 cleanupOpen = false
-                pixivRefreshKey++
+                if (pixivFilesChanged) {
+                    pixivFilesChanged = false
+                    pixivRefreshKey++
+                }
                 if (archiveMediaRefreshPending) {
                     archiveMediaRefreshPending = false
                     scope.launch {
@@ -1673,6 +1687,14 @@ fun AlbumApp(
         if (result.resultCode == Activity.RESULT_OK) {
             library.remove(pendingDeletes)
             val deletedUris = pendingDeletes.mapTo(hashSetOf()) { it.uri.toString() }
+            // A deleted file is a real change: the P page's walk has to run,
+            // even though no page is being left.
+            if (deletedUris.any { it in pixivArchivePendingDeleteUris } ||
+                pendingDeletes.any { it.folder.equals("Pixiv", ignoreCase = true) }
+            ) {
+                pixivFilesChanged = false
+                pixivRefreshKey++
+            }
             pixivArchiveSession.removeRecords(deletedUris intersect pixivArchivePendingDeleteUris)
             pixivArchivePendingDeleteUris -= deletedUris
             if (pendingDeletes.any { it.uri == selectedMedia?.uri }) selectedMedia = null
@@ -1691,6 +1713,12 @@ fun AlbumApp(
         if (result.resultCode == Activity.RESULT_OK) {
             library.remove(pendingDeletes)
             val deletedUris = pendingDeletes.mapTo(hashSetOf()) { it.uri.toString() }
+            if (deletedUris.any { it in pixivArchivePendingDeleteUris } ||
+                pendingDeletes.any { it.folder.equals("Pixiv", ignoreCase = true) }
+            ) {
+                pixivFilesChanged = false
+                pixivRefreshKey++
+            }
             pixivArchiveSession.records.value = pixivArchiveSession.records.value.filterNot {
                 it.uri.toString() in deletedUris && it.uri.toString() in pixivArchivePendingDeleteUris
             }
@@ -2201,7 +2229,10 @@ fun AlbumApp(
                 pixivArchiveSession.selectionMode.value = false
                 pixivArchiveSession.selectedUris.value = emptySet()
                 pixivArchiveOpen = false
-                pixivRefreshKey++
+                if (pixivFilesChanged) {
+                    pixivFilesChanged = false
+                    pixivRefreshKey++
+                }
             },
             onArchiveComplete = { completed, failed ->
                 observerRefreshJob[0]?.cancel()
@@ -2240,6 +2271,7 @@ fun AlbumApp(
                     // The archive page is rendered as a standalone page (the rest
                     // of the UI, including the destination screen, is not
                     // composed while it is open), so leave it first.
+                    pixivFilesChanged = true
                     pixivArchiveOpen = false
                     transferRequest = TransferRequest(items, TransferMode.Copy)
                 }
@@ -2257,12 +2289,14 @@ fun AlbumApp(
             },
             onMove = { items ->
                 if (items.isNotEmpty()) {
+                    pixivFilesChanged = true
                     pixivArchiveMoveUris = items.mapTo(hashSetOf()) { it.uri.toString() }
                     pixivArchiveOpen = false
                     transferRequest = TransferRequest(items, TransferMode.Move)
                 }
             },
             onDelete = { items ->
+                pixivFilesChanged = true
                 pixivArchivePendingDeleteUris = items.mapTo(hashSetOf()) { it.uri.toString() }
                 // The delete confirmation lives in the main UI, which is not
                 // composed while the archive page is open.
@@ -2283,7 +2317,10 @@ fun AlbumApp(
             excludedMedia = library.excludedMedia,
             onBack = {
                 cleanupOpen = false
-                pixivRefreshKey++
+                if (pixivFilesChanged) {
+                    pixivFilesChanged = false
+                    pixivRefreshKey++
+                }
                 if (archiveMediaRefreshPending) {
                     archiveMediaRefreshPending = false
                     scope.launch {
@@ -2294,8 +2331,12 @@ fun AlbumApp(
             findDuplicates = library::findDuplicates,
             confirmMediaDeletion = albumSettings.getBoolean("delete_confirmation", true),
             recycleMediaDeletion = albumSettings.getBoolean("recycle_bin", true),
-            onDeleteMedia = { entries -> performDelete(entries) },
+            onDeleteMedia = { entries ->
+                pixivFilesChanged = true
+                performDelete(entries)
+            },
             onRestoreRecycle = { entries ->
+                pixivFilesChanged = true
                 val systemEntries = entries.filter { it.systemTrashed }
                 val privateEntries = entries.filterNot { it.systemTrashed }
                 if (privateEntries.isNotEmpty()) scope.launch {
@@ -2329,6 +2370,7 @@ fun AlbumApp(
                 }
             },
             onDeleteRecycle = { entries ->
+                pixivFilesChanged = true
                 val systemEntries = entries.filter { it.systemTrashed }
                 val privateEntries = entries.filterNot { it.systemTrashed }
                 if (privateEntries.isNotEmpty()) {
@@ -3454,7 +3496,11 @@ fun AlbumApp(
                         pixivArchiveOpen = true
                     },
                     selectedFolders = selectedFolders,
-                    pinnedAlbumName = pixivSourceFolderName,
+                    // The P page's pinned folder is the local Pixiv folder
+                    // (Pictures/Pixiv). It used to follow the archive page's
+                    // source directory, so changing that setting moved the
+                    // pinned folder around.
+                    pinnedAlbumName = "Pixiv",
                     albumQueryMatchesItems = pixivSearchMode != PixivSearchMode.Artist,
                     flatMode = pixivSearchMode == PixivSearchMode.Tag && appliedQuery.isNotBlank(),
                     scrollToTopToken = scrollToTopToken,
@@ -3505,7 +3551,6 @@ fun AlbumApp(
                     onThemeColorChange = onThemeColorChange,
                     onNavReorderChange = { navReorderEnabled = it },
                     onToolsReorderChange = { toolsReorderEnabled = it },
-                    onShowHints = { showGestureHints = true },
                     onPixivTabEnabledChange = { enabled ->
                         pixivTabEnabled = enabled
                         tabOrder = normalizedTabOrder(tabOrder, enabled)
@@ -3516,13 +3561,6 @@ fun AlbumApp(
                         }
                     },
                     onRetentionChange = library::purgeExpiredRecycle,
-                    onDefaultSortChange = { selected ->
-                        mediaSort = when (selected) {
-                            "名称" -> MediaSort.Name
-                            "大小" -> MediaSort.Size
-                            else -> MediaSort.Time
-                        }
-                    },
                     onBackgroundOptimizationChange = { enabled ->
                         backgroundOptimizationEnabled = enabled
                         library.setBackgroundOptimization(enabled)

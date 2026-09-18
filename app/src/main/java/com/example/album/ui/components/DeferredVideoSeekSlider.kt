@@ -1,7 +1,5 @@
 package com.example.album.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -9,7 +7,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderColors
 import androidx.compose.material3.SliderDefaults
@@ -24,10 +21,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -59,6 +56,8 @@ internal fun DeferredVideoSeekSlider(
     // 3dp between the track ends and the thumb centre.
     val trackGapPx = with(LocalDensity.current) { 3.dp.toPx() }
     val thumbInsetPx = with(LocalDensity.current) { 6.dp.toPx() }
+    val thumbRadiusPx = with(LocalDensity.current) { 6.dp.toPx() }
+    val thumbRingWidthPx = with(LocalDensity.current) { 3.dp.toPx() }
     var displayedValue by remember { mutableFloatStateOf(valueMs.toFloat()) }
     var dragging by remember { mutableStateOf(false) }
     val latestOnSeek = rememberUpdatedState(onSeek)
@@ -155,6 +154,21 @@ internal fun DeferredVideoSeekSlider(
                     strokeWidth = trackStrokeWidthPx,
                     cap = StrokeCap.Round
                 )
+                // The thumb is drawn here, in the same coordinate space as the
+                // track, so its centre always sits on the track's centre line.
+                // A separate thumb slot is measured and placed by Material3,
+                // which left it a few pixels off the track's middle.
+                drawCircle(
+                    color = thumbColor,
+                    radius = thumbRadiusPx,
+                    center = Offset(thumbCenter, centerY)
+                )
+                drawCircle(
+                    color = thumbBorderColor,
+                    radius = (thumbRadiusPx - thumbRingWidthPx / 2f).coerceAtLeast(0f),
+                    center = Offset(thumbCenter, centerY),
+                    style = Stroke(width = thumbRingWidthPx)
+                )
             }
         },
         colors = SliderDefaults.colors(
@@ -170,13 +184,10 @@ internal fun DeferredVideoSeekSlider(
             disabledInactiveTickColor = Color.Transparent
         ),
         thumb = {
-            Box(
-                // The thumb is exactly as wide as the bar (12dp).
-                Modifier.size(12.dp)
-                    .clip(CircleShape)
-                    .background(thumbColor, CircleShape)
-                    .border(3.dp, thumbBorderColor, CircleShape)
-            )
+            // Invisible: it keeps Material3's thumb width (which is what the
+            // track's travel and the touch target are based on) while the
+            // visible thumb is painted with the track above.
+            Box(Modifier.size(12.dp))
         }
     )
 }

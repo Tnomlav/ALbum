@@ -60,8 +60,12 @@ internal class OverlayMiniWindow(
         /** Controls hide themselves after this long, like the in-app player. */
         private const val CONTROLS_TIMEOUT_MS = 3_000L
 
-        /** How often the window checks whether the system task switcher is up. */
-        private const val TASK_MANAGER_POLL_MS = 800L
+        /**
+         * How often the window checks whether the system task switcher is up.
+         * The check has to be quick enough that the window is already small
+         * while the switcher's opening animation runs.
+         */
+        private const val TASK_MANAGER_POLL_MS = 120L
 
         /** Where the platform puts the dismiss reason on the system dialog broadcast. */
         private const val SYSTEM_DIALOG_REASON_KEY = "reason"
@@ -87,6 +91,10 @@ internal class OverlayMiniWindow(
     private var compact = false
     private var savedWidth = 0
     private var savedHeight = 0
+    // The size the window was created with. Coming back from the shrunk state
+    // returns to this, not to whatever size the user dragged it to.
+    private var defaultWidth = 0
+    private var defaultHeight = 0
     // The task switcher is watched while the window is on screen. The system
     // gives a background app no callback for it, so the window looks for the
     // task switcher itself.
@@ -142,6 +150,8 @@ internal class OverlayMiniWindow(
         // is the same size whether it was opened in portrait or landscape.
         val width = min((min(screenWidth, screenHeight) * 0.62f).roundToInt(), (320 * density).roundToInt())
         val height = (width * 9f / 16f).roundToInt()
+        defaultWidth = width
+        defaultHeight = height
 
         val container = FrameLayout(context).apply {
             background = GradientDrawable().apply {
@@ -236,8 +246,6 @@ internal class OverlayMiniWindow(
                     dx = dx,
                     dy = dy,
                     density = density,
-                    startRawX = gestureStartX,
-                    startRawY = gestureStartY,
                     startWindowX = gestureStartWindowX,
                     startWindowY = gestureStartWindowY,
                     startWidth = gestureStartWidth,
@@ -427,17 +435,24 @@ internal class OverlayMiniWindow(
         // corner squares resize, everything else (including the edges) moves the
         // window. Overlapping bands used to make a drag ambiguous.
         val band = CORNER_DP * density
-        val nearLeft = rawX <= params.x + band
-        val nearRight = rawX >= params.x + params.width - band
-        val nearTop = rawY <= params.y + band
-        val nearBottom = rawY >= params.y + params.height - band
-        return when {
-            nearLeft && nearTop -> EDGE_LEFT or EDGE_TOP
-            nearRight && nearTop -> EDGE_RIGHT or EDGE_TOP
-            nearLeft && nearBottom -> EDGE_LEFT or EDGE_BOTTOM
-            nearRight && nearBottom -> EDGE_RIGHT or EDGE_BOTTOM
+        val leftDistance = rawX - params.x
+        val rightDistance = params.x + params.width - rawX
+        val topDistance = rawY - params.y
+        val bottomDistance = params.y + params.height - rawY
+        // The nearest side wins, so a finger in the bottom-left corner reports
+        // LEFT|BOTTOM even when the window is small enough that the corner bands
+        // would otherwise overlap or miss.
+        val horizontal = when {
+            leftDistance <= band && leftDistance <= rightDistance -> EDGE_LEFT
+            rightDistance <= band && rightDistance < leftDistance -> EDGE_RIGHT
             else -> 0
         }
+        val vertical = when {
+            topDistance <= band && topDistance <= bottomDistance -> EDGE_TOP
+            bottomDistance <= band && bottomDistance < topDistance -> EDGE_BOTTOM
+            else -> 0
+        }
+        return if (horizontal != 0 && vertical != 0) horizontal or vertical else 0
     }
 
     /**
@@ -450,8 +465,6 @@ internal class OverlayMiniWindow(
         dx: Float,
         dy: Float,
         density: Float,
-        startRawX: Float,
-        startRawY: Float,
         startWindowX: Int,
         startWindowY: Int,
         startWidth: Int,
@@ -460,15 +473,19 @@ internal class OverlayMiniWindow(
         val screenWidth = context.resources.displayMetrics.widthPixels
         val screenHeight = context.resources.displayMetrics.heightPixels
         val minWidth = (160 * density).roundToInt()
-        val centerX = startWindowX + startWidth / 2f
-        val centerY = startWindowY + startHeight / 2f
-        // Room left on the side that is *not* pinned. Limiting the size here is
-        // what keeps the pinned corner exactly in place; clamping the position
-        // afterwards used to drag the opposite corner around.
-        val right = startWindowX + startWidth
-        val bottom = startWindowY + startHeight
-        val horizontalRoom = if (startRawX < centerX) right - 8f * density else screenWidth - 8f * density - startWindowX
-        val verticalRoom = if (startRawY < centerY) bottom - 8f * density else screenHeight - 8f * density - startWindowY
+        // The dragged corner decides which corner stays put: dragging the left
+        // side pins the right edge, dragging the bottom side pins the top edge,
+        // and so on. The pinned corner is resolved from the grabbed *edges*, not
+        // from where the finger happened to be relative to the window's centre,
+        // which is what made the bottom-left drag behave like the bottom-right.
+        val pinRight = edges and EDGE_LEFT != 0
+        val pinBottom = edges and EDGE_TOP != 0
+        val pinnedX = startWindowX + startWidth
+        val pinnedY = startWindowY + startHeight
+        // Room between the pinned edge and the far side of the screen. Limiting
+        // the size here is what keeps the pinned corner exactly in place.
+        val horizontalRoom = if (pinRight) pinnedX - 8f * density else screenWidth - 8f * density - startWindowX
+        val verticalRoom = if (pinBottom) pinnedY - 8f * density else screenHeight - 8f * density - startWindowY
         val maxWidth = minOf(
             (screenWidth - 16 * density).roundToInt(),
             horizontalRoom.roundToInt(),
@@ -477,8 +494,8 @@ internal class OverlayMiniWindow(
         // Dragging away from the centre grows the window, dragging towards it
         // shrinks; that holds for every border and corner, which fixed the case
         // where both directions shrank the window.
-        val horizontalGrowth = if (startRawX < centerX) -dx else dx
-        val verticalGrowth = if (startRawY < centerY) -dy else dy
+        val horizontalGrowth = if (pinRight) -dx else dx
+        val verticalGrowth = if (pinBottom) -dy else dy
         val horizontalEdge = edges and (EDGE_LEFT or EDGE_RIGHT) != 0
         val verticalEdge = edges and (EDGE_TOP or EDGE_BOTTOM) != 0
         val growth = when {
@@ -490,12 +507,11 @@ internal class OverlayMiniWindow(
         }
         val newWidth = (startWidth + growth).roundToInt().coerceIn(minWidth, maxWidth)
         val newHeight = (newWidth * 9f / 16f).roundToInt()
-        // Pin the corner opposite the one being dragged: the bottom-right keeps
-        // the top-left in place, the bottom-left keeps the top-right, and so on.
-        // The room limits above make sure the pinned corner is never pushed out
-        // of the screen.
-        if (startRawX < centerX) params.x = startWindowX + (startWidth - newWidth)
-        if (startRawY < centerY) params.y = startWindowY + (startHeight - newHeight)
+        // Re-anchor on the pinned corner: its absolute position on screen is
+        // preserved exactly, so dragging the bottom-left corner keeps the
+        // top-right corner still (and the same for the other three).
+        params.x = if (pinRight) pinnedX - newWidth else startWindowX
+        params.y = if (pinBottom) pinnedY - newHeight else startWindowY
         params.width = newWidth
         params.height = newHeight
     }
@@ -520,9 +536,15 @@ internal class OverlayMiniWindow(
                 .coerceAtLeast((120 * metrics.density).roundToInt())
             params.width = target
             params.height = (target * 9f / 16f).roundToInt()
-        } else if (savedWidth > 0) {
-            params.width = savedWidth
-            params.height = savedHeight
+        } else {
+            // Back to the size the window opened with, not the size the user had
+            // dragged it to before the task switcher appeared.
+            val restoreWidth = if (defaultWidth > 0) defaultWidth else savedWidth
+            val restoreHeight = if (defaultHeight > 0) defaultHeight else savedHeight
+            if (restoreWidth > 0) {
+                params.width = restoreWidth
+                params.height = restoreHeight
+            }
         }
         // The buttons are laid out for the full size window, so they are hidden
         // while it is shrunk; a tap on the picture restores the window instead.

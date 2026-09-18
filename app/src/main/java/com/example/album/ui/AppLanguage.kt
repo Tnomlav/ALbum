@@ -176,6 +176,7 @@ private val APP_ENGLISH = mapOf(
     "在缩略图右上角显示收藏星标" to "Show favorite stars on thumbnails",
     "默认排序方式" to "Default sort order",
     "默认界面" to "Default screen",
+    "主页" to "Home",
     "滚动条" to "Scrollbar",
     "下拉刷新" to "Pull to refresh",
     "在支持扫描的页面顶部下拉触发扫描" to "Pull down at the top to rescan",
