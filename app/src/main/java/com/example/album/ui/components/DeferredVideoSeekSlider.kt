@@ -159,20 +159,29 @@ internal fun DeferredVideoSeekSlider(
                     size = Size(barRight - barLeft, radius * 2f),
                     cornerRadius = CornerRadius(radius, radius)
                 )
-                // The played part ends in a bite the size of the thumb: its end
-                // is a half-circle that opens to the left, so the thumb sits in
-                // it exactly. The bite shows the unplayed track underneath.
+                // The played part is built from the *whole* bar so its left end
+                // keeps the same half-circle no matter where the thumb is: a
+                // rounded rectangle that stops at the thumb would have its corner
+                // radius halved once it got narrow, which is the "semicircle
+                // turns into a rounded rectangle" the user saw at 0%. The bar is
+                // clipped to the thumb's centre and then has the thumb's circle
+                // cut out, so the end is a half-circle that opens to the left and
+                // fits the thumb exactly. The cut shows the unplayed track below.
                 val played = Path().apply {
                     addRoundRect(
                         RoundRect(
                             left = barLeft,
                             top = centerY - radius,
-                            right = thumbCenter,
+                            right = barRight,
                             bottom = centerY + radius,
                             cornerRadius = CornerRadius(radius, radius)
                         )
                     )
                 }
+                val upToThumb = Path().apply {
+                    addRect(Rect(barLeft, centerY - radius, thumbCenter, centerY + radius))
+                }
+                played.op(played, upToThumb, PathOperation.Intersect)
                 val thumbCircle = Path().apply {
                     addOval(
                         Rect(

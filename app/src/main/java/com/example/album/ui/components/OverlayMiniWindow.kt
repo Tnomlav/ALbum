@@ -4,10 +4,7 @@
 
 package com.example.album.ui.components
 
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
@@ -20,10 +17,8 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
-import androidx.core.content.ContextCompat
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -62,16 +57,6 @@ internal class OverlayMiniWindow(
 
         /** Controls hide themselves after this long, like the in-app player. */
         private const val CONTROLS_TIMEOUT_MS = 3_000L
-
-        /**
-         * How often the window checks whether the system task switcher is up.
-         * The check has to be quick enough that the window is already small
-         * while the switcher's opening animation runs.
-         */
-        private const val TASK_MANAGER_POLL_MS = 200L
-
-        /** Where the platform puts the dismiss reason on the system dialog broadcast. */
-        private const val SYSTEM_DIALOG_REASON_KEY = "reason"
     }
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -97,56 +82,9 @@ internal class OverlayMiniWindow(
      */
     private var suppressNextClick = false
     private var buttonDragListener: View.OnTouchListener? = null
-    private var compact = false
-    private var savedWidth = 0
-    private var savedHeight = 0
-    // The size the window was created with. Coming back from the shrunk state
-    // returns to this, not to whatever size the user dragged it to.
-    private var defaultWidth = 0
-    private var defaultHeight = 0
-    // The task switcher is watched while the window is on screen: the system
-    // gives a background app no callback for it. Only a *visible* switcher
-    // counts, because the launcher keeps the switcher entry in the task history
-    // after it is closed -- treating that leftover as "the switcher is open"
-    // made a freshly created window shrink on its own and then latched, so it
-    // never reacted to a real visit again.
-    private var switcherShown = false
     private val hideHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val hideControls = Runnable { setControlsVisible(false) }
     private var controlsVisible = true
-    private val taskManagerProbe = object : Runnable {
-        override fun run() {
-            // The next check is always queued, even if this one throws: a single
-            // failure used to stop the window from ever reacting again.
-            try {
-                val showing = isTaskManagerShowing()
-                if (showing && !switcherShown) {
-                    switcherShown = true
-                    if (!compact) setCompact(true)
-                } else if (!showing) {
-                    // Arm again for the next visit.
-                    switcherShown = false
-                }
-            } catch (_: Throwable) {
-                // Never let the probe die; the window just tries again.
-            } finally {
-                if (root != null) {
-                    hideHandler.postDelayed(this, TASK_MANAGER_POLL_MS)
-                }
-            }
-        }
-    }
-    private val closeSystemDialogsReceiver = object : BroadcastReceiver() {
-        override fun onReceive(receiverContext: Context?, intent: Intent?) {
-            val reason = intent?.getStringExtra(SYSTEM_DIALOG_REASON_KEY).orEmpty()
-            // "recentapps" is the task switcher; the home button reports
-            // "homekey" and must leave the window alone.
-            if (reason.contains("recent", ignoreCase = true) && root != null) {
-                switcherShown = true
-                setCompact(true)
-            }
-        }
-    }
     private val configurationCallback = object : android.content.ComponentCallbacks {
         override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
             // Rotating the device (which is what happens when the app goes to
@@ -169,8 +107,6 @@ internal class OverlayMiniWindow(
         // is the same size whether it was opened in portrait or landscape.
         val width = min((min(screenWidth, screenHeight) * 0.62f).roundToInt(), (320 * density).roundToInt())
         val height = (width * 9f / 16f).roundToInt()
-        defaultWidth = width
-        defaultHeight = height
 
         val container = FrameLayout(context).apply {
             background = GradientDrawable().apply {
@@ -248,7 +184,7 @@ internal class OverlayMiniWindow(
 
         // Dragging anywhere -- including from a button -- moves or resizes the
         // window. A tap that never moves still reaches the button's own click.
-        fun beginGesture(event: MotionEvent): Boolean {
+        fun beginGesture(source: View, event: MotionEvent): Boolean {
             val params = layoutParams ?: return false
             gestureStartX = event.rawX
             gestureStartY = event.rawY
@@ -257,18 +193,19 @@ internal class OverlayMiniWindow(
             gestureStartWindowY = params.y
             gestureStartWidth = params.width
             gestureStartHeight = params.height
-            // Hit-testing uses coordinates inside the window: the layout params
-            // are relative to the display frame, which sits below the status bar,
-            // so comparing them with raw screen coordinates shifted the corner
-            // zones vertically.
-            val origin = IntArray(2)
-            root?.getLocationOnScreen(origin)
+            // Hit-testing uses coordinates inside the window. The window can be
+            // positioned outside the app's own coordinate space (it is a
+            // FLAG_LAYOUT_NO_LIMITS overlay), so screen coordinates and layout
+            // params do not line up; `getLocationInWindow` plus the event's own
+            // position is exact for whichever child the finger landed on.
+            val location = IntArray(2)
+            source.getLocationInWindow(location)
             // A shrunk window resizes from its corners like any other: dragging
             // its bottom-left corner has to pin the top-right there too. A tap
             // (no movement) still restores the size the window opened with.
             gestureEdges = touchedEdges(
-                insideX = event.rawX - origin[0],
-                insideY = event.rawY - origin[1],
+                insideX = location[0] + event.x,
+                insideY = location[1] + event.y,
                 width = params.width,
                 height = params.height,
                 density = density
@@ -312,24 +249,14 @@ internal class OverlayMiniWindow(
 
         container.setOnTouchListener { view, event ->
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> beginGesture(event)
+                MotionEvent.ACTION_DOWN -> beginGesture(view, event)
                 MotionEvent.ACTION_MOVE -> continueGesture(view, event)
                 MotionEvent.ACTION_UP -> {
                     val wasTap = !gestureMoved
                     gestureEdges = 0
-                    if (wasTap) {
-                        // While the window is shrunk (the phone is showing its
-                        // task switcher) a tap brings the player back to the
-                        // size the user had chosen.
-                        if (compact) {
-                            setCompact(false)
-                            setControlsVisible(true)
-                        } else {
-                            // A tap on the empty area toggles the controls, the
-                            // same way it does inside the app's player.
-                            setControlsVisible(!controlsVisible)
-                        }
-                    }
+                    // A tap on the empty area toggles the controls, the same way
+                    // it does inside the app's player.
+                    if (wasTap) setControlsVisible(!controlsVisible)
                     view.performClick()
                     true
                 }
@@ -347,7 +274,7 @@ internal class OverlayMiniWindow(
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     suppressNextClick = false
-                    beginGesture(event)
+                    beginGesture(view, event)
                     false
                 }
                 MotionEvent.ACTION_MOVE -> if (gestureMoved) continueGesture(view, event) else false
@@ -382,15 +309,6 @@ internal class OverlayMiniWindow(
         runCatching { windowManager.addView(container, params) }
         root = container
         runCatching { context.registerComponentCallbacks(configurationCallback) }
-        runCatching {
-            ContextCompat.registerReceiver(
-                context,
-                closeSystemDialogsReceiver,
-                IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS),
-                ContextCompat.RECEIVER_NOT_EXPORTED
-            )
-        }
-        hideHandler.postDelayed(taskManagerProbe, TASK_MANAGER_POLL_MS)
         setControlsVisible(true)
         onVisibilityChanged(true)
     }
@@ -398,8 +316,6 @@ internal class OverlayMiniWindow(
     fun dismiss() {
         val view = root ?: return
         hideHandler.removeCallbacks(hideControls)
-        hideHandler.removeCallbacks(taskManagerProbe)
-        runCatching { context.unregisterReceiver(closeSystemDialogsReceiver) }
         runCatching { context.unregisterComponentCallbacks(configurationCallback) }
         runCatching { windowManager.removeView(view) }
         contentView?.player = null
@@ -407,8 +323,6 @@ internal class OverlayMiniWindow(
         contentView = null
         playPauseButton = null
         buttonViews = emptyList()
-        compact = false
-        switcherShown = false
         onVisibilityChanged(false)
     }
 
@@ -425,7 +339,7 @@ internal class OverlayMiniWindow(
 
     /** Keeps the controls on screen while the user is interacting with them. */
     private fun touchControls() {
-        if (controlsVisible && !compact) setControlsVisible(true)
+        if (controlsVisible) setControlsVisible(true)
     }
 
     fun syncPlayState() {
@@ -499,10 +413,13 @@ internal class OverlayMiniWindow(
         // window away from the window's own left edge. Touching there used to
         // count as a move, which is what made the window wander instead of
         // resizing.
+        // Proportional zones with no upper cap: a cap made the corners shrink
+        // relative to a window the user had enlarged, so a finger on the
+        // picture's own bottom-left corner (about a third of the way in) was
+        // read as "move" and the window wandered instead of resizing.
         val minimum = CORNER_DP * density
-        val maximum = 96f * density
-        val zoneX = (width * CORNER_FRACTION).coerceIn(minimum, maximum)
-        val zoneY = (height * CORNER_FRACTION).coerceIn(minimum, maximum)
+        val zoneX = (width * CORNER_FRACTION).coerceAtLeast(minimum)
+        val zoneY = (height * CORNER_FRACTION).coerceAtLeast(minimum)
         val leftDistance = insideX
         val rightDistance = width - insideX
         val topDistance = insideY
@@ -585,80 +502,6 @@ internal class OverlayMiniWindow(
     }
 
     /** Keeps the window inside the current screen bounds. */
-    /**
-     * Shrinks the window while the phone shows its task switcher, where a full
-     * size window would cover the task cards. A tap on the shrunk window puts it
-     * back to the size the user had.
-     */
-    fun setCompact(compact: Boolean) {
-        val view = root ?: return
-        val params = layoutParams ?: return
-        if (compact == this.compact) return
-        this.compact = compact
-        if (compact) {
-            savedWidth = params.width
-            savedHeight = params.height
-            val metrics = context.resources.displayMetrics
-            val target = (min(metrics.widthPixels, metrics.heightPixels) * 0.42f).roundToInt()
-                .coerceAtMost((220 * metrics.density).roundToInt())
-                .coerceAtLeast((120 * metrics.density).roundToInt())
-            params.width = target
-            params.height = (target * 9f / 16f).roundToInt()
-        } else {
-            // Back to the size the window opened with, not the size the user had
-            // dragged it to before the task switcher appeared.
-            val restoreWidth = if (defaultWidth > 0) defaultWidth else savedWidth
-            val restoreHeight = if (defaultHeight > 0) defaultHeight else savedHeight
-            if (restoreWidth > 0) {
-                params.width = restoreWidth
-                params.height = restoreHeight
-            }
-        }
-        // The buttons are laid out for the full size window, so they are hidden
-        // while it is shrunk; a tap on the picture restores the window instead.
-        setControlsVisible(!compact)
-        clampToScreen()
-        runCatching { windowManager.updateViewLayout(view, params) }
-    }
-
-    /**
-     * Whether the system's task switcher is on screen right now. Android sends
-     * a backgrounded app no callback for it, so this asks the task list the
-     * platform still exposes (which, without the system-only permission,
-     * contains only our own tasks and the launcher's).
-     *
-     * The test is "the launcher is visible but not showing its home screen":
-     * the switcher is exactly that on every phone seen so far, and unlike
-     * matching a class name it does not depend on how the vendor named the
-     * switcher's activity. A task that is only left over in the history is
-     * skipped via isVisible(), so it cannot latch the window shut.
-     */
-    @Suppress("DEPRECATION")
-    private fun isTaskManagerShowing(): Boolean {
-        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-            ?: return false
-        val tasks = runCatching { manager.getRecentTasks(6, 0) }.getOrNull() ?: return false
-        val home = homeComponent()
-        return tasks.any { info ->
-            // TaskInfo.isVisible() only exists from API 32; older releases fall
-            // back to the top-activity comparison alone.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2 && !info.isVisible()) return@any false
-            val component = info.topActivity ?: info.baseActivity ?: return@any false
-            if (component.packageName == context.packageName) return@any false
-            val name = "${component.packageName}.${component.className}".lowercase(Locale.ROOT)
-            name.contains("recents") || name.contains("overview") || name.contains("taskmanager") ||
-                (home != null && component != home)
-        }
-    }
-
-    /** The launcher's home activity, so "not the home screen" can be detected. */
-    private fun homeComponent(): android.content.ComponentName? = runCatching {
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-        @Suppress("DEPRECATION")
-        val resolved = context.packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
-        resolved?.activityInfo?.let { android.content.ComponentName(it.packageName, it.name) }
-    }.getOrNull()
-
     private fun clampToScreen() {
         val view = root ?: return
         val params = layoutParams ?: return
