@@ -461,9 +461,12 @@ internal class OverlayMiniWindow(
         // relative to a window the user had enlarged, so a finger on the
         // picture's own bottom-left corner (about a third of the way in) was
         // read as "move" and the window wandered instead of resizing.
-        val minimum = CORNER_DP * density
-        val zoneX = (width * CORNER_FRACTION).coerceAtLeast(minimum)
-        val zoneY = (height * CORNER_FRACTION).coerceAtLeast(minimum)
+        // Only a narrow band at the border counts as "grab the corner": the
+        // proportional zones reached far inside, so taps meant to move the
+        // window kept starting a resize instead.
+        val minimum = 16f * density
+        val zoneX = (width * CORNER_FRACTION).coerceAtMost(minimum).coerceAtLeast(8f * density)
+        val zoneY = (height * CORNER_FRACTION).coerceAtMost(minimum).coerceAtLeast(8f * density)
         val leftDistance = insideX
         val rightDistance = width - insideX
         val topDistance = insideY

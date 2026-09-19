@@ -50,6 +50,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clipToBounds
 import com.example.album.data.MediaItem
 import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appText
@@ -65,7 +66,7 @@ import kotlin.math.min
 import kotlin.math.sin
 
 /** Height reserved for the angle ruler, so it never covers the preview. */
-private val AngleBarHeight = 76.dp
+private val AngleBarHeight = 104.dp
 
 @Composable
 fun WallpaperCropScreen(
@@ -175,7 +176,7 @@ fun WallpaperCropScreen(
                 // the bottom of the picture.
                 BoxWithConstraints(
                     Modifier.fillMaxSize().statusBarsPadding()
-                        .padding(top = 58.dp, bottom = AngleBarHeight),
+                        .padding(top = 58.dp, bottom = AngleBarHeight + 14.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     val imageRatio = (editorGeometry.width.toFloat() / editorGeometry.height.coerceAtLeast(1))
@@ -224,7 +225,7 @@ fun WallpaperCropScreen(
                             }
                         }
                     )
-                    Box(Modifier.width(width).height(height)) {
+                    Box(Modifier.width(width).height(height).clipToBounds()) {
                         Image(
                             editorGeometry.asImageBitmap(),
                             null,
@@ -392,8 +393,8 @@ private fun CropFrame(
                     // mostly made of resize zones and moving it was hard.
                     val radiusX = (48f * density.density / size.width).coerceAtLeast(.024f)
                     val radiusY = (48f * density.density / size.height).coerceAtLeast(.024f)
-                    val innerX = radiusX * 0.25f
-                    val innerY = radiusY * 0.25f
+                    val innerX = radiusX * 0.5f
+                    val innerY = radiusY * 0.5f
                     val radius = maxOf(radiusX, radiusY)
                     // Distance from a frame edge with the sign of "outside": a
                     // positive value is outside the frame, negative inside.
