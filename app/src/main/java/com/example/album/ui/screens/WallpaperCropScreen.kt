@@ -200,6 +200,30 @@ fun WallpaperCropScreen(
                         val constrained = constrainWallpaperFrameToRotatedBounds(displayFrame, safeStraighten, safeFrameScale)
                         if (constrained != frame) frame = constrained
                     }
+                    // The gesture layer covers the whole preview, not just the
+                    // picture: touching the black bars above or below the image
+                    // used to do nothing at all. It only moves the frame (the
+                    // resize handles live on the frame itself), which is what a
+                    // drag outside the picture means.
+                    val imageSizePx = with(LocalDensity.current) {
+                        androidx.compose.ui.geometry.Size(width.value.dp.toPx(), height.value.dp.toPx())
+                    }
+                    Box(
+                        Modifier.fillMaxSize().pointerInput(imageSizePx, safeFrameScale) {
+                            detectDragGestures { change, amount ->
+                                change.consume()
+                                val dx = amount.x / imageSizePx.width.coerceAtLeast(1f) / safeFrameScale
+                                val dy = amount.y / imageSizePx.height.coerceAtLeast(1f) / safeFrameScale
+                                val moved = NormalizedRect(
+                                    displayFrame.left + dx,
+                                    displayFrame.top + dy,
+                                    displayFrame.right + dx,
+                                    displayFrame.bottom + dy
+                                )
+                                frame = constrainWallpaperFrameToRotatedBounds(moved, safeStraighten, safeFrameScale)
+                            }
+                        }
+                    )
                     Box(Modifier.width(width).height(height)) {
                         Image(
                             editorGeometry.asImageBitmap(),
@@ -368,8 +392,8 @@ private fun CropFrame(
                     // mostly made of resize zones and moving it was hard.
                     val radiusX = (48f * density.density / size.width).coerceAtLeast(.024f)
                     val radiusY = (48f * density.density / size.height).coerceAtLeast(.024f)
-                    val innerX = radiusX * 0.5f
-                    val innerY = radiusY * 0.5f
+                    val innerX = radiusX * 0.25f
+                    val innerY = radiusY * 0.25f
                     val radius = maxOf(radiusX, radiusY)
                     // Distance from a frame edge with the sign of "outside": a
                     // positive value is outside the frame, negative inside.

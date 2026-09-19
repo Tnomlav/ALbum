@@ -67,6 +67,12 @@ internal class OverlayMiniWindow(
     private var buttonViews: List<View> = emptyList()
     /** The rewind / play / forward row, whose spacing follows the window size. */
     private var transportButtons: List<ImageButton> = emptyList()
+    /**
+     * The two top corners carry buttons; a drag that starts on one of them is
+     * that corner's resize, decided from the button itself instead of from
+     * coordinates inside a different view.
+     */
+    private val buttonCornerEdges = java.util.IdentityHashMap<View, Int>()
     private var baseWindowWidth = 0
     // Gesture state, shared by the container and the buttons so a drag that
     // starts on a button still moves/resizes the window.
@@ -186,6 +192,9 @@ internal class OverlayMiniWindow(
         container.addView(restore)
         container.addView(close)
         buttonViews = listOf(restore, close, controls)
+        buttonCornerEdges.clear()
+        buttonCornerEdges[restore] = EDGE_LEFT or EDGE_TOP
+        buttonCornerEdges[close] = EDGE_RIGHT or EDGE_TOP
 
         // Dragging anywhere -- including from a button -- moves or resizes the
         // window. A tap that never moves still reaches the button's own click.
@@ -198,23 +207,24 @@ internal class OverlayMiniWindow(
             gestureStartWindowY = params.y
             gestureStartWidth = params.width
             gestureStartHeight = params.height
-            // Hit-testing uses coordinates inside the window. The window can be
-            // positioned outside the app's own coordinate space (it is a
-            // FLAG_LAYOUT_NO_LIMITS overlay), so screen coordinates and layout
-            // params do not line up; `getLocationInWindow` plus the event's own
-            // position is exact for whichever child the finger landed on.
-            val location = IntArray(2)
-            source.getLocationInWindow(location)
-            // A shrunk window resizes from its corners like any other: dragging
-            // its bottom-left corner has to pin the top-right there too. A tap
-            // (no movement) still restores the size the window opened with.
-            gestureEdges = touchedEdges(
-                insideX = location[0] + event.x,
-                insideY = location[1] + event.y,
-                width = params.width,
-                height = params.height,
-                density = density
-            )
+            // The corner a drag starts in is taken from the event's position
+            // *inside the container*: screen coordinates and layout params do not
+            // line up for a FLAG_LAYOUT_NO_LIMITS overlay, and `getLocationInWindow`
+            // was off by the window's own offset, which made the bottom-left read
+            // as the bottom-right (so the window never moved) or as a plain move.
+            // The two top corners carry buttons, so those are decided by the
+            // button itself instead of by coordinates in another view.
+            gestureEdges = buttonCornerEdges[source] ?: if (source === root) {
+                touchedEdges(
+                    insideX = event.x,
+                    insideY = event.y,
+                    width = params.width,
+                    height = params.height,
+                    density = density
+                )
+            } else {
+                0
+            }
             return true
         }
 
@@ -334,6 +344,8 @@ internal class OverlayMiniWindow(
         contentView = null
         playPauseButton = null
         buttonViews = emptyList()
+        transportButtons = emptyList()
+        buttonCornerEdges.clear()
         onVisibilityChanged(false)
     }
 
