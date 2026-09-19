@@ -362,31 +362,45 @@ private fun CropFrame(
                     val pointX = point.x / size.width
                     val pointY = point.y / size.height
                     val visible = shownFrame(working)
+                    // The finger usually lands just *outside* the frame, so the
+                    // outward part of a handle stays generous; the part that
+                    // reaches inside is halved, otherwise the small frame was
+                    // mostly made of resize zones and moving it was hard.
                     val radiusX = (48f * density.density / size.width).coerceAtLeast(.024f)
                     val radiusY = (48f * density.density / size.height).coerceAtLeast(.024f)
+                    val innerX = radiusX * 0.5f
+                    val innerY = radiusY * 0.5f
                     val radius = maxOf(radiusX, radiusY)
+                    // Distance from a frame edge with the sign of "outside": a
+                    // positive value is outside the frame, negative inside.
+                    fun outwardX(value: Float, edge: Float) = value - edge
+                    fun outwardY(value: Float, edge: Float) = value - edge
+                    fun inHandle(outward: Float, outwardLimit: Float, inwardLimit: Float): Boolean =
+                        outward <= outwardLimit && -outward <= inwardLimit
                     val corners = listOf(
                         Offset(visible.left, visible.top), Offset(visible.right, visible.top),
                         Offset(visible.left, visible.bottom), Offset(visible.right, visible.bottom)
                     )
                     handle = corners.indices.minByOrNull {
-                        val dx = corners[it].x - pointX
-                        val dy = corners[it].y - pointY
-                        dx * dx + dy * dy
-                    }?.takeIf {
-                        val dx = corners[it].x - pointX
-                        val dy = corners[it].y - pointY
-                        dx * dx + dy * dy <= radius * radius
+                        val dx = kotlin.math.abs(corners[it].x - pointX)
+                        val dy = kotlin.math.abs(corners[it].y - pointY)
+                        dx + dy
+                    }?.takeIf { index ->
+                        val isLeft = index % 2 == 0
+                        val isTop = index < 2
+                        val dx = if (isLeft) pointX - visible.left else visible.right - pointX
+                        val dy = if (isTop) pointY - visible.top else visible.bottom - pointY
+                        inHandle(dx, radiusX, innerX) && inHandle(dy, radiusY, innerY)
                     } ?: -1
                     if (handle < 0) {
                         // Edges get a wider band than the corners: the finger
                         // usually lands slightly outside the visible border.
                         val edgeTolerance = radius * 1.8f
                         val candidates = listOf(
-                            if (pointX in visible.left - edgeTolerance..visible.right + edgeTolerance) abs(pointY - visible.top) else Float.POSITIVE_INFINITY,
-                            if (pointX in visible.left - edgeTolerance..visible.right + edgeTolerance) abs(pointY - visible.bottom) else Float.POSITIVE_INFINITY,
-                            if (pointY in visible.top - edgeTolerance..visible.bottom + edgeTolerance) abs(pointX - visible.left) else Float.POSITIVE_INFINITY,
-                            if (pointY in visible.top - edgeTolerance..visible.bottom + edgeTolerance) abs(pointX - visible.right) else Float.POSITIVE_INFINITY
+                            if (pointX in visible.left - edgeTolerance..visible.right + edgeTolerance && inHandle(outwardY(pointY, visible.top), edgeTolerance, innerY)) abs(pointY - visible.top) else Float.POSITIVE_INFINITY,
+                            if (pointX in visible.left - edgeTolerance..visible.right + edgeTolerance && inHandle(outwardY(visible.bottom, pointY), edgeTolerance, innerY)) abs(pointY - visible.bottom) else Float.POSITIVE_INFINITY,
+                            if (pointY in visible.top - edgeTolerance..visible.bottom + edgeTolerance && inHandle(outwardX(pointX, visible.left), edgeTolerance, innerX)) abs(pointX - visible.left) else Float.POSITIVE_INFINITY,
+                            if (pointY in visible.top - edgeTolerance..visible.bottom + edgeTolerance && inHandle(outwardX(visible.right, pointX), edgeTolerance, innerX)) abs(pointX - visible.right) else Float.POSITIVE_INFINITY
                         )
                         handle = candidates.indices.minByOrNull { candidates[it] }
                             ?.takeIf { candidates[it] <= edgeTolerance }?.plus(4) ?: -1

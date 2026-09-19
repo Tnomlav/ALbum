@@ -709,7 +709,9 @@ class PixivArchiveRepository(private val context: Context) {
             }
             val next = if (moved) {
                 completed++
-                clearMetadataCache(record.pid)
+                // Keep the cached metadata: dropping it made the next scan of
+                // the same archive query Pixiv all over again, so a refresh
+                // re-updated files that had not changed at all.
                 record.copy(
                     status = PixivArchiveStatus.Archived,
                     message = if (tagsWriteFailed) "已归档至 $folderName，但 Tag 写入失败" else "已归档至 $folderName"
@@ -739,12 +741,6 @@ class PixivArchiveRepository(private val context: Context) {
         }
         onProgress(PixivArchiveProgress(if (failed == 0) PixivArchivePhase.Complete else PixivArchivePhase.Error, completed, total, failed, message = if (failed == 0) "已完成 $completed 张图片" else "归档已暂停，可检查后重试", log = if (failed == 0) "归档完成" else "操作已停止，可检查后重试"))
         PixivArchiveResult(updated, completed, failed)
-    }
-
-    private suspend fun clearMetadataCache(pid: String?) {
-        if (pid.isNullOrBlank()) return
-        metadataCacheLock.withLock { metadataCache.remove(pid) }
-        metadataPreferences.edit().remove(pid).apply()
     }
 
     private fun collectImages(file: DocumentFile, output: MutableList<DocumentFile>) {

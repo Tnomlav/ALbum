@@ -65,6 +65,9 @@ internal class OverlayMiniWindow(
     private var playPauseButton: ImageButton? = null
     private var contentView: PlayerView? = null
     private var buttonViews: List<View> = emptyList()
+    /** The rewind / play / forward row, whose spacing follows the window size. */
+    private var transportButtons: List<ImageButton> = emptyList()
+    private var baseWindowWidth = 0
     // Gesture state, shared by the container and the buttons so a drag that
     // starts on a button still moves/resizes the window.
     private var gestureStartX = 0f
@@ -159,6 +162,8 @@ internal class OverlayMiniWindow(
         val forward = overlayButton(com.example.album.R.drawable.ic_mw_forward, density) { onSeekForward() }
         playPauseButton = playPause
         listOf(rewind, playPause, forward).forEach { controls.addView(it) }
+        transportButtons = listOf(rewind, playPause, forward)
+        baseWindowWidth = width
         container.addView(controls)
         // Back to full screen sits in the top-left corner, close in the
         // top-right; the transport controls stay in the middle.
@@ -231,6 +236,7 @@ internal class OverlayMiniWindow(
                     startWidth = gestureStartWidth,
                     startHeight = gestureStartHeight
                 )
+                updateTransportSpacing()
             } else {
                 // Read the metrics here instead of reusing the ones captured when
                 // the window was created: after a rotation they described the
@@ -252,6 +258,10 @@ internal class OverlayMiniWindow(
                 MotionEvent.ACTION_DOWN -> beginGesture(view, event)
                 MotionEvent.ACTION_MOVE -> continueGesture(view, event)
                 MotionEvent.ACTION_UP -> {
+                    // Apply the finger's last position too: on a quick drag the
+                    // UP event carries the final spot and the window otherwise
+                    // stopped a few pixels short.
+                    if (gestureEdges != 0 && gestureMoved) continueGesture(view, event)
                     val wasTap = !gestureMoved
                     gestureEdges = 0
                     // A tap on the empty area toggles the controls, the same way
@@ -279,6 +289,7 @@ internal class OverlayMiniWindow(
                 }
                 MotionEvent.ACTION_MOVE -> if (gestureMoved) continueGesture(view, event) else false
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (gestureEdges != 0 && gestureMoved) continueGesture(view, event)
                     gestureEdges = 0
                     if (gestureMoved) suppressNextClick = true
                     gestureMoved = false
@@ -340,6 +351,27 @@ internal class OverlayMiniWindow(
     /** Keeps the controls on screen while the user is interacting with them. */
     private fun touchControls() {
         if (controlsVisible) setControlsVisible(true)
+    }
+
+    /**
+     * Keeps the gaps between the transport buttons proportional to the window:
+     * they were fixed at 6dp, so a resized window left them crowded together or
+     * spread far apart.
+     */
+    private fun updateTransportSpacing() {
+        val params = layoutParams ?: return
+        if (baseWindowWidth <= 0 || transportButtons.isEmpty()) return
+        val density = context.resources.displayMetrics.density
+        val scale = (params.width.toFloat() / baseWindowWidth).coerceIn(0.6f, 3f)
+        val margin = (6f * density * scale).roundToInt()
+        transportButtons.forEach { button ->
+            (button.layoutParams as? LinearLayout.LayoutParams)?.let { layout ->
+                layout.marginStart = margin
+                layout.marginEnd = margin
+                button.layoutParams = layout
+            }
+        }
+        root?.requestLayout()
     }
 
     fun syncPlayState() {

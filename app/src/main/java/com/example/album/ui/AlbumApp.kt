@@ -1047,7 +1047,10 @@ fun AlbumApp(
             pixivSourceFolderName = snapshot.sourceFolderName
             pixivLibraryVersion++
         } finally {
-            if (walking && generation == pixivReloadGeneration) pixivPageRefreshing = false
+            // The latest request always clears the flag, even when it returned
+            // early from the cached snapshot: an older cancelled walk used to
+            // leave the pull-to-refresh spinner running for good.
+            if (generation == pixivReloadGeneration) pixivPageRefreshing = false
         }
     }
     fun requestPixivReload(forceWalk: Boolean = true) {
@@ -2322,10 +2325,18 @@ fun AlbumApp(
             onDelete = { items ->
                 pixivFilesChanged = true
                 pixivArchivePendingDeleteUris = items.mapTo(hashSetOf()) { it.uri.toString() }
-                // The delete confirmation lives in the main UI, which is not
-                // composed while the archive page is open.
-                pixivArchiveOpen = false
-                requestDelete(items)
+                // Scanned archive items are SAF documents: deleting them needs
+                // no system dialog, so the page stays open and the result is
+                // reported right here. Closing it first only flashed back to the
+                // Pixiv page, and a failure left the files behind silently.
+                if (items.isNotEmpty() && items.all { it.isDocument }) {
+                    scope.launch { performDelete(items) }
+                } else {
+                    // Anything backed by MediaStore needs the app-level dialog,
+                    // which is not composed while this page is open.
+                    pixivArchiveOpen = false
+                    requestDelete(items)
+                }
             }
         )
         return
