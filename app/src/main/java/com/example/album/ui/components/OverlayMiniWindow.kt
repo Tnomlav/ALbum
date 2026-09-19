@@ -53,7 +53,7 @@ internal class OverlayMiniWindow(
         private const val CORNER_DP = 44f
 
         /** Corner zones are this share of the window, on each side. */
-        private const val CORNER_FRACTION = 0.4f
+        private const val CORNER_FRACTION = 0.25f
 
         /** Controls hide themselves after this long, like the in-app player. */
         private const val CONTROLS_TIMEOUT_MS = 3_000L
@@ -502,19 +502,12 @@ internal class OverlayMiniWindow(
         val screenWidth = context.resources.displayMetrics.widthPixels
         val screenHeight = context.resources.displayMetrics.heightPixels
         val minWidth = (160 * density).roundToInt()
-        // The dragged corner decides which corner stays put: dragging the left
-        // side pins the right edge, dragging the bottom side pins the top edge,
-        // and so on. The pinned corner is resolved from the grabbed *edges*, not
-        // from where the finger happened to be relative to the window's centre,
-        // which is what made the bottom-left drag behave like the bottom-right.
-        val pinRight = edges and EDGE_LEFT != 0
-        val pinBottom = edges and EDGE_TOP != 0
-        val pinnedX = startWindowX + startWidth
-        val pinnedY = startWindowY + startHeight
-        // Room between the pinned edge and the far side of the screen. Limiting
-        // the size here is what keeps the pinned corner exactly in place.
-        val horizontalRoom = if (pinRight) pinnedX - 8f * density else screenWidth - 8f * density - startWindowX
-        val verticalRoom = if (pinBottom) pinnedY - 8f * density else screenHeight - 8f * density - startWindowY
+        // Every corner resizes exactly like the bottom-right one: the window's
+        // top-left corner stays put and the picture grows or shrinks away from
+        // it. That is what the user asked for (repeatedly), and it also stops
+        // the window from sliding around mid-drag.
+        val horizontalRoom = screenWidth - 8f * density - startWindowX
+        val verticalRoom = screenHeight - 8f * density - startWindowY
         val maxWidth = minOf(
             (screenWidth - 16 * density).roundToInt(),
             horizontalRoom.roundToInt(),
@@ -523,8 +516,8 @@ internal class OverlayMiniWindow(
         // Dragging away from the centre grows the window, dragging towards it
         // shrinks; that holds for every border and corner, which fixed the case
         // where both directions shrank the window.
-        val horizontalGrowth = if (pinRight) -dx else dx
-        val verticalGrowth = if (pinBottom) -dy else dy
+        val horizontalGrowth = dx
+        val verticalGrowth = dy
         val horizontalEdge = edges and (EDGE_LEFT or EDGE_RIGHT) != 0
         val verticalEdge = edges and (EDGE_TOP or EDGE_BOTTOM) != 0
         val growth = when {
@@ -542,11 +535,9 @@ internal class OverlayMiniWindow(
         }
         val newWidth = (startWidth + growth).roundToInt().coerceIn(minWidth, maxWidth)
         val newHeight = (newWidth * 9f / 16f).roundToInt()
-        // Re-anchor on the pinned corner: its absolute position on screen is
-        // preserved exactly, so dragging the bottom-left corner keeps the
-        // top-right corner still (and the same for the other three).
-        params.x = if (pinRight) pinnedX - newWidth else startWindowX
-        params.y = if (pinBottom) pinnedY - newHeight else startWindowY
+        // The window itself never moves while resizing.
+        params.x = startWindowX
+        params.y = startWindowY
         params.width = newWidth
         params.height = newHeight
     }

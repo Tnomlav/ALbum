@@ -209,7 +209,7 @@ fun WallpaperCropScreen(
                         androidx.compose.ui.geometry.Size(width.value.dp.toPx(), height.value.dp.toPx())
                     }
                     Box(
-                        Modifier.fillMaxSize().pointerInput(imageSizePx, safeFrameScale) {
+                        Modifier.fillMaxSize().pointerInput(Unit) {
                             detectDragGestures { change, amount ->
                                 change.consume()
                                 val dx = amount.x / imageSizePx.width.coerceAtLeast(1f) / safeFrameScale
@@ -412,8 +412,11 @@ private fun CropFrame(
                     }?.takeIf { index ->
                         val isLeft = index % 2 == 0
                         val isTop = index < 2
-                        val dx = if (isLeft) pointX - visible.left else visible.right - pointX
-                        val dy = if (isTop) pointY - visible.top else visible.bottom - pointY
+                        // Positive means "outside the frame": the sign has to
+                        // match inHandle(), otherwise the inward branch is
+                        // unreachable and the band stays 48dp inside as well.
+                        val dx = if (isLeft) visible.left - pointX else pointX - visible.right
+                        val dy = if (isTop) visible.top - pointY else pointY - visible.bottom
                         inHandle(dx, radiusX, innerX) && inHandle(dy, radiusY, innerY)
                     } ?: -1
                     if (handle < 0) {
@@ -421,10 +424,10 @@ private fun CropFrame(
                         // usually lands slightly outside the visible border.
                         val edgeTolerance = radius * 1.8f
                         val candidates = listOf(
-                            if (pointX in visible.left - edgeTolerance..visible.right + edgeTolerance && inHandle(outwardY(pointY, visible.top), edgeTolerance, innerY)) abs(pointY - visible.top) else Float.POSITIVE_INFINITY,
-                            if (pointX in visible.left - edgeTolerance..visible.right + edgeTolerance && inHandle(outwardY(visible.bottom, pointY), edgeTolerance, innerY)) abs(pointY - visible.bottom) else Float.POSITIVE_INFINITY,
-                            if (pointY in visible.top - edgeTolerance..visible.bottom + edgeTolerance && inHandle(outwardX(pointX, visible.left), edgeTolerance, innerX)) abs(pointX - visible.left) else Float.POSITIVE_INFINITY,
-                            if (pointY in visible.top - edgeTolerance..visible.bottom + edgeTolerance && inHandle(outwardX(visible.right, pointX), edgeTolerance, innerX)) abs(pointX - visible.right) else Float.POSITIVE_INFINITY
+                            if (pointX in visible.left - edgeTolerance..visible.right + edgeTolerance && inHandle(outwardY(visible.top, pointY), edgeTolerance, innerY)) abs(pointY - visible.top) else Float.POSITIVE_INFINITY,
+                            if (pointX in visible.left - edgeTolerance..visible.right + edgeTolerance && inHandle(outwardY(pointY, visible.bottom), edgeTolerance, innerY)) abs(pointY - visible.bottom) else Float.POSITIVE_INFINITY,
+                            if (pointY in visible.top - edgeTolerance..visible.bottom + edgeTolerance && inHandle(outwardX(visible.left, pointX), edgeTolerance, innerX)) abs(pointX - visible.left) else Float.POSITIVE_INFINITY,
+                            if (pointY in visible.top - edgeTolerance..visible.bottom + edgeTolerance && inHandle(outwardX(pointX, visible.right), edgeTolerance, innerX)) abs(pointX - visible.right) else Float.POSITIVE_INFINITY
                         )
                         handle = candidates.indices.minByOrNull { candidates[it] }
                             ?.takeIf { candidates[it] <= edgeTolerance }?.plus(4) ?: -1
