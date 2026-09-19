@@ -197,9 +197,19 @@ fun WallpaperCropScreen(
                         width.value / (frameWidth * cosine + frameHeight * sine).coerceAtLeast(.0001f),
                         height.value / (frameWidth * sine + frameHeight * cosine).coerceAtLeast(.0001f)
                     ).coerceIn(.01f, 1f)
+                    // The frame the user last set by hand. Rotating the picture
+                    // squeezes the frame so it stays inside the rotated bounds;
+                    // rotating back has to grow it again instead of leaving the
+                    // squeezed size behind.
+                    var userFrame by remember { mutableStateOf<NormalizedRect?>(null) }
                     LaunchedEffect(displayFrame, safeStraighten, safeFrameScale) {
                         val constrained = constrainWallpaperFrameToRotatedBounds(displayFrame, safeStraighten, safeFrameScale)
-                        if (constrained != frame) frame = constrained
+                        if (constrained != displayFrame) {
+                            frame = constrained
+                        } else {
+                            val remembered = userFrame
+                            if (remembered != null && remembered.width > displayFrame.width) frame = remembered
+                        }
                     }
                     // The gesture layer covers the whole preview, not just the
                     // picture: touching the black bars above or below the image
@@ -209,20 +219,95 @@ fun WallpaperCropScreen(
                     val imageSizePx = with(LocalDensity.current) {
                         androidx.compose.ui.geometry.Size(width.value.dp.toPx(), height.value.dp.toPx())
                     }
+                    val imageLeftPx = with(LocalDensity.current) { ((maxWidth - width) / 2).toPx() }
+                    val imageTopPx = with(LocalDensity.current) { ((maxHeight - height) / 2).toPx() }
+                    val bandOuterPx = with(LocalDensity.current) { 48.dp.toPx() }
+                    val bandInnerPx = with(LocalDensity.current) { 24.dp.toPx() }
                     Box(
                         Modifier.fillMaxSize().pointerInput(Unit) {
-                            detectDragGestures { change, amount ->
-                                change.consume()
-                                val dx = amount.x / imageSizePx.width.coerceAtLeast(1f) / safeFrameScale
-                                val dy = amount.y / imageSizePx.height.coerceAtLeast(1f) / safeFrameScale
-                                val moved = NormalizedRect(
-                                    displayFrame.left + dx,
-                                    displayFrame.top + dy,
-                                    displayFrame.right + dx,
-                                    displayFrame.bottom + dy
-                                )
-                                frame = constrainWallpaperFrameToRotatedBounds(moved, safeStraighten, safeFrameScale)
-                            }
+                            var handle = -1
+                            var working = displayFrame
+                            fun shown(value: NormalizedRect) = NormalizedRect(
+                                left = .5f + (value.left - .5f) * safeFrameScale,
+                                top = .5f + (value.top - .5f) * safeFrameScale,
+                                right = .5f + (value.right - .5f) * safeFrameScale,
+                                bottom = .5f + (value.bottom - .5f) * safeFrameScale
+                            )
+                            fun hits(outward: Float, outwardBand: Float, inwardBand: Float) =
+                                outward <= outwardBand && -outward <= inwardBand
+                            detectDragGestures(
+                                onDragStart = { point ->
+                                    working = constrainWallpaperFrameToRotatedBounds(frame, safeStraighten, safeFrameScale)
+                                    // The same corner/edge bands the frame draws,
+                                    // measured in preview pixels, so a drag that
+                                    // starts in the black bar just outside the
+                                    // frame still grabs the handle.
+                                    val w = imageSizePx.width.coerceAtLeast(1f)
+                                    val h = imageSizePx.height.coerceAtLeast(1f)
+                                    val visible = shown(working)
+                                    val left = imageLeftPx + visible.left * w
+                                    val top = imageTopPx + visible.top * h
+                                    val right = imageLeftPx + visible.right * w
+                                    val bottom = imageTopPx + visible.bottom * h
+                                    val corners = listOf(
+                                        Offset(left, top), Offset(right, top),
+                                        Offset(left, bottom), Offset(right, bottom)
+                                    )
+                                    handle = corners.indices.minByOrNull { index ->
+                                        val isLeft = index % 2 == 0
+                                        val isTop = index < 2
+                                        val dx = if (isLeft) left - point.x else point.x - right
+                                        val dy = if (isTop) top - point.y else point.y - bottom
+                                        kotlin.math.abs(dx) + kotlin.math.abs(dy)
+                                    }?.takeIf { index ->
+                                        val isLeft = index % 2 == 0
+                                        val isTop = index < 2
+                                        val dx = if (isLeft) left - point.x else point.x - right
+                                        val dy = if (isTop) top - point.y else point.y - bottom
+                                        hits(dx, bandOuterPx, bandInnerPx) && hits(dy, bandOuterPx, bandInnerPx)
+                                    } ?: -1
+                                    if (handle < 0) {
+                                        val edge = bandOuterPx * 1.8f
+                                        val candidates = listOf(
+                                            if (point.x in left - edge..right + edge && hits(top - point.y, edge, bandInnerPx)) kotlin.math.abs(point.y - top) else Float.POSITIVE_INFINITY,
+                                            if (point.x in left - edge..right + edge && hits(point.y - bottom, edge, bandInnerPx)) kotlin.math.abs(point.y - bottom) else Float.POSITIVE_INFINITY,
+                                            if (point.y in top - edge..bottom + edge && hits(left - point.x, edge, bandInnerPx)) kotlin.math.abs(point.x - left) else Float.POSITIVE_INFINITY,
+                                            if (point.y in top - edge..bottom + edge && hits(point.x - right, edge, bandInnerPx)) kotlin.math.abs(point.x - right) else Float.POSITIVE_INFINITY
+                                        )
+                                        handle = candidates.indices
+                                            .minByOrNull { candidates[it] }
+                                            ?.takeIf { candidates[it] <= edge }
+                                            ?.plus(4)
+                                            ?: -1
+                                    }
+                                },
+                                onDragEnd = { handle = -1 },
+                                onDragCancel = { handle = -1 },
+                                onDrag = { change, amount ->
+                                    change.consume()
+                                    val w = imageSizePx.width.coerceAtLeast(1f)
+                                    val h = imageSizePx.height.coerceAtLeast(1f)
+                                    val x = ((change.position.x - imageLeftPx) / w)
+                                        .let { .5f + (it - .5f) / safeFrameScale }.coerceIn(0f, 1f)
+                                    val y = ((change.position.y - imageTopPx) / h)
+                                        .let { .5f + (it - .5f) / safeFrameScale }.coerceIn(0f, 1f)
+                                    val candidate = if (handle >= 0) {
+                                        resizeFrameFromPointer(working, handle, x, y, ratio / imageRatio, .06f)
+                                    } else {
+                                        val dx = amount.x / w / safeFrameScale
+                                        val dy = amount.y / h / safeFrameScale
+                                        NormalizedRect(
+                                            working.left + dx,
+                                            working.top + dy,
+                                            working.right + dx,
+                                            working.bottom + dy
+                                        )
+                                    }
+                                    working = constrainWallpaperFrameToRotatedBounds(candidate, safeStraighten, safeFrameScale)
+                                    frame = working
+                                    userFrame = working
+                                }
+                            )
                         }
                     )
                     Box(Modifier.width(width).height(height).clipToBounds()) {
@@ -241,7 +326,7 @@ fun WallpaperCropScreen(
                             normalizedRatio = ratio / imageRatio,
                             visibleScale = safeFrameScale,
                             straighten = safeStraighten,
-                            onFrameChange = { frame = it },
+                            onFrameChange = { frame = it; userFrame = it },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
