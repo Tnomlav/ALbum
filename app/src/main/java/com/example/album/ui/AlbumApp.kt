@@ -1100,8 +1100,12 @@ fun AlbumApp(
         // shows. Names are compared case-insensitively: a SAF folder and the
         // matching MediaStore bucket rarely agree on case.
         val allowedFolders = pixivFolderNames + pixivSourceFolderName
+        // Compare in lowercase through a set: the previous per-item
+        // `any { equals(ignoreCase = true) }` lowercased nothing but walked the
+        // whole folder list for every one of thousands of archive items.
+        val allowedLower = allowedFolders.mapTo(HashSet()) { it.lowercase() }
         val archived = pixivImages.filter { item ->
-            allowedFolders.any { it.equals(item.folder, ignoreCase = true) }
+            item.folder.lowercase() in allowedLower
         }
         // The local Pixiv folder belongs on this page too: the pinned folder is
         // that folder, not whatever the archive's source directory points at.
