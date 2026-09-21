@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The device smoke job below drives real gestures on an emulator; keep it off
+  # the pull-request path so a flaky emulator cannot block a review, but still
+  # get a weekly signal.
+  schedule:
+    - cron: '0 3 * * 1'
   workflow_dispatch:
 
 concurrency:
@@ -107,4 +112,68 @@ jobs:
         with:
           name: album-instrumented-reports-api${{ matrix.api-level }}
           path: app/build/reports/androidTests/connected
+          if-no-files-found: warn
+
+  # Scripted on-device checks for the surfaces that kept regressing and that no
+  # unit test can reach: the crop page's gesture bands. scripts/device-smoke.py
+  # screenshots the crop frame (it is drawn on a Canvas, so uiautomator cannot
+  # see it) and asserts that a tilt only insets it, that returning to zero
+  # restores it, and that a drag from the black bar grabs the edge there.
+  device-smoke:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Make the Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Build the debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Install Pillow for the screenshot analysis
+        run: python3 -m pip install --user pillow
+
+      - name: Run the device smoke checks
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-boot-timeout: 900
+          script: |
+            # A uniform fixture keeps the screenshot analysis unambiguous: the
+            # only long white lines on the crop page are the frame itself.
+            python3 -c "from PIL import Image; Image.new('RGB', (1200, 2000), (90, 96, 104)).save('/tmp/album-smoke.jpg', quality=92)"
+            adb push /tmp/album-smoke.jpg /sdcard/Pictures/album-smoke.jpg
+            adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/album-smoke.jpg
+            adb shell pm grant com.example.album android.permission.READ_MEDIA_IMAGES || true
+            adb shell appops set com.example.album MANAGE_EXTERNAL_STORAGE allow || true
+            python3 scripts/device-smoke.py --apk app/build/outputs/apk/debug/app-debug.apk --workdir /tmp
+
+      - name: Upload the smoke screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: album-device-smoke
+          path: |
+            /tmp/crop-*.png
           if-no-files-found: warn
