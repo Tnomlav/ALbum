@@ -43,10 +43,10 @@ internal class OverlayMiniWindow(
     companion object {
         fun canShow(context: Context): Boolean = Settings.canDrawOverlays(context)
 
-        private const val EDGE_LEFT = 1
-        private const val EDGE_TOP = 2
-        private const val EDGE_RIGHT = 4
-        private const val EDGE_BOTTOM = 8
+        internal const val EDGE_LEFT = 1
+        internal const val EDGE_TOP = 2
+        internal const val EDGE_RIGHT = 4
+        internal const val EDGE_BOTTOM = 8
 
         /** How far from a border the finger counts as "grab the border". */
         /** Size of the corner squares that resize the window. */
@@ -509,8 +509,7 @@ internal class OverlayMiniWindow(
         // keeps the top and left edges fixed, the bottom-left keeps the top and
         // right, the top-left keeps the bottom and right, and the top-right
         // keeps the bottom and left. Only the size changes.
-        val pinRight = edges and EDGE_LEFT != 0
-        val pinBottom = edges and EDGE_TOP != 0
+        val (pinRight, pinBottom) = miniWindowPinnedEdges(edges)
         val pinnedX = startWindowX + startWidth
         val pinnedY = startWindowY + startHeight
         val horizontalRoom = if (pinRight) pinnedX - 8f * density else screenWidth - 8f * density - startWindowX
@@ -595,3 +594,18 @@ internal fun cornerResizeGrowth(horizontalGrowth: Float, verticalGrowth: Float):
     val denominator = 1f + verticalPerWidth * verticalPerWidth
     return (horizontalGrowth + verticalGrowth * verticalPerWidth) / denominator
 }
+
+/**
+ * Which window edges stay pinned while a corner is dragged: dragging the left
+ * side pins the right edge, dragging the top side pins the bottom edge.
+ *
+ * Bottom-right therefore keeps the top and left edges, bottom-left keeps the
+ * top and right, top-left keeps the bottom and right, and top-right keeps the
+ * bottom and left. This has flip-flopped more than once, so it is pinned down by
+ * a unit test.
+ */
+internal fun miniWindowPinnedEdges(edges: Int): Pair<Boolean, Boolean> = (
+    edges and OverlayMiniWindow.EDGE_LEFT != 0
+    ) to (
+    edges and OverlayMiniWindow.EDGE_TOP != 0
+    )
