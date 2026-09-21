@@ -1378,7 +1378,7 @@ internal fun Media3VideoPlayer(
                         .pointerInput(Unit) { detectTapGestures(onTap = { refreshControls() }) }
                 )
             }
-            gestureHud?.let { hud ->
+            gestureHud?.takeIf { preferences.getBoolean("video_center_popup", true) }?.let { hud ->
                 Box(Modifier.align(Alignment.Center).zIndex(12f).background(Color.Black.copy(.72f)).padding(horizontal = 14.dp, vertical = 10.dp)) {
                     Text(hud, color = Color.White, fontSize = 14.sp)
                 }

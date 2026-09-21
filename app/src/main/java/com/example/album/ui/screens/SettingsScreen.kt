@@ -146,6 +146,7 @@ fun SettingsScreen(
     var rememberProgress by remember { mutableStateOf(preferences.getBoolean("video_progress", true)) }
     var autoHidePlayer by remember { mutableStateOf(preferences.getBoolean("video_auto_hide", true)) }
     var longSkip by remember { mutableStateOf(preferences.getBoolean("long_skip", false)) }
+    var centerPopup by remember { mutableStateOf(preferences.getBoolean("video_center_popup", true)) }
     var tapPause by remember { mutableStateOf(preferences.getBoolean("video_tap_pause", false)) }
     var portraitTapPause by remember { mutableStateOf(preferences.getBoolean("video_portrait_tap_pause", false)) }
     var autoMini by remember { mutableStateOf(preferences.getBoolean("video_auto_mini", false)) }
@@ -421,6 +422,7 @@ fun SettingsScreen(
         item { ToggleRow("进入后台时自动暂停", null, pauseVideoOnBackground) { setBoolean("video_pause_on_background", it) { pauseVideoOnBackground = it } } }
         item { ToggleRow("记住最后一次播放进度", null, rememberProgress) { setBoolean("video_progress", it) { rememberProgress = it } } }
         item { ToggleRow("自动隐藏播放器界面", "播放中无操作 3 秒后隐藏控件", autoHidePlayer) { setBoolean("video_auto_hide", it) { autoHidePlayer = it } } }
+        item { ToggleRow("视频弹窗", "暂停、快进快退、调节倍速时显示中间的黑色提示", centerPopup) { setBoolean("video_center_popup", it) { centerPopup = it } } }
         item { ToggleRow("长快进", "在播放器中显示长快退和长快进按钮", longSkip) { setBoolean("long_skip", it) { longSkip = it } } }
         if (longSkip) {
             item { ValueRow("长快进长度", value("long_skip_length", "30秒")) {
