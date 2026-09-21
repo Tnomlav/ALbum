@@ -69,42 +69,71 @@ class WallpaperCropGestureTest {
     }
 
     @Test
-    fun tiltingOnlyShrinksWhatIsDrawn() {
-        val chosen = NormalizedRect(.05f, .05f, .95f, .95f)
-        val imageRatio = 16f / 9f
-        assertEquals(1f, rotatedWallpaperPreviewScale(chosen, 0f, imageRatio), 1e-4f)
-        val tiltedScale = rotatedWallpaperPreviewScale(chosen, 30f, imageRatio)
-        assertTrue(tiltedScale < 1f)
-        // The frame itself is untouched by the tilt ...
-        assertFrameEquals(chosen, wallpaperPreviewFrame(chosen, 30f, imageRatio))
-        // ... while what is drawn is the inset version.
-        assertTrue(chosen.width * tiltedScale < chosen.width - 1e-3f)
+    fun zeroDegreesKeepsExactlyTheFrameTheUserChose() {
+        val chosen = NormalizedRect(.12f, .2f, .88f, .8f)
+        assertFrameEquals(chosen, inscribeWallpaperFrameInRotatedPicture(chosen, 0f, 16f / 9f))
     }
 
     @Test
-    fun aDragMadeWhileTiltedDoesNotShrinkTheCrop() {
+    fun aTiltShrinksTheFrameOnlyAsFarAsTheBoundaryNeeds() {
         val imageRatio = 16f / 9f
+        val chosen = NormalizedRect(.05f, .05f, .95f, .95f)
+        val tilted = inscribeWallpaperFrameInRotatedPicture(chosen, 30f, imageRatio)
+        assertTrue(tilted.width < chosen.width - 1e-3f)
+        assertTrue(wallpaperFrameInsideRotatedPicture(tilted, 30f, imageRatio))
+        // "Exactly inscribed": no room is wasted, so growing it by one percent
+        // would already leave the turned picture.
+        val grown = NormalizedRect(
+            tilted.centerX() - tilted.width / 2f * 1.01f,
+            tilted.centerY() - tilted.height / 2f * 1.01f,
+            tilted.centerX() + tilted.width / 2f * 1.01f,
+            tilted.centerY() + tilted.height / 2f * 1.01f
+        )
+        assertTrue(!wallpaperFrameInsideRotatedPicture(grown, 30f, imageRatio))
+    }
+
+    @Test
+    fun aDragMadeWhileTiltedKeepsTheSizeTheUserAskedFor() {
         val dragged = NormalizedRect(0f, 0f, 1f, 1f) // the user dragged to fill the picture
-        // The old rule clipped the dragged frame against the rotated bounds at
-        // the scale of the *previous*, smaller frame; the stored crop silently
-        // shrank and never came back when the angle returned to zero.
-        val oldStored = constrainWallpaperFrameToRotatedBounds(dragged, 30f, 1f)
-        assertTrue(oldStored.width < dragged.width - 1e-3f)
-        // The new rule only keeps the frame inside the picture ...
+        // Dragging only has to stay inside the picture itself; the angle preview
+        // shrinks what is drawn instead of rewriting the frame, so the size is
+        // still there when the angle returns to zero.
         val stored = constrainWallpaperFrameToImage(dragged)
         assertFrameEquals(dragged, stored)
-        // ... so zero degrees shows the size the user dragged.
-        assertFrameEquals(dragged, wallpaperPreviewFrame(stored, 0f, imageRatio))
+        assertFrameEquals(dragged, inscribeWallpaperFrameInRotatedPicture(stored, 0f, 16f / 9f))
+    }
+
+    @Test
+    fun aFramePushedIntoACornerWhileTiltedComesBackInside() {
+        val imageRatio = 9f / 16f
+        val chosen = NormalizedRect(.05f, .05f, .95f, .95f)
+        // Shoved far past the right edge and above the top edge: the drawn frame
+        // used to be clipped against the *bounding box* of the turned picture,
+        // which is why it could sit over the black corners.
+        val shoved = NormalizedRect(1.6f, -.6f, 2.5f, -.05f)
+        val tilted = inscribeWallpaperFrameInRotatedPicture(shoved, 40f, imageRatio)
+        assertTrue(wallpaperFrameInsideRotatedPicture(tilted, 40f, imageRatio))
+        val betterPlaced = inscribeWallpaperFrameInRotatedPicture(chosen, 40f, imageRatio)
+        assertTrue(wallpaperFrameInsideRotatedPicture(betterPlaced, 40f, imageRatio))
+        // Shrinking keeps the shape of the frame it was given.
+        assertEquals(shoved.width / shoved.height, tilted.width / tilted.height, 1e-3f)
     }
 
     @Test
     fun theChosenSizeComesBackWhenTheAngleReturnsToZero() {
         val imageRatio = 16f / 9f
         val chosen = NormalizedRect(.05f, .05f, .95f, .95f)
-        val tilted = wallpaperPreviewFrame(chosen, 35f, imageRatio)
-        // Tilting and returning to zero gives back exactly the chosen frame.
-        assertFrameEquals(chosen, wallpaperPreviewFrame(tilted, 0f, imageRatio))
+        val tilted = inscribeWallpaperFrameInRotatedPicture(chosen, 35f, imageRatio)
+        assertTrue(tilted.width < chosen.width - 1e-3f)
+        // The angle never rewrites the frame the user chose -- the screen keeps
+        // the requested frame and draws the inscribed one -- so zero degrees
+        // shows the chosen size again instead of the shrunk one.
+        assertFrameEquals(chosen, inscribeWallpaperFrameInRotatedPicture(chosen, 0f, imageRatio))
     }
+
+    private fun NormalizedRect.centerX() = (left + right) / 2f
+
+    private fun NormalizedRect.centerY() = (top + bottom) / 2f
 
     private fun assertFrameEquals(expected: NormalizedRect, actual: NormalizedRect) {
         assertEquals(expected.left, actual.left, 1e-4f)

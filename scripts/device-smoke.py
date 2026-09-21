@@ -273,8 +273,10 @@ def main():
 
     # The black bar above the picture: the touch lands outside the frame, so
     # only the outward band of the top edge can pick it up.
-    start_y = max(a[1] - 70, 210)
-    end_y = start_y + 120
+    # Start just above the frame's top edge (below the toolbar, which owns the
+    # top ~300px) and drag down, so the edge has clear room to follow the finger.
+    end_y = a[1] + 100
+    start_y = max(a[1] - 30, 320)
     drag(serial, width // 2, start_y, width // 2, end_y, 500)
     time.sleep(2)
     after = frame_bounds(screenshot(serial, "%s/crop-blackbar.png" % args.workdir))

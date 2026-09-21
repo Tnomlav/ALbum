@@ -162,7 +162,9 @@ jobs:
           script: |
             # A uniform fixture keeps the screenshot analysis unambiguous: the
             # only long white lines on the crop page are the frame itself.
-            python3 -c "from PIL import Image; Image.new('RGB', (1200, 2000), (90, 96, 104)).save('/tmp/album-smoke.jpg', quality=92)"
+            # Landscape leaves a real black bar above and below the picture for
+            # the black-bar drag check to start in.
+            python3 -c "from PIL import Image; Image.new('RGB', (2000, 1200), (90, 96, 104)).save('/tmp/album-smoke.jpg', quality=92)"
             adb push /tmp/album-smoke.jpg /sdcard/Pictures/album-smoke.jpg
             adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/album-smoke.jpg
             adb shell pm grant com.example.album android.permission.READ_MEDIA_IMAGES || true

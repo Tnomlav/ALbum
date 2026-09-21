@@ -4,7 +4,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import com.example.album.ui.screens.constrainWallpaperFrameToRotatedBounds
+import com.example.album.ui.screens.inscribeWallpaperFrameInRotatedPicture
+import com.example.album.ui.screens.wallpaperFrameInsideRotatedPicture
 
 class ImageEditorSafetyTest {
     @Test
@@ -55,18 +56,18 @@ class ImageEditorSafetyTest {
 
     @Test
     fun wallpaperCropMoveStaysInsideRotatedImageBounds() {
-        val frame = constrainWallpaperFrameToRotatedBounds(
+        // A frame shoved into the bottom-right corner is pulled back so that every
+        // corner of it lands inside the *turned picture*, not merely inside the
+        // bounding box of that picture (which is what let it sit on the black
+        // corners before).
+        val imageRatio = 16f / 9f
+        val frame = inscribeWallpaperFrameInRotatedPicture(
             NormalizedRect(.72f, .72f, .92f, .92f),
-            straighten = 45f
+            straighten = 45f,
+            imageAspectRatio = imageRatio
         )
-        val angle = Math.toRadians(45.0)
-        val halfWidth = (frame.width * kotlin.math.cos(angle) + frame.height * kotlin.math.sin(angle)) / 2f
-        val halfHeight = (frame.width * kotlin.math.sin(angle) + frame.height * kotlin.math.cos(angle)) / 2f
-        val centerX = (frame.left + frame.right) / 2f
-        val centerY = (frame.top + frame.bottom) / 2f
-        assertTrue(centerX - halfWidth >= -0.0001f)
-        assertTrue(centerX + halfWidth <= 1.0001f)
-        assertTrue(centerY - halfHeight >= -0.0001f)
-        assertTrue(centerY + halfHeight <= 1.0001f)
+        assertTrue(wallpaperFrameInsideRotatedPicture(frame, 45f, imageRatio))
+        assertTrue(frame.left >= -0.0001f && frame.right <= 1.0001f)
+        assertTrue(frame.top >= -0.0001f && frame.bottom <= 1.0001f)
     }
 }
