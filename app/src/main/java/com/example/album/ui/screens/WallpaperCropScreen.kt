@@ -93,7 +93,11 @@ fun WallpaperCropScreen(
     var editState by remember(item.uri) { mutableStateOf(ImageEditState()) }
     var bitmap by remember(item.uri) { mutableStateOf<android.graphics.Bitmap?>(null) }
     var loading by remember(item.uri) { mutableStateOf(true) }
-    var frame by remember(item.uri) { mutableStateOf(NormalizedRect()) }
+    // The crop frame the user asked for, in image coordinates. The tilt is a
+    // preview transform: it only shrinks what is drawn, so the chosen size has
+    // to stay here untouched and come back when the angle returns to zero.
+    // null means "the centred default for the current screen ratio".
+    var requestedFrame by remember(item.uri) { mutableStateOf<NormalizedRect?>(null) }
     val rotation = editState.rotation
     val straighten = editState.straighten
 
@@ -117,25 +121,25 @@ fun WallpaperCropScreen(
             IconButton(onClick = {
                 multiScreen = false
                 editState = ImageEditState()
-                frame = NormalizedRect()
+                requestedFrame = null
             }) {
                 Icon(Icons.Outlined.Restore, appText("重置修改", english), tint = Color.White)
             }
             IconButton(onClick = {
                 editState = editState.copy(rotation = (rotation + 270) % 360)
-                frame = NormalizedRect()
+                requestedFrame = null
             }) {
                 Icon(Icons.Outlined.RotateLeft, appText("左转", english), tint = Color.White)
             }
             IconButton(onClick = {
                 multiScreen = !multiScreen
-                frame = NormalizedRect()
+                requestedFrame = null
             }) {
                 Icon(Icons.Outlined.ViewWeek, if (multiScreen) appText("切换为单屏宽度", english) else appText("切换为多屏宽度", english), tint = Color.White)
             }
             IconButton(onClick = {
                 editState = editState.copy(rotation = (rotation + 90) % 360)
-                frame = NormalizedRect()
+                requestedFrame = null
             }) {
                 Icon(Icons.Outlined.RotateRight, appText("右转", english), tint = Color.White)
             }
@@ -147,7 +151,7 @@ fun WallpaperCropScreen(
                 } else {
                     source.height.toFloat() / source.width.coerceAtLeast(1)
                 }
-                val selected = if (frame == NormalizedRect()) centeredFrame(imageRatio, ratio) else frame
+                val selected = requestedFrame ?: centeredFrame(imageRatio, ratio)
                 onConfirm(cropWallpaperBitmap(source, selected, ratio, rotation, straighten.safeWallpaperAngle()))
             }) {
                 Icon(Icons.Outlined.Check, appText("使用裁剪区域", english), tint = Color.White)
@@ -185,32 +189,16 @@ fun WallpaperCropScreen(
                     val height = (width.value / imageRatio).coerceAtLeast(1f).dp
                     val ratio = if (multiScreen) multiScreenRatio else singleScreenRatio.coerceAtLeast(.01f)
                     val initial = centeredFrame(imageRatio, ratio)
-                    val displayFrame = if (frame == NormalizedRect()) initial else frame
                     val safeStraighten = straighten.safeWallpaperAngle()
-                    val angle = Math.toRadians(safeStraighten.toDouble())
-                    val cosine = abs(cos(angle)).toFloat()
-                    val sine = abs(sin(angle)).toFloat()
-                    val frameWidth = width.value * displayFrame.width.coerceIn(.001f, 1f)
-                    val frameHeight = height.value * displayFrame.height.coerceIn(.001f, 1f)
-                    val safeFrameScale = minOf(
-                        1f,
-                        width.value / (frameWidth * cosine + frameHeight * sine).coerceAtLeast(.0001f),
-                        height.value / (frameWidth * sine + frameHeight * cosine).coerceAtLeast(.0001f)
-                    ).coerceIn(.01f, 1f)
-                    // The frame the user last set by hand. Rotating the picture
-                    // squeezes the frame so it stays inside the rotated bounds;
-                    // rotating back has to grow it again instead of leaving the
-                    // squeezed size behind.
-                    var userFrame by remember { mutableStateOf<NormalizedRect?>(null) }
-                    LaunchedEffect(displayFrame, safeStraighten, safeFrameScale) {
-                        val constrained = constrainWallpaperFrameToRotatedBounds(displayFrame, safeStraighten, safeFrameScale)
-                        if (constrained != displayFrame) {
-                            frame = constrained
-                        } else {
-                            val remembered = userFrame
-                            if (remembered != null && remembered.width > displayFrame.width) frame = remembered
-                        }
-                    }
+                    // The frame the user asked for is never overwritten by the
+                    // angle preview: tilting only shrinks what is drawn, so
+                    // rotating back restores the chosen size instead of leaving
+                    // the squeezed one behind.
+                    val requested = requestedFrame ?: initial
+                    val displayFrame = wallpaperPreviewFrame(requested, safeStraighten, imageRatio)
+                    val safeFrameScale = rotatedWallpaperPreviewScale(requested, safeStraighten, imageRatio)
+                    val currentFrame by rememberUpdatedState(displayFrame)
+                    val currentScale by rememberUpdatedState(safeFrameScale)
                     // The gesture layer covers the whole preview, not just the
                     // picture: touching the black bars above or below the image
                     // used to do nothing at all. It only moves the frame (the
@@ -228,20 +216,20 @@ fun WallpaperCropScreen(
                             var handle = -1
                             var working = displayFrame
                             fun shown(value: NormalizedRect) = NormalizedRect(
-                                left = .5f + (value.left - .5f) * safeFrameScale,
-                                top = .5f + (value.top - .5f) * safeFrameScale,
-                                right = .5f + (value.right - .5f) * safeFrameScale,
-                                bottom = .5f + (value.bottom - .5f) * safeFrameScale
+                                left = .5f + (value.left - .5f) * currentScale,
+                                top = .5f + (value.top - .5f) * currentScale,
+                                right = .5f + (value.right - .5f) * currentScale,
+                                bottom = .5f + (value.bottom - .5f) * currentScale
                             )
-                            fun hits(outward: Float, outwardBand: Float, inwardBand: Float) =
-                                outward <= outwardBand && -outward <= inwardBand
                             detectDragGestures(
                                 onDragStart = { point ->
-                                    working = constrainWallpaperFrameToRotatedBounds(frame, safeStraighten, safeFrameScale)
+                                    working = currentFrame
                                     // The same corner/edge bands the frame draws,
                                     // measured in preview pixels, so a drag that
                                     // starts in the black bar just outside the
-                                    // frame still grabs the handle.
+                                    // frame still grabs the handle. One shared
+                                    // hit test keeps the black bars and the frame
+                                    // from disagreeing about what was grabbed.
                                     val w = imageSizePx.width.coerceAtLeast(1f)
                                     val h = imageSizePx.height.coerceAtLeast(1f)
                                     val visible = shown(working)
@@ -249,37 +237,22 @@ fun WallpaperCropScreen(
                                     val top = imageTopPx + visible.top * h
                                     val right = imageLeftPx + visible.right * w
                                     val bottom = imageTopPx + visible.bottom * h
-                                    val corners = listOf(
-                                        Offset(left, top), Offset(right, top),
-                                        Offset(left, bottom), Offset(right, bottom)
+                                    // A touch inside the frame is handled by the
+                                    // frame itself; this layer only ever resizes
+                                    // (it is what makes the black bars work).
+                                    val grabbed = cropHandleAt(
+                                        frameLeft = left,
+                                        frameTop = top,
+                                        frameRight = right,
+                                        frameBottom = bottom,
+                                        pointX = point.x,
+                                        pointY = point.y,
+                                        outwardX = bandOuterPx,
+                                        outwardY = bandOuterPx,
+                                        inwardX = bandInnerPx,
+                                        inwardY = bandInnerPx
                                     )
-                                    handle = corners.indices.minByOrNull { index ->
-                                        val isLeft = index % 2 == 0
-                                        val isTop = index < 2
-                                        val dx = if (isLeft) left - point.x else point.x - right
-                                        val dy = if (isTop) top - point.y else point.y - bottom
-                                        kotlin.math.abs(dx) + kotlin.math.abs(dy)
-                                    }?.takeIf { index ->
-                                        val isLeft = index % 2 == 0
-                                        val isTop = index < 2
-                                        val dx = if (isLeft) left - point.x else point.x - right
-                                        val dy = if (isTop) top - point.y else point.y - bottom
-                                        hits(dx, bandOuterPx, bandInnerPx) && hits(dy, bandOuterPx, bandInnerPx)
-                                    } ?: -1
-                                    if (handle < 0) {
-                                        val edge = bandOuterPx * 1.8f
-                                        val candidates = listOf(
-                                            if (point.x in left - edge..right + edge && hits(top - point.y, edge, bandInnerPx)) kotlin.math.abs(point.y - top) else Float.POSITIVE_INFINITY,
-                                            if (point.x in left - edge..right + edge && hits(point.y - bottom, edge, bandInnerPx)) kotlin.math.abs(point.y - bottom) else Float.POSITIVE_INFINITY,
-                                            if (point.y in top - edge..bottom + edge && hits(left - point.x, edge, bandInnerPx)) kotlin.math.abs(point.x - left) else Float.POSITIVE_INFINITY,
-                                            if (point.y in top - edge..bottom + edge && hits(point.x - right, edge, bandInnerPx)) kotlin.math.abs(point.x - right) else Float.POSITIVE_INFINITY
-                                        )
-                                        handle = candidates.indices
-                                            .minByOrNull { candidates[it] }
-                                            ?.takeIf { candidates[it] <= edge }
-                                            ?.plus(4)
-                                            ?: -1
-                                    }
+                                    handle = if (grabbed == CROP_HANDLE_MOVE) CROP_HANDLE_NONE else grabbed
                                 },
                                 onDragEnd = { handle = -1 },
                                 onDragCancel = { handle = -1 },
@@ -288,14 +261,14 @@ fun WallpaperCropScreen(
                                     val w = imageSizePx.width.coerceAtLeast(1f)
                                     val h = imageSizePx.height.coerceAtLeast(1f)
                                     val x = ((change.position.x - imageLeftPx) / w)
-                                        .let { .5f + (it - .5f) / safeFrameScale }.coerceIn(0f, 1f)
+                                        .let { .5f + (it - .5f) / currentScale }.coerceIn(0f, 1f)
                                     val y = ((change.position.y - imageTopPx) / h)
-                                        .let { .5f + (it - .5f) / safeFrameScale }.coerceIn(0f, 1f)
+                                        .let { .5f + (it - .5f) / currentScale }.coerceIn(0f, 1f)
                                     val candidate = if (handle >= 0) {
                                         resizeFrameFromPointer(working, handle, x, y, ratio / imageRatio, .06f)
                                     } else {
-                                        val dx = amount.x / w / safeFrameScale
-                                        val dy = amount.y / h / safeFrameScale
+                                        val dx = amount.x / w / currentScale
+                                        val dy = amount.y / h / currentScale
                                         NormalizedRect(
                                             working.left + dx,
                                             working.top + dy,
@@ -303,9 +276,8 @@ fun WallpaperCropScreen(
                                             working.bottom + dy
                                         )
                                     }
-                                    working = constrainWallpaperFrameToRotatedBounds(candidate, safeStraighten, safeFrameScale)
-                                    frame = working
-                                    userFrame = working
+                                    working = constrainWallpaperFrameToImage(candidate)
+                                    requestedFrame = working
                                 }
                             )
                         }
@@ -326,7 +298,7 @@ fun WallpaperCropScreen(
                             normalizedRatio = ratio / imageRatio,
                             visibleScale = safeFrameScale,
                             straighten = safeStraighten,
-                            onFrameChange = { frame = it; userFrame = it },
+                            onFrameChange = { requestedFrame = it },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -437,6 +409,125 @@ internal fun constrainWallpaperFrameToRotatedBounds(
     )
 }
 
+/**
+ * Preview inset that keeps [frame] inside the picture while it is shown at
+ * [straighten] degrees: what is drawn is scaled by this factor about the image
+ * centre, the same way the editor's crop step insets the frame it exports.
+ */
+internal fun rotatedWallpaperPreviewScale(
+    frame: NormalizedRect,
+    straighten: Float,
+    imageAspectRatio: Float
+): Float {
+    val ratio = imageAspectRatio.takeIf { it.isFinite() && it > 0f } ?: 1f
+    val width = frame.width.takeIf { it.isFinite() }?.coerceIn(.001f, 1f) ?: 1f
+    val height = frame.height.takeIf { it.isFinite() }?.coerceIn(.001f, 1f) ?: 1f
+    val angle = Math.toRadians(straighten.safeWallpaperAngle().toDouble())
+    val cosine = abs(cos(angle)).toFloat()
+    val sine = abs(sin(angle)).toFloat()
+    return minOf(
+        1f,
+        1f / (width * cosine + height * sine / ratio).coerceAtLeast(.0001f),
+        1f / (width * sine * ratio + height * cosine).coerceAtLeast(.0001f)
+    ).coerceIn(.01f, 1f)
+}
+
+/**
+ * What the crop preview draws for the frame the user asked for: the requested
+ * frame is only inset, never rewritten. That is what makes a chosen size come
+ * back when the angle returns to zero, instead of staying squeezed forever.
+ */
+internal fun wallpaperPreviewFrame(
+    requested: NormalizedRect,
+    straighten: Float,
+    imageAspectRatio: Float
+): NormalizedRect = constrainWallpaperFrameToRotatedBounds(
+    requested,
+    straighten,
+    rotatedWallpaperPreviewScale(requested, straighten, imageAspectRatio)
+)
+
+/**
+ * Keeps a hand-dragged frame inside the picture. The tilt never limits the
+ * stored frame: it is handled by [rotatedWallpaperPreviewScale] when the frame
+ * is drawn (and again when it is exported), so a drag made while the picture is
+ * tilted cannot quietly shrink the crop the user chose.
+ */
+internal fun constrainWallpaperFrameToImage(frame: NormalizedRect): NormalizedRect =
+    constrainWallpaperFrameToRotatedBounds(frame, 0f, 1f)
+
+/** Nothing close enough to grab. */
+internal const val CROP_HANDLE_NONE = -1
+
+/** The frame body: a drag moves the whole crop frame. */
+internal const val CROP_HANDLE_MOVE = 8
+
+/**
+ * Decides what a drag on the crop frame grabs. The frame and the point share
+ * one coordinate space (pixels in the gesture layer that covers the black bars,
+ * normalized image units inside `CropFrame`); [outwardX]/[outwardY] are how far
+ * *outside* the frame the finger may land and still grab a handle,
+ * [inwardX]/[inwardY] how far inside.
+ *
+ * The inward band is deliberately the smaller one: the finger usually lands
+ * just outside the frame, and a symmetric band turned a small frame into almost
+ * nothing but resize zones, which made moving it hard.
+ *
+ * Returns the corners 0..3 (left-top, right-top, left-bottom, right-bottom),
+ * the edges 4..7 (top, bottom, left, right), [CROP_HANDLE_MOVE] for the frame
+ * body, or [CROP_HANDLE_NONE] when the touch is too far away.
+ */
+internal fun cropHandleAt(
+    frameLeft: Float,
+    frameTop: Float,
+    frameRight: Float,
+    frameBottom: Float,
+    pointX: Float,
+    pointY: Float,
+    outwardX: Float,
+    outwardY: Float,
+    inwardX: Float,
+    inwardY: Float
+): Int {
+    // Positive means "outside the frame"; the sign has to be consistent with
+    // the band test below, otherwise the inward limit is unreachable and the
+    // band stays just as wide inside the frame.
+    fun inBand(outward: Float, outwardLimit: Float, inwardLimit: Float): Boolean =
+        outward <= outwardLimit && -outward <= inwardLimit
+    var handle = CROP_HANDLE_NONE
+    var nearest = Float.MAX_VALUE
+    for (index in 0..3) {
+        val isLeft = index % 2 == 0
+        val isTop = index < 2
+        val dx = if (isLeft) frameLeft - pointX else pointX - frameRight
+        val dy = if (isTop) frameTop - pointY else pointY - frameBottom
+        if (!inBand(dx, outwardX, inwardX) || !inBand(dy, outwardY, inwardY)) continue
+        val distance = abs(dx) + abs(dy)
+        // Strict "<" keeps the lowest index on a tie, like minByOrNull did.
+        if (distance < nearest) {
+            nearest = distance
+            handle = index
+        }
+    }
+    if (handle != CROP_HANDLE_NONE) return handle
+    // Edges get a wider band than the corners: the finger usually lands
+    // slightly outside the visible border.
+    val edge = maxOf(outwardX, outwardY) * 1.8f
+    val candidates = floatArrayOf(
+        if (pointX in frameLeft - edge..frameRight + edge && inBand(frameTop - pointY, edge, inwardY)) abs(pointY - frameTop) else Float.POSITIVE_INFINITY,
+        if (pointX in frameLeft - edge..frameRight + edge && inBand(pointY - frameBottom, edge, inwardY)) abs(pointY - frameBottom) else Float.POSITIVE_INFINITY,
+        if (pointY in frameTop - edge..frameBottom + edge && inBand(frameLeft - pointX, edge, inwardX)) abs(pointX - frameLeft) else Float.POSITIVE_INFINITY,
+        if (pointY in frameTop - edge..frameBottom + edge && inBand(pointX - frameRight, edge, inwardX)) abs(pointX - frameRight) else Float.POSITIVE_INFINITY
+    )
+    val nearestEdge = candidates.indices.minByOrNull { candidates[it] }
+    if (nearestEdge != null && candidates[nearestEdge] <= edge) return nearestEdge + 4
+    return if (pointX in frameLeft..frameRight && pointY in frameTop..frameBottom) {
+        CROP_HANDLE_MOVE
+    } else {
+        CROP_HANDLE_NONE
+    }
+}
+
 @Composable
 private fun CropFrame(
     frame: NormalizedRect,
@@ -454,11 +545,9 @@ private fun CropFrame(
         modifier.pointerInput(normalizedRatio, visibleScale, straighten) {
             var handle = -1 // 0..3 corners, 4..7 edges, 8 whole-frame move
             var working = currentFrame
-            fun constrained(value: NormalizedRect) = constrainWallpaperFrameToRotatedBounds(
-                value,
-                straighten,
-                visibleScale
-            )
+            // The tilt is a preview inset, not a limit on the crop: a drag only
+            // has to keep the frame inside the picture.
+            fun constrained(value: NormalizedRect) = constrainWallpaperFrameToImage(value)
             fun shownFrame(value: NormalizedRect) = NormalizedRect(
                 left = .5f + (value.left - .5f) * visibleScale,
                 top = .5f + (value.top - .5f) * visibleScale,
@@ -467,8 +556,9 @@ private fun CropFrame(
             )
             detectDragGestures(
                 onDragStart = { point ->
-                    working = constrained(currentFrame)
-                    if (working != currentFrame) currentOnFrameChange(working)
+                    // The drawn frame is already a valid crop, so nothing is
+                    // written back just because a drag started.
+                    working = currentFrame
                     val pointX = point.x / size.width
                     val pointY = point.y / size.height
                     val visible = shownFrame(working)
@@ -478,47 +568,20 @@ private fun CropFrame(
                     // mostly made of resize zones and moving it was hard.
                     val radiusX = (48f * density.density / size.width).coerceAtLeast(.024f)
                     val radiusY = (48f * density.density / size.height).coerceAtLeast(.024f)
-                    val innerX = radiusX * 0.5f
-                    val innerY = radiusY * 0.5f
-                    val radius = maxOf(radiusX, radiusY)
-                    // Distance from a frame edge with the sign of "outside": a
-                    // positive value is outside the frame, negative inside.
-                    fun outwardX(value: Float, edge: Float) = value - edge
-                    fun outwardY(value: Float, edge: Float) = value - edge
-                    fun inHandle(outward: Float, outwardLimit: Float, inwardLimit: Float): Boolean =
-                        outward <= outwardLimit && -outward <= inwardLimit
-                    val corners = listOf(
-                        Offset(visible.left, visible.top), Offset(visible.right, visible.top),
-                        Offset(visible.left, visible.bottom), Offset(visible.right, visible.bottom)
+                    // One shared hit test, so the frame and the black bars
+                    // around it can never disagree about what a touch grabbed.
+                    handle = cropHandleAt(
+                        frameLeft = visible.left,
+                        frameTop = visible.top,
+                        frameRight = visible.right,
+                        frameBottom = visible.bottom,
+                        pointX = pointX,
+                        pointY = pointY,
+                        outwardX = radiusX,
+                        outwardY = radiusY,
+                        inwardX = radiusX * 0.5f,
+                        inwardY = radiusY * 0.5f
                     )
-                    handle = corners.indices.minByOrNull {
-                        val dx = kotlin.math.abs(corners[it].x - pointX)
-                        val dy = kotlin.math.abs(corners[it].y - pointY)
-                        dx + dy
-                    }?.takeIf { index ->
-                        val isLeft = index % 2 == 0
-                        val isTop = index < 2
-                        // Positive means "outside the frame": the sign has to
-                        // match inHandle(), otherwise the inward branch is
-                        // unreachable and the band stays 48dp inside as well.
-                        val dx = if (isLeft) visible.left - pointX else pointX - visible.right
-                        val dy = if (isTop) visible.top - pointY else pointY - visible.bottom
-                        inHandle(dx, radiusX, innerX) && inHandle(dy, radiusY, innerY)
-                    } ?: -1
-                    if (handle < 0) {
-                        // Edges get a wider band than the corners: the finger
-                        // usually lands slightly outside the visible border.
-                        val edgeTolerance = radius * 1.8f
-                        val candidates = listOf(
-                            if (pointX in visible.left - edgeTolerance..visible.right + edgeTolerance && inHandle(outwardY(visible.top, pointY), edgeTolerance, innerY)) abs(pointY - visible.top) else Float.POSITIVE_INFINITY,
-                            if (pointX in visible.left - edgeTolerance..visible.right + edgeTolerance && inHandle(outwardY(pointY, visible.bottom), edgeTolerance, innerY)) abs(pointY - visible.bottom) else Float.POSITIVE_INFINITY,
-                            if (pointY in visible.top - edgeTolerance..visible.bottom + edgeTolerance && inHandle(outwardX(visible.left, pointX), edgeTolerance, innerX)) abs(pointX - visible.left) else Float.POSITIVE_INFINITY,
-                            if (pointY in visible.top - edgeTolerance..visible.bottom + edgeTolerance && inHandle(outwardX(pointX, visible.right), edgeTolerance, innerX)) abs(pointX - visible.right) else Float.POSITIVE_INFINITY
-                        )
-                        handle = candidates.indices.minByOrNull { candidates[it] }
-                            ?.takeIf { candidates[it] <= edgeTolerance }?.plus(4) ?: -1
-                    }
-                    if (handle < 0 && pointX in visible.left..visible.right && pointY in visible.top..visible.bottom) handle = 8
                 },
                 onDrag = { change, amount ->
                     if (handle < 0) return@detectDragGestures

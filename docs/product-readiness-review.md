@@ -298,6 +298,6 @@ lint 报告（`app/build/reports/lint-results-debug.txt`）：**0 error / 133 wa
 
 ## 2026-09-22 全盘优化清单（进行中）
 
-已完成：P 页归档文件夹过滤改为预计算小写集合＋哈希查找（v1.2.50）；小窗四角"固定哪两条边"抽成 miniWindowPinnedEdges() 并由单元测试钉死四种情形（v1.2.51）；小窗期间隐藏多任务卡片尝试 setExcludeFromRecents 并调整调用时机（v1.2.52），真机结论是 OriginOS 不采纳该标志（dumpsys 里仍是 Recent #1）。
+已完成：P 页归档文件夹过滤改为预计算小写集合＋哈希查找（v1.2.50）；小窗四角"固定哪两条边"抽成 miniWindowPinnedEdges() 并由单元测试钉死四种情形（v1.2.51）；小窗期间隐藏多任务卡片尝试 setExcludeFromRecents 并调整调用时机（v1.2.52），真机结论是 OriginOS 不采纳该标志（dumpsys 里仍是 Recent #1）；裁剪页黑边层与裁剪框共用一套命中判定 cropHandleAt()（v1.2.53）；裁剪框不再被倾斜预览永久压小，角度回正后恢复原尺寸、导出也不再被内缩两次（v1.2.53）。
 
-待做：1 裁剪页黑边区域走同一套命中判定（把角/边/移动三态抽成接收图片归一化坐标的共用函数）；2 裁剪页记录被旋转挤小前的尺寸并在角度回正后恢复；3 P 页 walk 增量（目录指纹＋复用快照，真机计时）；4 小窗多任务隐藏改用 FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS 重建任务；5 缩略图并发与缓存命中率审计；6 三个列表页 remember/derivedStateOf 键审计；7 启动路径 IO 移出主线程；8 lint baseline 失效条目与死代码清理；9 APK 体积（LibVLC 架构/localeFilters/资源）审计；10 CI 增补真机脚本化检查。
+待做：3 P 页 walk 增量（目录指纹＋复用快照，真机计时）；4 小窗多任务隐藏改用 FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS 重建任务；5 缩略图并发与缓存命中率审计；6 三个列表页 remember/derivedStateOf 键审计；7 启动路径 IO 移出主线程；8 lint baseline 失效条目与死代码清理；9 APK 体积（LibVLC 架构/localeFilters/资源）审计；10 CI 增补真机脚本化检查。
