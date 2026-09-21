@@ -778,10 +778,12 @@ internal fun Media3VideoPlayer(
             } else {
                 ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             }
-            hostActivity?.moveTaskToBack(true)
-            // The app has no UI while the window floats: keep it out of the
-            // multi-task list until mini mode ends.
+            // The app has no UI while the window floats, so keep it out of the
+            // multi-task list until mini mode ends. The flag has to be set while
+            // the task is still in front: setting it after moveTaskToBack() was
+            // not honoured by the system on the test device.
             setTaskHiddenFromRecents(true)
+            hostActivity?.moveTaskToBack(true)
         } else if (onEnterPictureInPicture()) {
             pictureInPictureRequested = true
         } else {

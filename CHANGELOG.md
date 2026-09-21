@@ -1,5 +1,9 @@
 # Album Changelog
 
+## v1.2.52 - 2026-09-22（小窗多任务隐藏：设置时机调整，仍未生效）
+
+- 把 task 排除多任务（setExcludeFromRecents）的调用提前到 moveTaskToBack 之前（此前在之后调用）。真机复测：本应用仍以 Recent #1 出现在 dumpsys activity recents 里 —— 说明这台 OriginOS 机器不采纳该标志。结论记在 CHANGELOG，下一轮改用 FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS 重建任务的方式验证。
+
 ## v1.2.51 - 2026-09-22（小窗四角回归测试）
 
 - 把"拖动某个角时固定哪两条边"抽成 `miniWindowPinnedEdges()` 并用单元测试钉死四种情形（右下固定顶+左、左下固定顶+右、左上固定底+右、右上固定底+左）。这段语义前后改过好几次，以后改动一旦破坏它测试会直接失败。
