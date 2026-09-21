@@ -830,6 +830,9 @@ fun AlbumApp(
     var pixivLibraryImages by remember { mutableStateOf<List<MediaItem>?>(null) }
     var pixivFolderNames by remember { mutableStateOf(setOf("Pixiv")) }
     var pixivSourceFolderName by remember { mutableStateOf("Pixiv") }
+    // Cost of the last Pixiv library walk, shown on the archive page so the
+    // folder-index reuse is visible instead of a matter of faith.
+    var pixivWalkStats by remember { mutableStateOf<com.example.album.data.PixivWalkStats?>(null) }
     var pixivTagsByUri by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
     // Bumped only when a full walk finishes. Partial snapshots during the walk
     // update the grid but must not restart the (expensive) tag index build.
@@ -1008,6 +1011,7 @@ fun AlbumApp(
                     pixivLibraryImages = cached.items
                     pixivFolderNames = cached.folderNames
                     pixivSourceFolderName = cached.sourceFolderName
+                    pixivWalkStats = cached.walkStats
                     pixivLibraryVersion++
                 }
             }
@@ -1030,6 +1034,7 @@ fun AlbumApp(
                     pixivLibraryImages = partial.items
                     pixivFolderNames = partial.folderNames
                     pixivSourceFolderName = partial.sourceFolderName
+                    pixivWalkStats = partial.walkStats
                 }
             }
             val snapshot = try {
@@ -1045,6 +1050,7 @@ fun AlbumApp(
             pixivTagsByUri = snapshot.tagsByUri
             pixivFolderNames = snapshot.folderNames
             pixivSourceFolderName = snapshot.sourceFolderName
+            pixivWalkStats = snapshot.walkStats
             pixivLibraryVersion++
         } finally {
             // The latest request always clears the flag, even when it returned
@@ -2229,6 +2235,7 @@ fun AlbumApp(
     if (pixivArchiveOpen) {
         PixivArchiveScreen(
             session = pixivArchiveSession,
+            walkStats = pixivWalkStats,
             onStartScan = { source, maxBatchSize ->
                 if (pixivArchiveSession.state.value != ArchiveUiState.Scanning) {
                     pixivArchiveSession.beginScan()

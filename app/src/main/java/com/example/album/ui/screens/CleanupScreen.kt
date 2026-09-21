@@ -335,6 +335,7 @@ fun CleanupScreen(
 @Composable
 fun PixivArchiveScreen(
     session: PixivArchiveSession,
+    walkStats: com.example.album.data.PixivWalkStats? = null,
     onStartScan: (Uri, Int) -> Unit,
     onCancelScan: () -> Unit,
     onClearScan: () -> Unit,
@@ -410,6 +411,22 @@ fun PixivArchiveScreen(
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )
+                // Where the library walk's time went. Reused folders are the
+                // ones the index replayed without touching the provider again.
+                walkStats?.takeIf { it.directoriesListed + it.directoriesReused > 0 }?.let { stats ->
+                    Text(
+                        if (english) {
+                            "%.1fs · %d read, %d reused".format(stats.durationMs / 1000f, stats.directoriesListed, stats.directoriesReused)
+                        } else {
+                            "扫描 %.1f 秒 · 读取 %d 个目录，复用 %d 个".format(stats.durationMs / 1000f, stats.directoriesListed, stats.directoriesReused)
+                        },
+                        modifier = Modifier.padding(start = 8.dp).weight(1f),
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         } else {
             val selectedItems = selectedMedia()

@@ -47,6 +47,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlin.coroutines.resume
+import androidx.core.net.toUri
 import org.json.JSONObject
 
 data class PixivMetadata(
@@ -99,7 +100,9 @@ data class PixivLibrarySnapshot(
     val folderNames: Set<String>,
     val sourceFolderName: String,
     val sourceConfigured: Boolean,
-    val targetConfigured: Boolean
+    val targetConfigured: Boolean,
+    /** Cost of the walk behind this snapshot; null for the cached one. */
+    val walkStats: PixivWalkStats? = null
 )
 
 class PixivArchiveRepository(private val context: Context) {
@@ -391,6 +394,13 @@ class PixivArchiveRepository(private val context: Context) {
         val archivedItems = mutableListOf<MediaItem>()
         val archivedLock = Any()
         var lastPublishedAt = 0L
+        // Folders that did not change since the previous walk are replayed from
+        // this index instead of being listed again; every folder listing is a
+        // binder round trip into the document provider.
+        val walkKey = libraryCacheKey()
+        val previousWalk = loadPixivWalkIndex(context, walkKey)
+        val nextWalk = PixivWalkIndex()
+        var walkStats = PixivWalkStats()
 
         fun snapshotOf(source: List<MediaItem>): PixivLibrarySnapshot {
             val archived = synchronized(archivedLock) { archivedItems.toList() }
@@ -402,7 +412,8 @@ class PixivArchiveRepository(private val context: Context) {
                 folderNames = folderNames,
                 sourceFolderName = sourceFolderName,
                 sourceConfigured = sourceUri != null,
-                targetConfigured = targetUri != null
+                targetConfigured = targetUri != null,
+                walkStats = walkStats
             )
         }
 
@@ -413,6 +424,46 @@ class PixivArchiveRepository(private val context: Context) {
             onProgress(snapshotOf(source))
         }
 
+        fun itemFor(entry: PixivDirEntry, folder: String): MediaItem {
+            val modified = entry.lastModified.takeIf { it > 0 } ?: 0L
+            return MediaItem(
+                id = entry.uri.hashCode().toLong() and 0xffffffffL,
+                uri = Uri.parse(entry.uri),
+                name = entry.name.ifBlank { "未命名图片" },
+                folder = folder,
+                dateTaken = modified,
+                mimeType = entry.mimeType.ifBlank { "image/*" },
+                size = entry.size,
+                dateModified = modified / 1000L,
+                isDocument = true
+            )
+        }
+
+        fun walkTree(root: DocumentFile?, treeUri: Uri?, folder: String, output: MutableList<MediaItem>) {
+            val tree = treeUri ?: return
+            val rootDocument = root ?: return
+            val (index, stats) = walkPixivFolders(
+                rootUri = rootDocument.uri.toString(),
+                folderName = folder,
+                previous = previousWalk,
+                list = { uri -> listPixivDirectory(context, tree, Uri.parse(uri)) },
+                includeHidden = showHiddenMedia,
+                onItem = { entry, folderName, siblings ->
+                    val item = itemFor(entry, folderName)
+                    output += item
+                    // Keep the sidecar around so tag reads do not have to search
+                    // the tree again later.
+                    siblings["${entry.name}.pixiv.json"]?.let { sidecar ->
+                        DocumentFile.fromSingleUri(context, sidecar.uri.toUri())
+                            ?.let { archiveSidecarCache[item.uri.toString()] = it }
+                    }
+                },
+                onFolderDone = { publish(output) }
+            )
+            nextWalk.merge(index)
+            walkStats += stats
+        }
+
         val sourceItems: List<MediaItem>
         if (sourceRoot != null) {
             val collected = mutableListOf<MediaItem>()
@@ -420,15 +471,7 @@ class PixivArchiveRepository(private val context: Context) {
             // be handed to the page immediately; the items follow as they are
             // discovered.
             publish(collected, force = true)
-            collectLibraryImages(
-                sourceRoot,
-                sourceFolderName,
-                collected,
-                tagsByUri,
-                loadTags = false,
-                showHiddenMedia = showHiddenMedia,
-                onCollected = { publish(collected) }
-            )
+            walkTree(sourceRoot, sourceUri, sourceFolderName, collected)
             sourceItems = collected.toList()
         } else {
             sourceItems = fallbackDefaultItems.map { item -> item.copy(folder = sourceFolderName) }
@@ -448,14 +491,7 @@ class PixivArchiveRepository(private val context: Context) {
                             val artistName = artistFolder.name?.takeIf { it.isNotBlank() }
                                 ?: return@withPermit
                             val collected = mutableListOf<MediaItem>()
-                            collectLibraryImages(
-                                artistFolder,
-                                artistName,
-                                collected,
-                                tagsByUri,
-                                loadTags = false,
-                                showHiddenMedia = showHiddenMedia
-                            )
+                            walkTree(artistFolder, targetUri, artistName, collected)
                             if (collected.isEmpty()) return@withPermit
                             synchronized(archivedLock) { archivedItems.addAll(collected) }
                             publish(sourceItems)
@@ -464,6 +500,7 @@ class PixivArchiveRepository(private val context: Context) {
                 }.awaitAll()
             }
         }
+        savePixivWalkIndex(context, walkKey, nextWalk)
         snapshotOf(sourceItems).also { publish(sourceItems, force = true) }
     }
 
@@ -759,63 +796,6 @@ class PixivArchiveRepository(private val context: Context) {
         if (mime.startsWith("image/") || imageByExtension) output += file
     }
 
-    private fun collectLibraryImages(
-        file: DocumentFile,
-        folderName: String,
-        output: MutableList<MediaItem>,
-        tagsByUri: MutableMap<String, List<String>>,
-        siblingSidecars: Map<String, DocumentFile> = emptyMap(),
-        loadTags: Boolean = true,
-        showHiddenMedia: Boolean = false,
-        onCollected: (() -> Unit)? = null
-    ) {
-        // SAF can expose MediaStore trashed files with their physical
-        // ".trashed-*" name. Pixiv's library is loaded separately from the
-        // main MediaLibraryState, so it must apply the same exclusion here.
-        if (isSystemTrashedName(file.name)) return
-        if (!showHiddenMedia && file.name.orEmpty().trimStart().startsWith('.')) return
-        if (file.isDirectory) {
-            val children = runCatching { file.listFiles() }.getOrDefault(emptyArray())
-            val sidecars = children.filter { it.isFile && it.name.orEmpty().endsWith(".pixiv.json", ignoreCase = true) }
-                .associateBy { it.name.orEmpty() }
-            children.filterNot { it.name.orEmpty().endsWith(".pixiv.json", ignoreCase = true) }
-                .forEach { child ->
-                    collectLibraryImages(
-                        child, folderName, output, tagsByUri, sidecars, loadTags, showHiddenMedia, onCollected
-                    )
-                }
-            // Empty directories would otherwise never report progress.
-            onCollected?.invoke()
-            return
-        }
-        val mime = file.type ?: context.contentResolver.getType(file.uri).orEmpty()
-        if (!mime.startsWith("image/")) return
-        val modified = file.lastModified().takeIf { it > 0 } ?: 0L
-        val item = MediaItem(
-            id = file.uri.toString().hashCode().toLong() and 0xffffffffL,
-            uri = file.uri,
-            name = file.name ?: "未命名图片",
-            folder = folderName,
-            dateTaken = modified,
-            mimeType = mime.ifBlank { "image/*" },
-            size = file.length(),
-            dateModified = modified / 1000L,
-            isDocument = true
-        )
-        output += item
-        onCollected?.invoke()
-        if (loadTags) {
-            val sidecar = siblingSidecars["${file.name}.pixiv.json"]
-            sidecar?.let { archiveSidecarCache[item.uri.toString()] = it }
-            val tags = readEmbeddedTags(file.uri, mime).ifEmpty { sidecar?.let(::readSidecarTags).orEmpty() }
-            if (tags.isNotEmpty()) tagsByUri[item.uri.toString()] = tags
-        } else {
-            siblingSidecars["${file.name}.pixiv.json"]?.let {
-                archiveSidecarCache[item.uri.toString()] = it
-            }
-        }
-    }
-
     private fun readEmbeddedTags(uri: Uri, mimeType: String): List<String> = runCatching {
         when {
             mimeType == "image/jpeg" -> if (uri.scheme == "file" && uri.path != null) {
@@ -990,7 +970,7 @@ class PixivArchiveRepository(private val context: Context) {
                     }
                     webView.webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView, url: String) {
-                            val host = Uri.parse(url).host.orEmpty().lowercase(Locale.ROOT)
+                            val host = url.toUri().host.orEmpty().lowercase(Locale.ROOT)
                             if (host != "www.pixiv.net" && host != "pixiv.net") return
                             view.evaluateJavascript(
                                 """fetch('/ajax/illust/$pid?lang=zh',{credentials:'include',cache:'no-store'}).then(r=>r.text()).catch(()=> '')"""

@@ -96,7 +96,7 @@
         errorLine2="                                                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/WallpaperCropScreen.kt"
-            line="80"
+            line="91"
             column="69"/>
     </issue>
 
@@ -107,7 +107,7 @@
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/WallpaperCropScreen.kt"
-            line="80"
+            line="91"
             column="29"/>
     </issue>
 
@@ -140,7 +140,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/data/PixivArchiveRepository.kt"
-            line="985"
+            line="965"
             column="21"/>
     </issue>
 
@@ -151,7 +151,7 @@
         errorLine2="                      ~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="871"
+            line="888"
             column="23"/>
     </issue>
 
@@ -162,7 +162,7 @@
         errorLine2="                        ~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="872"
+            line="889"
             column="25"/>
     </issue>
 
@@ -173,7 +173,7 @@
         errorLine2="                                                       ~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="875"
+            line="892"
             column="56"/>
     </issue>
 
@@ -277,7 +277,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="856"
+            line="859"
             column="13"/>
     </issue>
 
@@ -288,7 +288,7 @@
         errorLine2="                        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="1794"
+            line="1800"
             column="25"/>
     </issue>
 
@@ -299,7 +299,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="1812"
+            line="1818"
             column="13"/>
     </issue>
 
@@ -310,7 +310,7 @@
         errorLine2="                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="1813"
+            line="1819"
             column="30"/>
     </issue>
 
@@ -321,7 +321,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="1984"
+            line="1990"
             column="13"/>
     </issue>
 
@@ -332,7 +332,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="1992"
+            line="1998"
             column="13"/>
     </issue>
 
@@ -343,7 +343,7 @@
         errorLine2="                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="1993"
+            line="1999"
             column="30"/>
     </issue>
 
@@ -354,7 +354,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="2005"
+            line="2011"
             column="13"/>
     </issue>
 
@@ -365,7 +365,7 @@
         errorLine2="                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="2006"
+            line="2012"
             column="30"/>
     </issue>
 
@@ -376,7 +376,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="2118"
+            line="2124"
             column="21"/>
     </issue>
 
@@ -387,7 +387,7 @@
         errorLine2="                ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="2298"
+            line="2305"
             column="17"/>
     </issue>
 
@@ -398,7 +398,7 @@
         errorLine2="                                                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="2388"
+            line="2395"
             column="91"/>
     </issue>
 
@@ -409,7 +409,7 @@
         errorLine2="                                                                                                                      ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="2403"
+            line="2410"
             column="119"/>
     </issue>
 
@@ -420,7 +420,7 @@
         errorLine2="                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="2420"
+            line="2427"
             column="56"/>
     </issue>
 
@@ -431,7 +431,7 @@
         errorLine2="                                                                                           ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="2428"
+            line="2435"
             column="92"/>
     </issue>
 
@@ -442,7 +442,7 @@
         errorLine2="                                                                                                                       ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="2443"
+            line="2450"
             column="120"/>
     </issue>
 
@@ -453,7 +453,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="2642"
+            line="2649"
             column="21"/>
     </issue>
 
@@ -464,7 +464,7 @@
         errorLine2="                                             ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="3040"
+            line="3047"
             column="46"/>
     </issue>
 
@@ -475,7 +475,7 @@
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="3580"
+            line="3587"
             column="25"/>
     </issue>
 
@@ -486,7 +486,7 @@
         errorLine2="                                ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="3822"
+            line="3829"
             column="33"/>
     </issue>
 
@@ -497,7 +497,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/AlbumApp.kt"
-            line="3891"
+            line="3898"
             column="13"/>
     </issue>
 
@@ -618,7 +618,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1134"
+            line="1151"
             column="9"/>
     </issue>
 
@@ -629,7 +629,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1139"
+            line="1156"
             column="9"/>
     </issue>
 
@@ -640,7 +640,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1157"
+            line="1174"
             column="9"/>
     </issue>
 
@@ -651,7 +651,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1210"
+            line="1227"
             column="9"/>
     </issue>
 
@@ -662,7 +662,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1234"
+            line="1251"
             column="9"/>
     </issue>
 
@@ -673,7 +673,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1254"
+            line="1271"
             column="9"/>
     </issue>
 
@@ -684,7 +684,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1356"
+            line="1373"
             column="9"/>
     </issue>
 
@@ -695,7 +695,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1469"
+            line="1486"
             column="13"/>
     </issue>
 
@@ -706,7 +706,7 @@
         errorLine2="                ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1520"
+            line="1537"
             column="17"/>
     </issue>
 
@@ -717,7 +717,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1575"
+            line="1592"
             column="9"/>
     </issue>
 
@@ -728,7 +728,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1780"
+            line="1797"
             column="21"/>
     </issue>
 
@@ -739,7 +739,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1784"
+            line="1801"
             column="21"/>
     </issue>
 
@@ -750,7 +750,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1788"
+            line="1805"
             column="21"/>
     </issue>
 
@@ -761,7 +761,7 @@
         errorLine2="                            ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1805"
+            line="1822"
             column="29"/>
     </issue>
 
@@ -772,7 +772,7 @@
         errorLine2="                        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="1885"
+            line="1902"
             column="25"/>
     </issue>
 
@@ -783,7 +783,7 @@
         errorLine2="                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/screens/CleanupScreen.kt"
-            line="2576"
+            line="2593"
             column="59"/>
     </issue>
 
@@ -992,7 +992,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/MediaLibraryState.kt"
-            line="500"
+            line="505"
             column="9"/>
     </issue>
 
@@ -1003,7 +1003,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/MediaLibraryState.kt"
-            line="610"
+            line="615"
             column="9"/>
     </issue>
 
@@ -1014,7 +1014,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/ui/MediaLibraryState.kt"
-            line="616"
+            line="621"
             column="9"/>
     </issue>
 
@@ -1091,7 +1091,7 @@
         errorLine2="                      ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/data/PixivArchiveRepository.kt"
-            line="163"
+            line="166"
             column="23"/>
     </issue>
 
@@ -1102,8 +1102,30 @@
         errorLine2="        ^">
         <location
             file="src/main/java/com/example/album/data/PixivArchiveRepository.kt"
-            line="170"
+            line="173"
             column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                uri = Uri.parse(entry.uri),"
+        errorLine2="                      ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/example/album/data/PixivArchiveRepository.kt"
+            line="431"
+            column="23"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                list = { uri -> listPixivDirectory(context, tree, Uri.parse(uri)) },"
+        errorLine2="                                                                  ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/example/album/data/PixivArchiveRepository.kt"
+            line="449"
+            column="67"/>
     </issue>
 
     <issue
@@ -1113,30 +1135,8 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/data/PixivArchiveRepository.kt"
-            line="919"
+            line="899"
             column="13"/>
-    </issue>
-
-    <issue
-        id="UseKtx"
-        message="Use the KTX extension function `String.toUri` instead?"
-        errorLine1="                            val host = Uri.parse(url).host.orEmpty().lowercase(Locale.ROOT)"
-        errorLine2="                                       ~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/example/album/data/PixivArchiveRepository.kt"
-            line="993"
-            column="40"/>
-    </issue>
-
-    <issue
-        id="UseKtx"
-        message="Use the KTX extension function `String.toUri` instead?"
-        errorLine1="                            val host = Uri.parse(url).host.orEmpty().lowercase(Locale.ROOT)"
-        errorLine2="                                       ~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/example/album/data/PixivArchiveRepository.kt"
-            line="993"
-            column="40"/>
     </issue>
 
     <issue
@@ -1311,7 +1311,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/example/album/data/ThumbnailRepository.kt"
-            line="76"
+            line="113"
             column="9"/>
     </issue>
 
