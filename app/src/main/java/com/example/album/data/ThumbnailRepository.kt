@@ -37,6 +37,15 @@ object ThumbnailRepository {
     private val keyLocks = ConcurrentHashMap<String, Mutex>()
     private val maintenanceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val trimScheduled = AtomicBoolean(false)
+    // Cache effectiveness is otherwise invisible from the outside: these
+    // counters turn "scroll a big folder" into one log line.
+    private val memoryHits = java.util.concurrent.atomic.AtomicLong()
+    private val diskHits = java.util.concurrent.atomic.AtomicLong()
+    private val platformDecodes = java.util.concurrent.atomic.AtomicLong()
+    private val coalescedRequests = java.util.concurrent.atomic.AtomicLong()
+    // Starts at 1 so the first load of a session always writes a line: that is
+    // what makes the counters visible without scrolling a whole library first.
+    private val nextReportAt = java.util.concurrent.atomic.AtomicLong(1L)
     private val memory = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 8L / 1024L).toInt()) {
         override fun sizeOf(key: String, value: Bitmap): Int = (value.allocationByteCount / 1024).coerceAtLeast(1)
     }
@@ -55,10 +64,37 @@ object ThumbnailRepository {
         else -> 6000
     }
 
+    /** Memory/disk hit rate and real decodes, for the cache audit log. */
+    fun statsLine(): String {
+        val memory = memoryHits.get()
+        val disk = diskHits.get()
+        val decoded = platformDecodes.get()
+        val requests = memory + disk + decoded
+        val hitRate = if (requests == 0L) 0.0 else (memory + disk) * 100.0 / requests
+        return "requests=$requests memory=$memory disk=$disk decoded=$decoded " +
+            "coalesced=${coalescedRequests.get()} hit=${"%.1f".format(hitRate)}%"
+    }
+
+    private fun reportProgress() {
+        val total = memoryHits.get() + diskHits.get() + platformDecodes.get()
+        // Decodes run several at a time, so "total % N == 0" is skipped whenever
+        // two requests finish together; step the threshold instead.
+        val threshold = nextReportAt.get()
+        if (total >= threshold && nextReportAt.compareAndSet(threshold, threshold + THUMBNAIL_REPORT_EVERY)) {
+            android.util.Log.i(THUMBNAIL_LOG_TAG, statsLine())
+        }
+    }
+
+    /** Writes the current hit-rate counters, for the on-device cache audit. */
+    fun logStats(reason: String) {
+        val total = memoryHits.get() + diskHits.get() + platformDecodes.get()
+        if (total > 0) android.util.Log.i(THUMBNAIL_LOG_TAG, "$reason " + statsLine())
+    }
+
     fun peek(item: MediaItem, requestedSize: Int, preferences: SharedPreferences): Bitmap? {
         val generation = preferences.getLong("thumbnail_cache_generation", 0L)
         val key = cacheKey(item, quantizeSize(requestedSize), generation)
-        return memory.get(key)?.takeUnless(Bitmap::isRecycled)
+        return memory.get(key)?.takeUnless(Bitmap::isRecycled)?.also { memoryHits.incrementAndGet() }
     }
 
     fun cacheBytes(context: Context): Long = thumbnailDirectory(context).walkTopDown()
@@ -68,6 +104,7 @@ object ThumbnailRepository {
     fun clear(context: Context, preferences: SharedPreferences): Long {
         val directory = thumbnailDirectory(context)
         val cleared = cacheBytes(context)
+        android.util.Log.i(THUMBNAIL_LOG_TAG, "clearing cache: " + statsLine())
         backgroundOptimizationJob?.cancel()
         backgroundOptimizationJob = null
         backgroundOptimizationSignature = null
@@ -176,6 +213,8 @@ object ThumbnailRepository {
     private const val BACKGROUND_FIRST_PASS_ITEMS = 160
     private const val BACKGROUND_SECOND_PASS_ITEMS = 80
     private const val BACKGROUND_PASS_DELAY_MS = 1_000L
+    private const val THUMBNAIL_REPORT_EVERY = 100L
+    private const val THUMBNAIL_LOG_TAG = "AlbumThumbs"
 
     fun cancelBackgroundOptimization() {
         backgroundOptimizationJob?.cancel()
@@ -193,11 +232,20 @@ object ThumbnailRepository {
         val size = quantizeSize(requestedSize)
         val generation = preferences.getLong("thumbnail_cache_generation", 0L)
         val key = cacheKey(item, size, generation)
-        memory.get(key)?.takeUnless(Bitmap::isRecycled)?.let { return@withContext it }
+        memory.get(key)?.takeUnless(Bitmap::isRecycled)?.let {
+            memoryHits.incrementAndGet()
+            return@withContext it
+        }
         val lock = keyLocks.getOrPut(key) { Mutex() }
         try {
             lock.withLock {
-                memory.get(key)?.takeUnless(Bitmap::isRecycled)?.let { return@withLock it }
+                memory.get(key)?.takeUnless(Bitmap::isRecycled)?.let {
+                    // Another request for the same cell finished first: the
+                    // decode did not have to run twice.
+                    coalescedRequests.incrementAndGet()
+                    memoryHits.incrementAndGet()
+                    return@withLock it
+                }
                 slots.withPermit {
                     val diskCacheEnabled = preferences.getBoolean("background_optimization", true)
                     val cacheFile = cacheFile(context.cacheDir, key)
@@ -206,12 +254,16 @@ object ThumbnailRepository {
                             cached.prepareToDraw()
                             cacheFile.setLastModified(System.currentTimeMillis())
                             memory.put(key, cached)
+                            diskHits.incrementAndGet()
+                            reportProgress()
                             return@withPermit cached
                         }
                     }
                     val loaded = loadPlatformThumbnail(context, item, size) ?: return@withPermit null
                     loaded.prepareToDraw()
                     memory.put(key, loaded)
+                    platformDecodes.incrementAndGet()
+                    reportProgress()
                     if (diskCacheEnabled) {
                         persist(cacheFile, loaded)
                         scheduleTrim(cacheFile.parentFile!!, preferences)

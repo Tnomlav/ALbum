@@ -21,7 +21,18 @@ object MediaSnapshotStore {
         val localVideos: List<MediaItem>
     )
 
+    // Last snapshot parsed or written in this process. Warm starts (returning to
+    // the grid, configuration changes, tab switches) read this instead of
+    // parsing a multi-megabyte JSON file on the main thread, which is what used
+    // to stall the first frame of a cold start.
+    @Volatile
+    private var inMemory: Snapshot? = null
+
+    /** The snapshot already parsed in this process, without touching the disk. */
+    fun cached(): Snapshot? = inMemory
+
     fun save(context: Context, snapshot: Snapshot) {
+        inMemory = snapshot
         runCatching {
             val root = JSONObject()
                 .put("images", encode(snapshot.images))
@@ -40,7 +51,10 @@ object MediaSnapshotStore {
 
     fun load(context: Context): Snapshot? = runCatching {
         val file = File(context.filesDir, FILE_NAME)
-        if (!file.isFile) return@runCatching null
+        if (!file.isFile) {
+            inMemory = null
+            return@runCatching null
+        }
         val root = JSONObject(file.readText())
         Snapshot(
             images = decode(root.optJSONArray("images")),
@@ -48,7 +62,7 @@ object MediaSnapshotStore {
             localImages = decode(root.optJSONArray("localImages")),
             localVideos = decode(root.optJSONArray("localVideos"))
         ).takeIf { it.images.isNotEmpty() || it.videos.isNotEmpty() || it.localImages.isNotEmpty() || it.localVideos.isNotEmpty() }
-    }.getOrNull()
+    }.getOrNull().also { inMemory = it }
 
     private fun encode(items: List<MediaItem>): JSONArray {
         val array = JSONArray()

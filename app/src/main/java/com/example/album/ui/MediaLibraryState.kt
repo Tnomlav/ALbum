@@ -145,10 +145,11 @@ class MediaLibraryState(context: Context) {
         private set
 
     init {
-        // Publish the cached snapshot before the first frame. Waiting for the
-        // refresh coroutine left the albums page with nothing to show for a few
-        // frames, which is what made a cold start look like it was loading.
-        runCatching { com.example.album.data.MediaSnapshotStore.load(appContext) }.getOrNull()?.let { cached ->
+        // Publish the snapshot this process has already parsed. Reading and
+        // parsing the file here used to stall the first frame: on a large
+        // library the JSON is several megabytes. A cold start now loads it from
+        // disk in refresh(), which already runs on Dispatchers.IO.
+        com.example.album.data.MediaSnapshotStore.cached()?.let { cached ->
             allImages = cached.images
             allVideos = cached.videos
             localImages = cached.localImages
@@ -298,6 +299,10 @@ class MediaLibraryState(context: Context) {
             // Remember that at least one scan finished: until then an empty
             // library means "not loaded yet", not "no media".
             initialLoadComplete = true
+            // One cache-audit line per library scan, next to the per-200
+            // progress lines: pulling to refresh on a big library is enough to
+            // read the thumbnail memory/disk hit rate off logcat.
+            ThumbnailRepository.logStats("after scan")
         }
     }
 
