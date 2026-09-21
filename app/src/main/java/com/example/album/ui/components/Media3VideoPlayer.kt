@@ -694,6 +694,19 @@ internal fun Media3VideoPlayer(
         runCatching { context.startActivity(intent) }
     }
 
+    /**
+     * While the floating window is up the app has no visible UI, so its task is
+     * hidden from the multi-task list; leaving mini mode brings it back.
+     */
+    fun setTaskHiddenFromRecents(hidden: Boolean) {
+        val activity = hostActivity ?: return
+        val manager = activity.getSystemService(android.content.Context.ACTIVITY_SERVICE)
+            as? android.app.ActivityManager ?: return
+        runCatching {
+            manager.appTasks.forEach { task -> task.setExcludeFromRecents(hidden) }
+        }
+    }
+
     fun showFloatingWindow() {
         if (floatingWindow?.isShowing == true) return
         if (!OverlayMiniWindow.canShow(context)) {
@@ -720,6 +733,7 @@ internal fun Media3VideoPlayer(
                 // rebuilding the in-app surface is what brings the picture back
                 // instead of audio only.
                 videoSurfaceToken++
+                setTaskHiddenFromRecents(false)
                 // The task was moved to the back when the window appeared, so
                 // returning to full screen has to bring it forward again.
                 bringAppToFront()
@@ -727,6 +741,7 @@ internal fun Media3VideoPlayer(
             onClose = {
                 floatingWindow = null
                 pictureInPictureRequested = false
+                setTaskHiddenFromRecents(false)
                 // Closing the window is the user asking for playback to stop;
                 // when "pause in the background" is on, the video must not keep
                 // playing behind the launcher.
@@ -764,6 +779,9 @@ internal fun Media3VideoPlayer(
                 ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             }
             hostActivity?.moveTaskToBack(true)
+            // The app has no UI while the window floats: keep it out of the
+            // multi-task list until mini mode ends.
+            setTaskHiddenFromRecents(true)
         } else if (onEnterPictureInPicture()) {
             pictureInPictureRequested = true
         } else {
@@ -822,6 +840,8 @@ internal fun Media3VideoPlayer(
                         controlsInteraction++
                         videoSurfaceToken++
                     }
+                    // Back in the app: it belongs in the multi-task list again.
+                    setTaskHiddenFromRecents(false)
                     pictureInPictureRequested = false
                     if (pausedForBackground) {
                         pausedForBackground = false
