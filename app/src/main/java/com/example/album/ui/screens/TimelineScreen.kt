@@ -290,10 +290,15 @@ private fun OptimizedTimelineGrid(
     LaunchedEffect(scrollToTopToken) {
         if (scrollToTopToken > 0L) state.scrollToItem(0)
     }
-    LaunchedEffect(state, groupedDates) {
+    // Same lookup as the album grids: build the key set once per date grouping
+    // instead of scanning every group and every photo on every scroll sample.
+    val timelineKeys = remember(groupedDates) {
+        groupedDates.asSequence().flatMap { it.value.asSequence() }.mapTo(HashSet()) { it.uri.toString() }
+    }
+    LaunchedEffect(state, groupedDates, timelineKeys) {
         snapshotFlow {
             val firstKey = state.layoutInfo.visibleItemsInfo
-                .firstOrNull { info -> groupedDates.any { group -> group.value.any { it.uri.toString() == info.key } } }
+                .firstOrNull { info -> info.key in timelineKeys }
                 ?.key as? String
             Triple(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset, firstKey)
         }
@@ -303,7 +308,7 @@ private fun OptimizedTimelineGrid(
                 onFirstVisibleMediaChanged(firstKey)
             }
     }
-        val flatItems = remember(groupedDates) { groupedDates.flatMap { it.value } }
+    val flatItems = remember(groupedDates) { groupedDates.flatMap { it.value } }
     LazyGridMediaPrefetch(state, flatItems)
     val scope = rememberCoroutineScope()
     val scrollJob = remember { arrayOfNulls<Job>(1) }
@@ -477,10 +482,13 @@ private fun AdaptiveTimeline(
             index += group.value.size
         }
     }
-    LaunchedEffect(state, groupedDates) {
+    val staggeredTimelineKeys = remember(groupedDates) {
+        groupedDates.asSequence().flatMap { it.value.asSequence() }.mapTo(HashSet()) { it.uri.toString() }
+    }
+    LaunchedEffect(state, groupedDates, staggeredTimelineKeys) {
         snapshotFlow {
             val firstKey = state.layoutInfo.visibleItemsInfo
-                .firstOrNull { info -> groupedDates.any { group -> group.value.any { it.uri.toString() == info.key } } }
+                .firstOrNull { info -> info.key in staggeredTimelineKeys }
                 ?.key as? String
             Triple(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset, firstKey)
         }

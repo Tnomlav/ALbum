@@ -366,11 +366,15 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
             }
         }
     }
-    LaunchedEffect(gridState) {
+    // Resolving "the first visible item" used to rescan every album (and, for a
+    // folder, every photo inside it) on every scroll sample. A hash set of the
+    // keys keeps the lookup O(1) and stops building uri.toString() per compare.
+    val albumKeys = remember(albums) { albums.mapTo(HashSet()) { it.name } }
+    LaunchedEffect(gridState, albumKeys) {
         snapshotFlow {
-            val firstKey = gridState.layoutInfo.visibleItemsInfo.firstOrNull { info ->
-                albums.any { mediaAlbum -> mediaAlbum.name == info.key }
-            }?.key as? String
+            val firstKey = gridState.layoutInfo.visibleItemsInfo
+                .firstOrNull { info -> info.key in albumKeys }
+                ?.key as? String
             Triple(gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset, firstKey)
         }
             .sample(80L)
@@ -521,10 +525,11 @@ private fun FolderGrid(
         val position = album.items.indexOfFirst { it.uri.toString() == uri }
         if (position >= 0) gridState.scrollToItem(position)
     }
-    LaunchedEffect(gridState) {
+    val mediaKeys = remember(album.items) { album.items.mapTo(HashSet()) { it.uri.toString() } }
+    LaunchedEffect(gridState, mediaKeys) {
         snapshotFlow {
             val firstKey = gridState.layoutInfo.visibleItemsInfo
-                .firstOrNull { info -> album.items.any { media -> media.uri.toString() == info.key } }
+                .firstOrNull { info -> info.key in mediaKeys }
                 ?.key as? String
             Triple(gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset, firstKey)
         }
@@ -660,10 +665,11 @@ private fun AdaptiveFolderGrid(
         val position = album.items.indexOfFirst { it.uri.toString() == uri }
         if (position >= 0) state.scrollToItem(position)
     }
-    LaunchedEffect(state) {
+    val staggeredMediaKeys = remember(album.items) { album.items.mapTo(HashSet()) { it.uri.toString() } }
+    LaunchedEffect(state, staggeredMediaKeys) {
         snapshotFlow {
             val firstKey = state.layoutInfo.visibleItemsInfo
-                .firstOrNull { info -> album.items.any { media -> media.uri.toString() == info.key } }
+                .firstOrNull { info -> info.key in staggeredMediaKeys }
                 ?.key as? String
             Triple(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset, firstKey)
         }
