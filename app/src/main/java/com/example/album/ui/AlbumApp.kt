@@ -197,6 +197,13 @@ import kotlinx.coroutines.channels.Channel
 import kotlin.coroutines.coroutineContext
 import kotlin.math.roundToInt
 
+/**
+ * How long the P page's refresh indicator stays up at minimum. The folder index
+ * makes a warm walk finish in a few hundred milliseconds, and a spinner that
+ * comes and goes that fast reads as "nothing happened".
+ */
+private const val MIN_PIXIV_REFRESH_INDICATOR_MS = 700L
+
 private enum class MainTab(val label: String, val icon: ImageVector) {
     Albums("相册", Icons.Outlined.Collections),
     Videos("视频", Icons.Outlined.VideoLibrary),
@@ -996,12 +1003,18 @@ fun AlbumApp(
             .distinctBy { it.uri.toString() }
     } }
     suspend fun reloadPixivPage(forceWalk: Boolean = true) {
-        if (selectedTab != MainTab.Pixiv || cleanupOpen) return
+        if (selectedTab != MainTab.Pixiv || cleanupOpen) {
+            // The request was made while another page is showing: it never walks,
+            // so it must not leave the indicator it lit up running.
+            pixivPageRefreshing = false
+            return
+        }
         val generation = ++pixivReloadGeneration
         // Loading the cached snapshot is not a "refresh": showing the progress
         // indicator for it is what made opening the app look like it was
         // loading. Only a real SAF walk sets the flag.
         var walking = false
+        var walkStartedAt = 0L
         try {
             // Show the previous snapshot immediately (SAF tree walks are slow)
             // and replace it once the fresh walk finishes.
@@ -1024,6 +1037,7 @@ fun AlbumApp(
             }
             pixivPageRefreshing = true
             walking = true
+            walkStartedAt = System.nanoTime()
             // A full SAF walk can take several seconds. Partial snapshots are
             // streamed through a conflated channel so folders appear as soon as
             // they are read instead of all at the end.
@@ -1056,11 +1070,25 @@ fun AlbumApp(
             // The latest request always clears the flag, even when it returned
             // early from the cached snapshot: an older cancelled walk used to
             // leave the pull-to-refresh spinner running for good.
+            // Once the folder index is warm the walk finishes in a few hundred
+            // milliseconds, which is short enough that the indicator could come
+            // and go inside a single frame -- "the pull did something" has to
+            // stay visible.
+            if (walkStartedAt > 0L) {
+                val elapsedMs = (System.nanoTime() - walkStartedAt) / 1_000_000L
+                if (elapsedMs < MIN_PIXIV_REFRESH_INDICATOR_MS) {
+                    delay(MIN_PIXIV_REFRESH_INDICATOR_MS - elapsedMs)
+                }
+            }
             if (generation == pixivReloadGeneration) pixivPageRefreshing = false
         }
     }
     fun requestPixivReload(forceWalk: Boolean = true) {
         pixivReloadJob?.cancel()
+        // A real walk is what the P page's pull-to-refresh asks for, so light
+        // the indicator up now: waiting for the 350ms debounce below left the
+        // gesture's spinner sitting still until the walk got going.
+        if (forceWalk) pixivPageRefreshing = true
         pixivReloadJob = scope.launch {
             // Triggers often arrive together (a library refresh plus an explicit
             // request); the short wait collapses them into one SAF walk instead
@@ -3495,9 +3523,11 @@ fun AlbumApp(
                     query = if (pixivSearchMode == PixivSearchMode.Tag) "" else appliedQuery,
                     searchingFolders = false,
                     // The P page streams its folders as the walk progresses, so
-                    // it does not need a blocking spinner; the library refresh
-                    // (what its pull-to-refresh asks for) still shows one.
-                    loading = library.loading,
+                    // it does not need a blocking spinner -- but its refresh
+                    // indicator has to follow the Pixiv walk it actually starts
+                    // (pixivPageRefreshing), which is not the same state as the
+                    // media library's loading flag.
+                    loading = pixivPageRefreshing || library.loading,
                     scanning = library.scanning,
                     suppressRefreshIndicator = !startupLibraryReadDone,
                     permissionGranted = true,
