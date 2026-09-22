@@ -442,6 +442,13 @@ class PixivArchiveRepository(private val context: Context) {
         fun walkTree(root: DocumentFile?, treeUri: Uri?, folder: String, output: MutableList<MediaItem>) {
             val tree = treeUri ?: return
             val rootDocument = root ?: return
+            // Same filter the media library applies, so the P page and the album
+            // pages hide exactly the same pictures.
+            val adultFilter = if (AdultTagStore.enabled(context)) {
+                AdultTagStore.load(context)
+            } else {
+                AdultTagFilter()
+            }
             val (index, stats) = walkPixivFolders(
                 rootUri = rootDocument.uri.toString(),
                 folderName = folder,
@@ -450,12 +457,14 @@ class PixivArchiveRepository(private val context: Context) {
                 includeHidden = showHiddenMedia,
                 onItem = { entry, folderName, siblings ->
                     val item = itemFor(entry, folderName)
-                    output += item
-                    // Keep the sidecar around so tag reads do not have to search
-                    // the tree again later.
-                    siblings["${entry.name}.pixiv.json"]?.let { sidecar ->
-                        DocumentFile.fromSingleUri(context, sidecar.uri.toUri())
-                            ?.let { archiveSidecarCache[item.uri.toString()] = it }
+                    if (!adultFilter.contains(item)) {
+                        output += item
+                        // Keep the sidecar around so tag reads do not have to
+                        // search the tree again later.
+                        siblings["${entry.name}.pixiv.json"]?.let { sidecar ->
+                            DocumentFile.fromSingleUri(context, sidecar.uri.toUri())
+                                ?.let { archiveSidecarCache[item.uri.toString()] = it }
+                        }
                     }
                 },
                 onFolderDone = { publish(output) }
@@ -701,6 +710,7 @@ class PixivArchiveRepository(private val context: Context) {
                             onProgress(PixivArchiveProgress(PixivArchivePhase.Tags, completed, total, failed, record.filename, metadata.artist, "正在写入 Pixiv tags", itemProgress = 0.85f))
                             writeMetadata(requireNotNull(target), folder, metadata)
                         }
+                        rememberAdultTag(target, record.filename, metadata.tags)
                         moved = true
                     } catch (error: Exception) {
                         // The file has already been moved. Do not delete it
@@ -734,6 +744,7 @@ class PixivArchiveRepository(private val context: Context) {
                 if (copied) {
                     try {
                         if (writeTags) writeMetadata(requireNotNull(target), folder, metadata)
+                        rememberAdultTag(target, record.filename, metadata.tags)
                         if (copyInsteadOfMove || mediaRepository.deleteUriPermanently(record.uri)) {
                             moved = true
                         } else {
@@ -1161,6 +1172,20 @@ class PixivArchiveRepository(private val context: Context) {
         } finally {
             temporary.delete()
         }
+    }
+
+    /**
+     * Records an archived file that turned out to carry an adult tag, so the
+     * library filter never has to read tags back from every image.
+     */
+    private fun rememberAdultTag(target: DocumentFile?, archivedName: String, tags: List<String>) {
+        val document = target ?: return
+        AdultTagStore.record(
+            context = context,
+            uri = document.uri.toString(),
+            name = document.name ?: archivedName,
+            tags = tags
+        )
     }
 
     private fun documentFileForUri(uri: Uri): DocumentFile? {

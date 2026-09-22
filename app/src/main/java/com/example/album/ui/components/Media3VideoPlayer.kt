@@ -39,6 +39,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Headphones
@@ -1546,11 +1548,16 @@ internal fun Media3VideoPlayer(
                 )
             ) {
                 Box(
-                    Modifier.fillMaxSize().padding(horizontal = 24.dp),
+                    // The dialog window covers the whole screen, including the
+                    // navigation bar and any display cutout, so in landscape the
+                    // menu used to centre against the wrong rectangle. Insets
+                    // fix the centring; the width cap keeps it menu-sized
+                    // instead of stretching across a landscape screen.
+                    Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 24.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Surface(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        modifier = Modifier.widthIn(max = 360.dp).fillMaxWidth().padding(horizontal = 12.dp),
                         color = Color.Black.copy(alpha = .20f),
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
                     ) {

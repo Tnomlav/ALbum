@@ -3623,6 +3623,12 @@ fun AlbumApp(
                             pixivRefreshKey++
                         }
                     },
+                    onHideAdultTaggedChange = { enabled ->
+                        scope.launch {
+                            library.setHideAdultTagged(enabled)
+                            pixivRefreshKey++
+                        }
+                    },
                     onRenameExtensionChange = { showRenameExtension = it },
                     onLanguageChange = onAppLanguageChange
                 )

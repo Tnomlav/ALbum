@@ -980,6 +980,7 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
     var pauseOnBackground by remember { mutableStateOf(preferences.getBoolean("video_pause_on_background", true)) }
     var rememberProgress by remember { mutableStateOf(preferences.getBoolean("video_progress", true)) }
     var autoHide by remember { mutableStateOf(preferences.getBoolean("video_auto_hide", true)) }
+    var centerPopup by remember { mutableStateOf(preferences.getBoolean("video_center_popup", true)) }
     var longSkip by remember { mutableStateOf(preferences.getBoolean("long_skip", false)) }
     var edgeProtection by remember { mutableStateOf(preferences.getBoolean("edge_protection", true)) }
     var tapPause by remember { mutableStateOf(preferences.getBoolean("video_tap_pause", false)) }
@@ -1022,6 +1023,9 @@ private fun VideoSettingsDialog(onDismiss: () -> Unit) {
                 }
                 VideoSettingSwitch(appText("自动隐藏播放器界面", english), autoHide) {
                     autoHide = it; putBoolean("video_auto_hide", it)
+                }
+                VideoSettingSwitch(appText("手势提示浮层", english), centerPopup) {
+                    centerPopup = it; putBoolean("video_center_popup", it)
                 }
                 VideoSettingSwitch(appText("长快进", english), longSkip) {
                     longSkip = it; putBoolean("long_skip", it)

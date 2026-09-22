@@ -40,6 +40,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import org.json.JSONArray
 import org.json.JSONObject
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 
 private data class RefreshResult(
     val images: List<MediaItem>,
@@ -246,11 +247,22 @@ class MediaLibraryState(context: Context) {
             refreshError = refreshResult.errors.takeIf { it.isNotEmpty() }?.joinToString("、")
             val prepared = withContext(Dispatchers.Default) {
                 val showHiddenMedia = settingsPreferences.getBoolean("show_hidden_media", false)
+                // The R-18 filter only needs the identities the archiver
+                // recorded while writing tags: no file has to be read here.
+                val adultFilter = if (com.example.album.data.AdultTagStore.enabled(appContext)) {
+                    com.example.album.data.AdultTagStore.load(appContext)
+                } else {
+                    com.example.album.data.AdultTagFilter()
+                }
                 fun visibleName(item: MediaItem): Boolean =
-                    !item.isSystemTrashedFile() && (showHiddenMedia || !item.name.trimStart().startsWith('.'))
-                val normalizedImages = refreshResult.images.filter(::visibleName).distinctBy { it.uri }.sortedByDescending { it.dateTaken }
+                    !item.isSystemTrashedFile() &&
+                        (showHiddenMedia || !item.name.trimStart().startsWith('.'))
+                // The R-18 filter is about pictures; videos keep their own
+                // handling (they rarely carry the archive's tag set).
+                fun visibleImage(item: MediaItem): Boolean = visibleName(item) && !adultFilter.contains(item)
+                val normalizedImages = refreshResult.images.filter(::visibleImage).distinctBy { it.uri }.sortedByDescending { it.dateTaken }
                 val normalizedVideos = refreshResult.videos.filter(::visibleName).distinctBy { it.uri }.sortedByDescending { it.dateTaken }
-                val normalizedLocalImages = refreshResult.local.filterNot { it.isVideo }.filter(::visibleName).distinctBy { it.uri }.sortedByDescending { it.dateTaken }
+                val normalizedLocalImages = refreshResult.local.filterNot { it.isVideo }.filter(::visibleImage).distinctBy { it.uri }.sortedByDescending { it.dateTaken }
                 val normalizedLocalVideos = refreshResult.local.filter { it.isVideo }.filter(::visibleName).distinctBy { it.uri }.sortedByDescending { it.dateTaken }
                 val excluded = excludedFolders
                 PreparedMedia(
@@ -506,6 +518,15 @@ class MediaLibraryState(context: Context) {
         refresh(permissionGranted)
     }
 
+    /**
+     * Hides (or shows again) the pictures the archiver tagged as adult content.
+     * A refresh re-applies the filter, exactly like the hidden-file toggle.
+     */
+    suspend fun setHideAdultTagged(enabled: Boolean) {
+        settingsPreferences.edit().putBoolean("hide_adult_tagged", enabled).apply()
+        refresh(permissionGranted)
+    }
+
     fun remove(item: MediaItem) {
         if (item.isDocument) {
             if (item.isVideo) localVideos = localVideos.filterNot { it.uri == item.uri }
@@ -618,7 +639,7 @@ class MediaLibraryState(context: Context) {
 
     fun restoreExcludedFolder(folder: String) {
         excludedFolders = excludedFolders - folder
-        cleanupPreferences.edit().putStringSet("excluded_folders", excludedFolders).apply()
+        cleanupPreferences.edit { putStringSet("excluded_folders", excludedFolders) }
         applyExclusions()
     }
 

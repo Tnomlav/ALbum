@@ -103,6 +103,7 @@ fun SettingsScreen(
     showFavoriteBadge: Boolean,
     onShowFavoriteBadgeChange: (Boolean) -> Unit,
     onShowHiddenMediaChange: (Boolean) -> Unit,
+    onHideAdultTaggedChange: (Boolean) -> Unit = {},
     onRenameExtensionChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
@@ -154,6 +155,7 @@ fun SettingsScreen(
     var gifThumbnails by remember { mutableStateOf(preferences.getBoolean("gif_thumbnails", true)) }
     var previewOriginal by remember { mutableStateOf(preferences.getBoolean("preview_original", true)) }
     var showHiddenMedia by remember { mutableStateOf(preferences.getBoolean("show_hidden_media", false)) }
+    var hideAdultTagged by remember { mutableStateOf(preferences.getBoolean("hide_adult_tagged", false)) }
     var pullRefresh by remember { mutableStateOf(preferences.getBoolean("pull_refresh", true)) }
     var persistentScrollbar by remember { mutableStateOf(preferences.getBoolean("persistent_scrollbar", false)) }
     var randomSlideshow by remember { mutableStateOf(preferences.getBoolean("random_slideshow", false)) }
@@ -416,13 +418,19 @@ fun SettingsScreen(
                 onShowHiddenMediaChange(it)
             }
         } }
+        item { ToggleRow("屏蔽 R-18 图片", "隐藏归档时写入 R-18 tag 的图片", hideAdultTagged) {
+            setBoolean("hide_adult_tagged", it) {
+                hideAdultTagged = it
+                onHideAdultTaggedChange(it)
+            }
+        } }
         }
         if (settingsSection == "视频") {
         item { ToggleRow("打开视频时自动播放", null, autoplay) { setBoolean("video_autoplay", it) { autoplay = it } } }
         item { ToggleRow("进入后台时自动暂停", null, pauseVideoOnBackground) { setBoolean("video_pause_on_background", it) { pauseVideoOnBackground = it } } }
         item { ToggleRow("记住最后一次播放进度", null, rememberProgress) { setBoolean("video_progress", it) { rememberProgress = it } } }
         item { ToggleRow("自动隐藏播放器界面", "播放中无操作 3 秒后隐藏控件", autoHidePlayer) { setBoolean("video_auto_hide", it) { autoHidePlayer = it } } }
-        item { ToggleRow("视频弹窗", "暂停、快进快退、调节倍速时显示中间的黑色提示", centerPopup) { setBoolean("video_center_popup", it) { centerPopup = it } } }
+        item { ToggleRow("手势提示浮层", "手势操作时显示中间提示", centerPopup) { setBoolean("video_center_popup", it) { centerPopup = it } } }
         item { ToggleRow("长快进", "在播放器中显示长快退和长快进按钮", longSkip) { setBoolean("long_skip", it) { longSkip = it } } }
         if (longSkip) {
             item { ValueRow("长快进长度", value("long_skip_length", "30秒")) {
