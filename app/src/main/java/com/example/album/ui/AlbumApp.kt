@@ -3625,6 +3625,10 @@ fun AlbumApp(
                     },
                     onHideAdultTaggedChange = { enabled ->
                         scope.launch {
+                            // Older archives carry the tags in their files but not
+                            // in the filter store, so record them before the
+                            // library re-filters.
+                            if (enabled) pixivRepository.backfillAdultTags()
                             library.setHideAdultTagged(enabled)
                             pixivRefreshKey++
                         }

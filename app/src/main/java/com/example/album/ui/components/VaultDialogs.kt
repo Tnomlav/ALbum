@@ -138,7 +138,7 @@ fun VaultApplyChoiceSheet(
             verticalAlignment = Alignment.CenterVertically
         ) {
             TextButton(onClick = { onApply(draft) }, enabled = draft.isNotBlank(), modifier = Modifier.height(48.dp)) {
-                Text(appText("应用", LocalAppEnglish.current), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                Text(appText(VaultDialogLabels.apply, LocalAppEnglish.current), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -174,7 +174,7 @@ fun VaultSortChoiceSheet(
         }
         Row(Modifier.fillMaxWidth().height(56.dp).padding(start = 12.dp, end = 12.dp, bottom = 8.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { onApply(draftMethod, draftDirection) }, modifier = Modifier.height(48.dp)) {
-                Text(appText("应用", LocalAppEnglish.current), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                Text(appText(VaultDialogLabels.apply, LocalAppEnglish.current), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -205,7 +205,7 @@ fun VaultSortWheelSheet(
         Spacer(Modifier.height(34.dp))
         Box(Modifier.fillMaxWidth().height(74.dp), contentAlignment = Alignment.Center) {
             TextButton(onClick = { onApply(draftMethod, draftDirection) }, modifier = Modifier.fillMaxWidth(.8f).height(54.dp), shape = CircleShape, border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary)) {
-                Text(if (english) "Apply" else "应用", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                Text(appText(VaultDialogLabels.apply, english), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -263,7 +263,7 @@ fun VaultLayoutWheelSheet(
                 shape = CircleShape,
                 border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
             ) {
-                Text(if (english) "Apply" else "应用", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                Text(appText(VaultDialogLabels.apply, english), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -312,7 +312,12 @@ fun VaultColorSheet(
 }
 
 @Composable
-fun VaultInfoSheet(title: String, body: String, dismissLabel: String = "知道了", onDismiss: () -> Unit) {
+fun VaultInfoSheet(
+    title: String,
+    body: String,
+    dismissLabel: String = VaultDialogLabels.acknowledge,
+    onDismiss: () -> Unit
+) {
     VaultBottomSheet(title, onDismiss) {
         Text(
             body,
@@ -321,9 +326,7 @@ fun VaultInfoSheet(title: String, body: String, dismissLabel: String = "知道�
             fontSize = 13.sp,
             lineHeight = 21.sp
         )
-        TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End).height(48.dp)) {
-            Text(dismissLabel, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-        }
+        VaultSheetDismissButton(label = dismissLabel, onClick = onDismiss)
     }
 }
 
@@ -337,25 +340,12 @@ fun VaultConfirmationSheet(
     onConfirm: () -> Unit
 ) {
     VaultConfirmationFrame(title = title, body = body, onDismiss = onDismiss) {
-        TextButton(
-            onClick = onConfirm,
-            modifier = Modifier.fillMaxWidth(.8f).height(54.dp),
-            shape = CircleShape,
-            border = androidx.compose.foundation.BorderStroke(
-                2.dp,
-                if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-            )
-        ) {
-            Text(
-                confirmLabel,
-                color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-        TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(54.dp)) {
-            Text(appText("取消", LocalAppEnglish.current), color = MaterialTheme.colorScheme.onSurface, fontSize = 17.sp)
-        }
+        VaultSheetConfirmButtons(
+            confirmLabel = confirmLabel,
+            onConfirm = onConfirm,
+            onDismiss = onDismiss,
+            danger = danger
+        )
     }
 }
 
@@ -372,9 +362,7 @@ fun VaultChoiceConfirmationSheet(
                 Text(choice, color = MaterialTheme.colorScheme.primary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             }
         }
-        TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(54.dp)) {
-            Text(appText("取消", LocalAppEnglish.current), color = MaterialTheme.colorScheme.onSurface, fontSize = 17.sp)
-        }
+        VaultSheetCancelButton(onDismiss)
     }
 }
 
@@ -520,7 +508,7 @@ fun VaultWheelChoiceSheet(
                             onClick = { dismissAnimated() },
                             modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp).size(40.dp)
                                 .background((if (playerStyle) Color.White else foreground).copy(alpha = .08f), CircleShape)
-                        ) { Icon(Icons.Outlined.Close, appText("关闭", LocalAppEnglish.current), tint = foreground) }
+                        ) { Icon(Icons.Outlined.Close, appText(VaultDialogLabels.close, LocalAppEnglish.current), tint = foreground) }
                     }
                     ChoiceWheel(options, draft, onSelected = { draft = it }, foreground = foreground, muted = muted, divider = divider)
                     VaultSheetApplyButton(
@@ -539,21 +527,98 @@ fun VaultWheelChoiceSheet(
  */
 @Composable
 fun VaultSheetApplyButton(
-    label: String = appText("应用", LocalAppEnglish.current),
+    label: String = VaultDialogLabels.apply,
     playerStyle: Boolean = false,
     onClick: () -> Unit
 ) {
-    val foreground = if (playerStyle) Color.White else MaterialTheme.colorScheme.primary
+    VaultSheetPrimaryButton(label = label, playerStyle = playerStyle, onClick = onClick)
+}
+
+/**
+ * The one place the app's dialog buttons take their wording from. Every dialog
+ * that offers "confirm", "cancel" or "close" uses these labels, so the same
+ * word never sits in a different place or means something else.
+ */
+object VaultDialogLabels {
+    val cancel = "取消"
+    val done = "完成"
+    val acknowledge = "知道了"
+    val apply = "应用"
+    val close = "关闭"
+}
+
+/**
+ * The primary action of a dialog: one outlined pill, centred, the same size and
+ * position everywhere. Destructive actions use the error colour instead of the
+ * accent, so "this deletes something" is visible before reading the label.
+ */
+@Composable
+fun VaultSheetPrimaryButton(
+    label: String,
+    onClick: () -> Unit,
+    danger: Boolean = false,
+    enabled: Boolean = true,
+    playerStyle: Boolean = false
+) {
+    val accent = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+        danger -> MaterialTheme.colorScheme.error
+        playerStyle -> Color.White
+        else -> MaterialTheme.colorScheme.primary
+    }
     Box(Modifier.fillMaxWidth().height(74.dp), contentAlignment = Alignment.Center) {
         TextButton(
             onClick = onClick,
+            enabled = enabled,
             modifier = Modifier.fillMaxWidth(.8f).height(54.dp),
             shape = CircleShape,
-            border = androidx.compose.foundation.BorderStroke(2.dp, foreground)
+            border = androidx.compose.foundation.BorderStroke(2.dp, accent)
         ) {
-            Text(label, color = foreground, fontWeight = FontWeight.SemiBold)
+            Text(appText(label, LocalAppEnglish.current), color = accent, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         }
     }
+}
+
+/** Closing a dialog that only informs: the same pill, with a "知道了" label. */
+@Composable
+fun VaultSheetDismissButton(
+    label: String = VaultDialogLabels.acknowledge,
+    playerStyle: Boolean = false,
+    onClick: () -> Unit
+) {
+    VaultSheetPrimaryButton(label = label, onClick = onClick, playerStyle = playerStyle)
+}
+
+/**
+ * "取消" under a primary action: full width, plain text, never the accent
+ * colour, so backing out of a dialog always looks the same and never competes
+ * with the decision itself.
+ */
+@Composable
+fun VaultSheetCancelButton(onDismiss: () -> Unit) {
+    TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(54.dp)) {
+        Text(
+            appText(VaultDialogLabels.cancel, LocalAppEnglish.current),
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 17.sp
+        )
+    }
+}
+
+/**
+ * A dialog that asks for a decision: the primary pill on top (destructive in
+ * the error colour) and "取消" full width underneath.
+ */
+@Composable
+fun VaultSheetConfirmButtons(
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    danger: Boolean = false,
+    confirmEnabled: Boolean = true
+) {
+    VaultSheetPrimaryButton(label = confirmLabel, onClick = onConfirm, danger = danger, enabled = confirmEnabled)
+    VaultSheetCancelButton(onDismiss)
 }
 
 @Composable
@@ -631,16 +696,12 @@ fun VaultTextInputSheet(
             label = label,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp)
         )
-        Row(
-            modifier = Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextButton(onClick = onConfirm, enabled = confirmEnabled, modifier = Modifier.widthIn(min = 64.dp).height(48.dp)) {
-                Text(confirmLabel, color = if (confirmEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
-            }
-        }
-        Spacer(Modifier.height(4.dp))
+        VaultSheetConfirmButtons(
+            confirmLabel = confirmLabel,
+            onConfirm = onConfirm,
+            onDismiss = onDismiss,
+            confirmEnabled = confirmEnabled
+        )
     }
 }
 
@@ -708,29 +769,20 @@ fun VaultTextInputDialog(
                             onClick = { dismissAnimated() },
                             modifier = Modifier.align(Alignment.CenterEnd).size(40.dp)
                         ) {
-                            Icon(Icons.Outlined.Close, appText("关闭", LocalAppEnglish.current))
+                            Icon(Icons.Outlined.Close, appText(VaultDialogLabels.close, LocalAppEnglish.current))
                         }
                     }
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp)) {
                           VaultActionInput(value, onValueChange, label, Modifier.fillMaxWidth(), singleLine, initialSelection, autoFocus)
                     }
-                    Row(
-                        Modifier.fillMaxWidth().height(54.dp),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(
-                            onClick = { dismissAnimated(onConfirm) },
-                            enabled = confirmEnabled,
-                            modifier = Modifier.widthIn(min = 64.dp).height(48.dp)
-                        ) {
-                            Text(
-                                confirmLabel,
-                                color = if (confirmEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
+                    // The header's × already closes this dialog, so the only
+                    // action left is the primary one -- the same pill every
+                    // other dialog uses.
+                    VaultSheetPrimaryButton(
+                        label = confirmLabel,
+                        onClick = { dismissAnimated(onConfirm) },
+                        enabled = confirmEnabled
+                    )
                 }
             }
         }
@@ -853,7 +905,7 @@ fun VaultDateSheet(initialMillis: Long, onDismiss: () -> Unit, onSelect: (Long) 
                             onClick = { dismissAnimated() },
                             modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)
                                 .size(40.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = .08f), CircleShape)
-                        ) { Icon(Icons.Outlined.Close, appText("关闭", english)) }
+                        ) { Icon(Icons.Outlined.Close, appText(VaultDialogLabels.close, english)) }
                     }
                     Box(
                         Modifier.fillMaxWidth().height(200.dp).padding(horizontal = 12.dp).drawBehind {
@@ -982,7 +1034,7 @@ fun VaultBottomSheet(title: String, onDismiss: () -> Unit, content: @Composable 
                     Box(Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) {
                         Text(title, style = VaultText.SheetTitle)
                         IconButton(onClick = ::dismissAnimated, modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)) {
-                            Icon(Icons.Outlined.Close, contentDescription = appText("关闭", english))
+                            Icon(Icons.Outlined.Close, contentDescription = appText(VaultDialogLabels.close, english))
                         }
                     }
                     content()

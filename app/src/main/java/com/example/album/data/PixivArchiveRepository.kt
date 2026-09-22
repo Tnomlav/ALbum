@@ -47,6 +47,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlin.coroutines.resume
+import androidx.core.content.edit
 import androidx.core.net.toUri
 import org.json.JSONObject
 
@@ -275,6 +276,52 @@ class PixivArchiveRepository(private val context: Context) {
         val snapshot = buildLibrary(fallbackDefaultItems, onProgress)
         runCatching { writeLibraryCache(snapshot) }
         snapshot
+    }
+
+    /**
+     * Records the adult-tagged files of archives that were written before the
+     * R-18 filter existed.
+     *
+     * The archiver only started remembering tags in 1.2.61, so an archive made
+     * earlier has the tags in the files but nothing in the filter store. This
+     * walks the archive once, reads the tags the archiver wrote (embedded
+     * first, the `.pixiv.json` sidecar as a fallback) and remembers every adult
+     * work. A marker per archive configuration keeps it a one-time cost.
+     *
+     * @return how many files were recorded by this run.
+     */
+    suspend fun backfillAdultTags(onFolderDone: () -> Unit = {}): Int = withContext(Dispatchers.IO) {
+        val preferences = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
+        val key = libraryCacheKey()
+        if (preferences.getString(ADULT_BACKFILL_KEY, null) == key) return@withContext 0
+        val targetUri = preferences.getString("target_uri", null)?.toUri()
+        val root = targetUri?.let { treeDocumentFile(it) } ?: return@withContext 0
+
+        var recorded = 0
+        walkPixivFolders(
+            rootUri = root.uri.toString(),
+            folderName = "",
+            previous = PixivWalkIndex(),
+            list = { uri -> listPixivDirectory(context, targetUri, uri.toUri()) },
+            // Everything the archiver wrote has to be inspected, hidden names
+            // included: the filter must not depend on the display settings.
+            includeHidden = true,
+            onItem = { entry, _, siblings ->
+                val uri = entry.uri.toUri()
+                val tags = readEmbeddedTags(uri, entry.mimeType).ifEmpty {
+                    siblings["${entry.name}.pixiv.json"]?.let { sidecar ->
+                        DocumentFile.fromSingleUri(context, sidecar.uri.toUri())?.let(::readSidecarTags)
+                    }.orEmpty()
+                }
+                if (AdultTagStore.hasAdultTag(tags)) {
+                    AdultTagStore.record(context, entry.uri, entry.name, tags)
+                    recorded++
+                }
+            },
+            onFolderDone = onFolderDone
+        )
+        preferences.edit().putString(ADULT_BACKFILL_KEY, key).apply()
+        recorded
     }
 
     /**
@@ -907,18 +954,20 @@ class PixivArchiveRepository(private val context: Context) {
     private fun writePersistedMetadata(pid: String, metadata: PixivMetadata) {
         runCatching {
             val tags = org.json.JSONArray().apply { metadata.tags.forEach(::put) }
-            metadataPreferences.edit().putString(
-                pid,
-                JSONObject().apply {
-                    put("title", metadata.title)
-                    put("artist", metadata.artist)
-                    put("artistId", metadata.artistId)
-                    put("tags", tags)
-                    put("tagTranslations", JSONObject().apply {
-                        metadata.tagTranslations.forEach { (source, values) -> put(source, JSONObject(values)) }
-                    })
-                }.toString()
-            ).apply()
+            metadataPreferences.edit {
+                putString(
+                    pid,
+                    JSONObject().apply {
+                        put("title", metadata.title)
+                        put("artist", metadata.artist)
+                        put("artistId", metadata.artistId)
+                        put("tags", tags)
+                        put("tagTranslations", JSONObject().apply {
+                            metadata.tagTranslations.forEach { (source, values) -> put(source, JSONObject(values)) }
+                        })
+                    }.toString()
+                )
+            }
         }
     }
 
@@ -1307,6 +1356,8 @@ private val COMMON_PIXIV_FILENAME = Regex(
 private const val PROGRESS_UPDATE_INTERVAL_MS = 120L
 private const val PIXIV_METADATA_CONCURRENCY = 3
 private const val LIBRARY_CACHE_FILE = "pixiv_library_cache.json"
+/** Set once the archive has been scanned for adult tags (per configuration). */
+private const val ADULT_BACKFILL_KEY = "adult_backfill_key"
 
 /** How often the P page is handed a partial snapshot while the tree is read. */
 private const val LIBRARY_PROGRESS_INTERVAL_MS = 250L
