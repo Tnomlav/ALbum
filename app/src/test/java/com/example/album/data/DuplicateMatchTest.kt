@@ -2,6 +2,7 @@ package com.example.album.data
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
@@ -49,6 +50,22 @@ class DuplicateMatchTest {
     fun degenerateValuesDoNotMatch() {
         assertFalse(matches(aspectA = 0f, aspectB = 0f))
         assertFalse(matches(aspectA = Float.NaN, aspectB = Float.NaN))
+    }
+
+    @Test
+    fun theHashGridSetsABitWhenTheLeftCellIsBrighter() {
+        // A left-to-right brightening gradient is brighter on the right for
+        // every comparison, so no bit is set.
+        val brighteningRight = IntArray(9 * 8) { index -> (index % 9) * 10 }
+        assertEquals(0L, dHashFromLuminanceGrid(brighteningRight))
+        // Left to right darkening sets every bit.
+        val darkeningRight = IntArray(9 * 8) { index -> 80 - (index % 9) * 10 }
+        assertEquals(-1L, dHashFromLuminanceGrid(darkeningRight))
+        // Flipping one cell pair flips exactly one bit.
+        val single = brighteningRight.copyOf()
+        single[3 * 9 + 4] = 999
+        // Row 3, column 4 -> bit 3*8 + 4.
+        assertEquals(1L shl 28, dHashFromLuminanceGrid(single))
     }
 
     @Test

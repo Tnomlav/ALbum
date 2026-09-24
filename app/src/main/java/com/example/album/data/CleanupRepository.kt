@@ -27,6 +27,23 @@ import org.json.JSONObject
 data class DuplicateGroup(val hash: String, val items: List<MediaItem>)
 
 /**
+ * The 64-bit dHash of a 9x8 luminance grid: a bit is set when the cell on the
+ * left is brighter than the one to its right. Pure, so the bit layout is pinned
+ * by a test instead of only existing inside the bitmap code.
+ */
+internal fun dHashFromLuminanceGrid(grid: IntArray): Long {
+    var hash = 0L
+    var bit = 0
+    for (row in 0 until 8) {
+        for (column in 0 until 8) {
+            if (grid[row * 9 + column] > grid[row * 9 + column + 1]) hash = hash or (1L shl bit)
+            bit++
+        }
+    }
+    return hash
+}
+
+/**
  * Positions of the pictures that share an aspect ratio (within [tolerance])
  * with at least one other picture.
  *
@@ -103,43 +120,63 @@ data class RecycleEntry(
 
 class CleanupRepository(private val context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-    private val analysisPreferences = context.getSharedPreferences(ANALYSIS_PREFERENCES, Context.MODE_PRIVATE)
     private val recycleDirectory = File(context.filesDir, "recycle_bin").apply { mkdirs() }
 
-    suspend fun findExactDuplicates(items: List<MediaItem>): List<DuplicateGroup> = withContext(Dispatchers.IO) {
-        pruneAnalysisCache(items)
-        val cacheEditor = analysisPreferences.edit()
-        val sized = items.mapNotNull { item -> mediaSize(item)?.takeIf { it > 0 }?.let { it to item } }
-        val result = sized.groupBy { it.first }
-            .values
-            .filter { it.size > 1 }
-            .flatMap { candidates ->
-                candidates.mapNotNull { (_, item) -> cachedSha256(item, cacheEditor)?.let { it to item } }
-                    .groupBy({ it.first }, { it.second })
-                    .filterValues { it.size > 1 }
-                    .map { (hash, duplicates) -> DuplicateGroup(hash, duplicates.sortedByDescending { it.dateTaken }) }
-            }
-            .sortedByDescending { it.items.size }
-        cacheEditor.apply()
-        result
-    }
+    /**
+     * Analysis results (SHA-256 and perceptual fingerprints) live in one compact
+     * text file instead of SharedPreferences: a library-sized preference set is
+     * slow to read, slow to prune and rewrites the whole XML on commit, which was
+     * a large part of why a repeat scan still felt heavy.
+     */
+    private val analysisCacheFile = File(context.filesDir, "cleanup_analysis_cache.txt")
 
     /**
-     * Duplicate groups: files that are byte-for-byte identical **and** the ones
-     * that are plainly the same picture after being re-encoded, resized or
-     * saved at a different quality.
-     *
-     * The page used to compare SHA-256 only, so two copies that look identical
-     * by eye never showed up unless their bytes matched exactly. The perceptual
-     * fingerprint that could have caught them was computed by a function
-     * nothing ever called.
+     * Byte-for-byte duplicates, found the way a phone's storage cleaner does it:
+     * group by the size MediaStore already knows, read a 16 KB head of each
+     * candidate, then stream the survivors side by side and stop at the first
+     * difference. Nothing is hashed end to end and no picture is decoded, which
+     * is what makes it take seconds instead of minutes.
      */
     suspend fun findDuplicateGroups(
         items: List<MediaItem>,
         onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> }
     ): List<DuplicateGroup> = withContext(Dispatchers.IO) {
-        pruneAnalysisCache(items)
-        val cacheEditor = analysisPreferences.edit()
+        withAnalysisCache(items) { cache -> duplicateGroups(items, cache, false, onProgress) }
+    }
+
+    /**
+     * The same picture after re-encoding, resizing or a quality change. This one
+     * has to decode candidate pictures, so it is a separate, explicitly asked
+     * for scan: [findDuplicateGroups] stays the fast path.
+     */
+    suspend fun findLookalikeGroups(
+        items: List<MediaItem>,
+        onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> }
+    ): List<DuplicateGroup> = withContext(Dispatchers.IO) {
+        withAnalysisCache(items) { cache -> duplicateGroups(items, cache, true, onProgress) }
+    }
+
+    private suspend fun <T> withAnalysisCache(
+        items: List<MediaItem>,
+        block: suspend (MutableMap<String, String>) -> T
+    ): T {
+        val cache = loadAnalysisCache()
+        val activeUris = items.mapTo(hashSetOf()) { it.uri.toString() }
+        return try {
+            block(cache)
+        } finally {
+            // Persist whatever was computed, even when the user cancelled: the
+            // next scan picks up where this one stopped instead of redoing it.
+            saveAnalysisCache(cache, activeUris)
+        }
+    }
+
+    private suspend fun duplicateGroups(
+        items: List<MediaItem>,
+        cache: MutableMap<String, String>,
+        includeLookalikes: Boolean,
+        onProgress: (completed: Int, total: Int) -> Unit
+    ): List<DuplicateGroup> {
         // Two passes: hashing files that share a size, then decoding the
         // pictures that could be the same image at another size or quality.
         // Progress is reported over both, and every loop checks for cancellation
@@ -150,11 +187,15 @@ class CleanupRepository(private val context: Context) {
         val hashingCandidates = sized.groupBy({ it.first }, { it.second }).values
             .filter { it.size > 1 }
             .flatten()
-        val pictures = items.withIndex().filterNot { it.value.isVideo }
-        val candidatePositions = aspectCandidatePositions(
-            pictures.map { it.value.width.toFloat() / it.value.height.coerceAtLeast(1) }
-        )
-        val decoding = pictures.filterIndexed { position, _ -> position in candidatePositions }
+        val decoding = if (includeLookalikes) {
+            val pictures = items.withIndex().filterNot { it.value.isVideo }
+            val candidatePositions = aspectCandidatePositions(
+                pictures.map { it.value.width.toFloat() / it.value.height.coerceAtLeast(1) }
+            )
+            pictures.filterIndexed { position, _ -> position in candidatePositions }
+        } else {
+            emptyList()
+        }
         val totalWork = hashingCandidates.size + decoding.size
         var completedWork = 0
         onProgress(completedWork, totalWork)
@@ -174,19 +215,32 @@ class CleanupRepository(private val context: Context) {
             if (a != b) parents[b] = a
         }
 
-        // Identical bytes: only files of the same size can be, so the hashing
-        // stays limited to the sizes that repeat.
-        sized.groupBy({ it.first }, { it.second }).values.filter { it.size > 1 }.forEach { candidates ->
+        // Identical bytes, the way a phone's storage cleaner does it. Only files
+        // of the same size can match, and only files that also agree on their
+        // first 16 KB are worth comparing: the comparison itself streams both
+        // files and stops at the first difference, so nothing is hashed.
+        val quickSignatures = coroutineScope {
+            val gate = Semaphore(FINGERPRINT_CONCURRENCY)
+            hashingCandidates.map { index ->
+                async {
+                    gate.withPermit {
+                        val value = cachedHeadSignature(items[index], cache)?.let { it to index }
+                        completedWork++
+                        onProgress(completedWork, totalWork)
+                        value
+                    }
+                }
+            }.awaitAll().filterNotNull()
+        }
+        quickSignatures.groupBy({ it.first }, { it.second }).values.filter { it.size > 1 }.forEach { same ->
             coroutineContext.ensureActive()
-            val hashed = candidates.mapNotNull { index ->
+            // Compare against the first member: byte equality is transitive, so
+            // one representative per group is enough, and every comparison stops
+            // as soon as the two files differ.
+            val representative = same.first()
+            same.drop(1).forEach { index ->
                 coroutineContext.ensureActive()
-                val value = cachedSha256(items[index], cacheEditor)?.let { it to index }
-                completedWork++
-                onProgress(completedWork, totalWork)
-                value
-            }
-            hashed.groupBy({ it.first }, { it.second }).values.filter { it.size > 1 }.forEach { same ->
-                same.drop(1).forEach { union(same.first(), it) }
+                if (sameBytes(items[representative], items[index])) union(representative, index)
             }
         }
 
@@ -196,15 +250,13 @@ class CleanupRepository(private val context: Context) {
         // Decoding is the expensive part, so only pictures that could possibly
         // match are decoded (the matcher requires the aspect ratio to agree
         // within three percent) and the decodes run a few at a time.
-        val pendingWrites = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
         val fingerprints = coroutineScope {
             val gate = Semaphore(FINGERPRINT_CONCURRENCY)
             decoding
                 .map { (index, item) ->
                     async {
                         gate.withPermit {
-                            val value = cachedFingerprint(item) { key, stored -> pendingWrites += key to stored }
-                                ?.let { index to it }
+                            val value = cachedFingerprint(item, cache)?.let { index to it }
                             completedWork++
                             onProgress(completedWork, totalWork)
                             value
@@ -214,7 +266,6 @@ class CleanupRepository(private val context: Context) {
                 .awaitAll()
                 .filterNotNull()
         }
-        pendingWrites.forEach { (key, value) -> cacheEditor.putString(key, value) }
         val buckets = mutableMapOf<Long, MutableList<Int>>()
         fingerprints.forEachIndexed { position, (index, candidate) ->
             val possible = mutableSetOf<Int>()
@@ -244,8 +295,7 @@ class CleanupRepository(private val context: Context) {
                 )
             }
             .sortedByDescending { it.items.size }
-        cacheEditor.apply()
-        result
+        return result
     }
 
     suspend fun stageForRecycle(items: List<MediaItem>): List<RecycleEntry> = withContext(Dispatchers.IO) {
@@ -450,35 +500,59 @@ class CleanupRepository(private val context: Context) {
         return runCatching { context.contentResolver.openAssetFileDescriptor(item.uri, "r")?.use { it.length } }.getOrNull()
     }
 
-    private fun sha256(item: MediaItem): String? = runCatching {
-        val digest = MessageDigest.getInstance("SHA-256")
-        openMediaInputStream(context, item.uri).use { input ->
-            requireNotNull(input)
-            val buffer = ByteArray(64 * 1024)
-            while (true) {
-                val count = input.read(buffer)
-                if (count <= 0) break
-                digest.update(buffer, 0, count)
-            }
-        }
-        digest.digest().joinToString("") { "%02x".format(it) }
-    }.getOrNull()
-
-    private fun cachedSha256(item: MediaItem, editor: android.content.SharedPreferences.Editor): String? {
-        val key = "sha:${item.uri}"
+    /**
+     * Size plus the first 16 KB. This is the whole pre-filter for "identical
+     * bytes": files that disagree here cannot be identical, and files that agree
+     * are compared directly instead of being hashed end to end.
+     */
+    private fun cachedHeadSignature(item: MediaItem, cache: MutableMap<String, String>): String? {
+        val key = "head:${item.uri}"
         val signature = analysisSignature(item)
-        analysisPreferences.getString(key, null)?.let { stored ->
+        cache[key]?.let { stored ->
             if (stored.startsWith("$signature|")) return stored.substringAfter('|')
         }
-        val hash = sha256(item) ?: return null
-        editor.putString(key, "$signature|$hash")
-        return hash
+        val value = headSignature(item) ?: return null
+        cache[key] = "$signature|$value"
+        return value
     }
 
-    private fun cachedFingerprint(item: MediaItem, onStore: (String, String) -> Unit): Fingerprint? {
+    private fun headSignature(item: MediaItem): String? = runCatching {
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update(item.size.toString().toByteArray())
+        openMediaInputStream(context, item.uri).use { input ->
+            requireNotNull(input)
+            val buffer = ByteArray(HEAD_SIGNATURE_BYTES)
+            val head = input.read(buffer)
+            if (head > 0) digest.update(buffer, 0, head)
+        }
+        digest.digest().joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
+    }.getOrNull()
+
+    /** Streams both files side by side and gives up at the first difference. */
+    private fun sameBytes(first: MediaItem, second: MediaItem): Boolean = runCatching {
+        openMediaInputStream(context, first.uri).use { left ->
+            openMediaInputStream(context, second.uri).use { right ->
+                if (left == null || right == null) return false
+                val leftBuffer = ByteArray(COMPARE_BUFFER_BYTES)
+                val rightBuffer = ByteArray(COMPARE_BUFFER_BYTES)
+                while (true) {
+                    val leftRead = left.read(leftBuffer)
+                    val rightRead = right.read(rightBuffer)
+                    if (leftRead != rightRead) return false
+                    if (leftRead <= 0) return true
+                    for (index in 0 until leftRead) {
+                        if (leftBuffer[index] != rightBuffer[index]) return false
+                    }
+                }
+                @Suppress("UNREACHABLE_CODE") true
+            }
+        }
+    }.getOrDefault(false)
+
+    private fun cachedFingerprint(item: MediaItem, cache: MutableMap<String, String>): Fingerprint? {
         val key = "fingerprint:${item.uri}"
         val signature = analysisSignature(item)
-        analysisPreferences.getString(key, null)?.let { stored ->
+        cache[key]?.let { stored ->
             runCatching {
                 val json = JSONObject(stored)
                 if (json.optString("signature") == signature) {
@@ -488,7 +562,6 @@ class CleanupRepository(private val context: Context) {
                         width = json.getInt("width"),
                         height = json.getInt("height"),
                         size = json.getLong("size"),
-                        sharpness = json.getDouble("sharpness").toFloat(),
                         red = json.getDouble("red").toFloat(),
                         green = json.getDouble("green").toFloat(),
                         blue = json.getDouble("blue").toFloat()
@@ -497,86 +570,115 @@ class CleanupRepository(private val context: Context) {
             }
         }
         val fingerprint = fingerprint(item) ?: return null
-        onStore(key, JSONObject().apply {
+        cache[key] = JSONObject().apply {
             put("signature", signature)
             put("hash", fingerprint.hash.toString())
             put("width", fingerprint.width)
             put("height", fingerprint.height)
             put("size", fingerprint.size)
-            put("sharpness", fingerprint.sharpness.toDouble())
             put("red", fingerprint.red.toDouble())
             put("green", fingerprint.green.toDouble())
             put("blue", fingerprint.blue.toDouble())
-        }.toString())
+        }.toString()
         return fingerprint
     }
 
-    private fun pruneAnalysisCache(items: List<MediaItem>) {
-        val activeUris = items.mapTo(hashSetOf()) { it.uri.toString() }
-        val editor = analysisPreferences.edit()
-        analysisPreferences.all.keys.forEach { key ->
-            val uri = when {
-                key.startsWith("sha:") -> key.removePrefix("sha:")
-                key.startsWith("fingerprint:") -> key.removePrefix("fingerprint:")
-                else -> null
+    /**
+     * One line per cached value, `<key>\t<value>`. Loading is a single buffered
+     * read; saving drops entries whose files are no longer in the library.
+     */
+    private fun loadAnalysisCache(): MutableMap<String, String> = runCatching {
+        val entries = java.util.concurrent.ConcurrentHashMap<String, String>()
+        if (!analysisCacheFile.isFile) return@runCatching entries
+        analysisCacheFile.bufferedReader().useLines { lines ->
+            lines.forEach { line ->
+                val separator = line.indexOf('\t')
+                if (separator > 0) entries[line.substring(0, separator)] = line.substring(separator + 1)
             }
-            if (uri != null && uri !in activeUris) editor.remove(key)
         }
-        editor.apply()
+        entries
+    }.getOrDefault(java.util.concurrent.ConcurrentHashMap())
+
+    private fun saveAnalysisCache(cache: Map<String, String>, activeUris: Set<String>) {
+        runCatching {
+            val temporary = File(context.filesDir, "${analysisCacheFile.name}.tmp")
+            temporary.bufferedWriter().use { writer ->
+                cache.forEach { (key, value) ->
+                    val uri = key.substringAfter(':', "")
+                    if (uri.isNotEmpty() && uri !in activeUris) return@forEach
+                    writer.append(key).append('\t').append(value).append('\n')
+                }
+            }
+            if (!temporary.renameTo(analysisCacheFile)) {
+                analysisCacheFile.writeText(temporary.readText())
+                temporary.delete()
+            }
+        }
     }
 
-    // The version suffix invalidates fingerprints computed by an older decoder
-    // (the sample size changed, so the same picture would hash differently).
-    private fun analysisSignature(item: MediaItem): String = "${item.size}:${item.dateModified}:fp2"
+    // The version suffix invalidates values computed by an older decoder or hash
+    // implementation: the same picture would hash differently.
+    private fun analysisSignature(item: MediaItem): String = "${item.size}:${item.dateModified}:fp3"
 
     private fun fingerprint(item: MediaItem): Fingerprint? = runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         openMediaInputStream(context, item.uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var sample = 1
-        // The fingerprint only needs 64x64, so 128px is plenty: decoding at half
-        // the previous size is what keeps a full-library scan to a sane time.
+        // The fingerprint only needs a 9x8 luminance grid, so a coarse decode is
+        // plenty. Everything below works on one getPixels() array: the previous
+        // version built two filtered bitmaps and called getPixel() (a JNI hop)
+        // four thousand times per picture.
         while (max(bounds.outWidth, bounds.outHeight) / sample > 128) sample *= 2
         val decoded = openMediaInputStream(context, item.uri)?.use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
         } ?: return null
-        val thumb = Bitmap.createScaledBitmap(decoded, 64, 64, true)
-        val hashBitmap = Bitmap.createScaledBitmap(thumb, 9, 8, true)
-        var hash = 0L
-        var bit = 0
-        repeat(8) { y ->
-            repeat(8) { x ->
-                if (luminance(hashBitmap.getPixel(x, y)) > luminance(hashBitmap.getPixel(x + 1, y))) {
-                    hash = hash or (1L shl bit)
-                }
-                bit++
-            }
+        val width = decoded.width
+        val height = decoded.height
+        if (width <= 0 || height <= 0) {
+            decoded.recycle()
+            return null
         }
+        val pixels = IntArray(width * height)
+        decoded.getPixels(pixels, 0, width, 0, 0, width, height)
+
         var red = 0L
         var green = 0L
         var blue = 0L
-        var sharpness = 0L
-        repeat(64) { y ->
-            repeat(64) { x ->
-                val color = thumb.getPixel(x, y)
-                red += android.graphics.Color.red(color)
-                green += android.graphics.Color.green(color)
-                blue += android.graphics.Color.blue(color)
-                if (x > 0) sharpness += kotlin.math.abs(luminance(color) - luminance(thumb.getPixel(x - 1, y)))
-                if (y > 0) sharpness += kotlin.math.abs(luminance(color) - luminance(thumb.getPixel(x, y - 1)))
+        pixels.forEach { color ->
+            red += (color shr 16) and 0xff
+            green += (color shr 8) and 0xff
+            blue += color and 0xff
+        }
+
+        // 9x8 grid of block averages: one pass over the pixels, no rescaling.
+        val grid = IntArray(9 * 8)
+        for (row in 0 until 8) {
+            val yStart = row * height / 8
+            val yEnd = ((row + 1) * height / 8).coerceAtLeast(yStart + 1).coerceAtMost(height)
+            for (column in 0 until 9) {
+                val xStart = column * width / 9
+                val xEnd = ((column + 1) * width / 9).coerceAtLeast(xStart + 1).coerceAtMost(width)
+                var sum = 0L
+                var samples = 0
+                for (y in yStart until yEnd) {
+                    val rowStart = y * width
+                    for (x in xStart until xEnd) {
+                        sum += luminance(pixels[rowStart + x])
+                        samples++
+                    }
+                }
+                grid[row * 9 + column] = if (samples == 0) 0 else (sum / samples).toInt()
             }
         }
-        if (hashBitmap !== thumb) hashBitmap.recycle()
-        if (thumb !== decoded) thumb.recycle()
         decoded.recycle()
-        val count = 64f * 64f
+        val count = pixels.size.toFloat().coerceAtLeast(1f)
         Fingerprint(
             item = item,
-            hash = hash,
-            width = bounds.outWidth,
-            height = bounds.outHeight,
+            hash = dHashFromLuminanceGrid(grid),
+            width = width,
+            height = height,
             size = mediaSize(item) ?: 0L,
-            sharpness = sharpness / (count * 2f),
             red = red / count,
             green = green / count,
             blue = blue / count
@@ -595,7 +697,6 @@ class CleanupRepository(private val context: Context) {
         val width: Int,
         val height: Int,
         val size: Long,
-        val sharpness: Float,
         val red: Float,
         val green: Float,
         val blue: Float
@@ -669,4 +770,10 @@ private const val MIN_BACKUP_FREE_SPACE_BYTES = 8L * 1024L * 1024L
  * and IO bound; four keeps a large scan to seconds instead of minutes without
  * competing with whatever the user is looking at.
  */
-private const val FINGERPRINT_CONCURRENCY = 4
+private const val FINGERPRINT_CONCURRENCY = 6
+
+/** Head bytes hashed by the cheap signature before a direct comparison. */
+private const val HEAD_SIGNATURE_BYTES = 16 * 1024
+
+/** Chunk size used while comparing two candidate files. */
+private const val COMPARE_BUFFER_BYTES = 64 * 1024

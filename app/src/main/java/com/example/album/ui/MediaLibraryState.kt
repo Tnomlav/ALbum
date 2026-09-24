@@ -650,6 +650,14 @@ class MediaLibraryState(context: Context) {
         onProgress
     )
 
+    /** The slow, opt-in scan that also matches re-encoded copies. */
+    suspend fun findLookalikes(
+        onProgress: (Int, Int) -> Unit = { _, _ -> }
+    ): List<DuplicateGroup> = cleanup.findLookalikeGroups(
+        (allImages + localImages).distinctBy { it.uri.toString() },
+        onProgress
+    )
+
     suspend fun stageForRecycle(items: List<MediaItem>): List<RecycleEntry> {
         val staged = cleanup.stageForRecycle(items)
         recycleEntries = cleanup.loadRecycleEntries()
