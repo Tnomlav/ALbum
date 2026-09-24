@@ -2,8 +2,6 @@ package com.example.album.data
 
 import android.content.ContentValues
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -27,78 +25,35 @@ import org.json.JSONObject
 data class DuplicateGroup(val hash: String, val items: List<MediaItem>)
 
 /**
- * The 64-bit dHash of a 9x8 luminance grid: a bit is set when the cell on the
- * left is brighter than the one to its right. Pure, so the bit layout is pinned
- * by a test instead of only existing inside the bitmap code.
+ * The candidate set for "identical bytes": only files whose size appears more
+ * than once can be duplicates, and the size is already in the media metadata,
+ * so this costs no file access at all.
  */
-internal fun dHashFromLuminanceGrid(grid: IntArray): Long {
-    var hash = 0L
-    var bit = 0
-    for (row in 0 until 8) {
-        for (column in 0 until 8) {
-            if (grid[row * 9 + column] > grid[row * 9 + column + 1]) hash = hash or (1L shl bit)
-            bit++
-        }
+internal fun duplicateSizeCandidates(sizes: List<Long>): List<Int> {
+    val bySize = mutableMapOf<Long, MutableList<Int>>()
+    sizes.forEachIndexed { position, size ->
+        if (size > 0L) bySize.getOrPut(size) { mutableListOf() } += position
     }
-    return hash
+    return bySize.values.filter { it.size > 1 }.flatten()
 }
 
 /**
- * Positions of the pictures that share an aspect ratio (within [tolerance])
- * with at least one other picture.
- *
- * The duplicate matcher requires the aspect ratios to agree, so nothing outside
- * this set can be a duplicate. Decoding every picture in a large library took
- * minutes; this is what makes the scan skip most of it. Entries whose aspect is
- * unknown stay in the set: they are rare and must not be silently skipped.
+ * Streams two files side by side and gives up at the first difference. Byte
+ * equality is what "duplicate" means here, and stopping early is what makes a
+ * library-wide check take seconds instead of minutes.
  */
-internal fun aspectCandidatePositions(aspects: List<Float>, tolerance: Float = .03f): Set<Int> {
-    val candidates = mutableSetOf<Int>()
-    val ordered = mutableListOf<Int>()
-    aspects.forEachIndexed { position, aspect ->
-        if (aspect.isFinite() && aspect > 0f) ordered += position else candidates += position
-    }
-    ordered.sortBy { aspects[it] }
-    var left = 0
-    ordered.forEachIndexed { right, _ ->
-        while (aspects[ordered[right]] - aspects[ordered[left]] > tolerance * aspects[ordered[right]]) left++
-        if (right > left) {
-            for (position in left..right) candidates += ordered[position]
+internal fun sameContent(left: java.io.InputStream, right: java.io.InputStream): Boolean {
+    val leftBuffer = ByteArray(COMPARE_BUFFER_BYTES)
+    val rightBuffer = ByteArray(COMPARE_BUFFER_BYTES)
+    while (true) {
+        val leftRead = left.read(leftBuffer)
+        val rightRead = right.read(rightBuffer)
+        if (leftRead != rightRead) return false
+        if (leftRead <= 0) return true
+        for (index in 0 until leftRead) {
+            if (leftBuffer[index] != rightBuffer[index]) return false
         }
     }
-    return candidates
-}
-
-/**
- * Whether two fingerprints are the same picture rather than merely similar.
- *
- * Deliberately strict, because these groups are offered for deletion: at most
- * six of the sixty-four dHash bits may differ, the aspect ratio has to match
- * within three percent, and the average colour has to be within thirty of each
- * other. A re-encode, a resize or a quality change stays well inside that;
- * two different photos of the same scene usually do not.
- */
-internal fun looksLikeSamePicture(
-    hashA: Long,
-    hashB: Long,
-    aspectA: Float,
-    aspectB: Float,
-    redA: Float,
-    greenA: Float,
-    blueA: Float,
-    redB: Float,
-    greenB: Float,
-    blueB: Float
-): Boolean {
-    if (java.lang.Long.bitCount(hashA xor hashB) > 6) return false
-    if (!aspectA.isFinite() || !aspectB.isFinite()) return false
-    val largerAspect = max(aspectA, aspectB)
-    if (largerAspect <= 0f) return false
-    if (kotlin.math.abs(aspectA - aspectB) / largerAspect > .03f) return false
-    val red = (redA - redB).toDouble()
-    val green = (greenA - greenB).toDouble()
-    val blue = (blueA - blueB).toDouble()
-    return kotlin.math.sqrt(red * red + green * green + blue * blue) <= 30.0
 }
 
 data class RecycleEntry(
@@ -141,19 +96,7 @@ class CleanupRepository(private val context: Context) {
         items: List<MediaItem>,
         onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> }
     ): List<DuplicateGroup> = withContext(Dispatchers.IO) {
-        withAnalysisCache(items) { cache -> duplicateGroups(items, cache, false, onProgress) }
-    }
-
-    /**
-     * The same picture after re-encoding, resizing or a quality change. This one
-     * has to decode candidate pictures, so it is a separate, explicitly asked
-     * for scan: [findDuplicateGroups] stays the fast path.
-     */
-    suspend fun findLookalikeGroups(
-        items: List<MediaItem>,
-        onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> }
-    ): List<DuplicateGroup> = withContext(Dispatchers.IO) {
-        withAnalysisCache(items) { cache -> duplicateGroups(items, cache, true, onProgress) }
+        withAnalysisCache(items) { cache -> duplicateGroups(items, cache, onProgress) }
     }
 
     private suspend fun <T> withAnalysisCache(
@@ -174,29 +117,13 @@ class CleanupRepository(private val context: Context) {
     private suspend fun duplicateGroups(
         items: List<MediaItem>,
         cache: MutableMap<String, String>,
-        includeLookalikes: Boolean,
         onProgress: (completed: Int, total: Int) -> Unit
     ): List<DuplicateGroup> {
-        // Two passes: hashing files that share a size, then decoding the
-        // pictures that could be the same image at another size or quality.
-        // Progress is reported over both, and every loop checks for cancellation
-        // so leaving the page stops the work instead of pinning the CPU.
-        val sized = items.mapIndexedNotNull { index, item ->
-            mediaSize(item)?.takeIf { it > 0 }?.let { it to index }
-        }
-        val hashingCandidates = sized.groupBy({ it.first }, { it.second }).values
-            .filter { it.size > 1 }
-            .flatten()
-        val decoding = if (includeLookalikes) {
-            val pictures = items.withIndex().filterNot { it.value.isVideo }
-            val candidatePositions = aspectCandidatePositions(
-                pictures.map { it.value.width.toFloat() / it.value.height.coerceAtLeast(1) }
-            )
-            pictures.filterIndexed { position, _ -> position in candidatePositions }
-        } else {
-            emptyList()
-        }
-        val totalWork = hashingCandidates.size + decoding.size
+        // Only files whose size repeats can be identical, and the size comes
+        // straight from the media metadata. Every loop checks for cancellation so
+        // leaving the page stops the work instead of pinning the CPU.
+        val hashingCandidates = duplicateSizeCandidates(items.map { mediaSize(it) ?: 0L })
+        val totalWork = hashingCandidates.size
         var completedWork = 0
         onProgress(completedWork, totalWork)
 
@@ -220,7 +147,7 @@ class CleanupRepository(private val context: Context) {
         // first 16 KB are worth comparing: the comparison itself streams both
         // files and stops at the first difference, so nothing is hashed.
         val quickSignatures = coroutineScope {
-            val gate = Semaphore(FINGERPRINT_CONCURRENCY)
+            val gate = Semaphore(ANALYSIS_CONCURRENCY)
             hashingCandidates.map { index ->
                 async {
                     gate.withPermit {
@@ -241,47 +168,6 @@ class CleanupRepository(private val context: Context) {
             same.drop(1).forEach { index ->
                 coroutineContext.ensureActive()
                 if (sameBytes(items[representative], items[index])) union(representative, index)
-            }
-        }
-
-        // The same picture at another size or quality. Eight 8-bit bands keep
-        // the candidate search cheap while still guaranteeing a hit: a pair that
-        // differs in at most six of sixty-four bits must share a whole band.
-        // Decoding is the expensive part, so only pictures that could possibly
-        // match are decoded (the matcher requires the aspect ratio to agree
-        // within three percent) and the decodes run a few at a time.
-        val fingerprints = coroutineScope {
-            val gate = Semaphore(FINGERPRINT_CONCURRENCY)
-            decoding
-                .map { (index, item) ->
-                    async {
-                        gate.withPermit {
-                            val value = cachedFingerprint(item, cache)?.let { index to it }
-                            completedWork++
-                            onProgress(completedWork, totalWork)
-                            value
-                        }
-                    }
-                }
-                .awaitAll()
-                .filterNotNull()
-        }
-        val buckets = mutableMapOf<Long, MutableList<Int>>()
-        fingerprints.forEachIndexed { position, (index, candidate) ->
-            val possible = mutableSetOf<Int>()
-            repeat(8) { band ->
-                val segment = (candidate.hash ushr (band * 8)) and 0xffL
-                buckets[(band.toLong() shl 8) or segment]?.let(possible::addAll)
-            }
-            possible.forEach { otherPosition ->
-                val other = fingerprints[otherPosition].second
-                if (looksLikeSamePicture(candidate, other)) {
-                    union(index, fingerprints[otherPosition].first)
-                }
-            }
-            repeat(8) { band ->
-                val segment = (candidate.hash ushr (band * 8)) and 0xffL
-                buckets.getOrPut((band.toLong() shl 8) or segment) { mutableListOf() } += position
             }
         }
 
@@ -528,60 +414,14 @@ class CleanupRepository(private val context: Context) {
         digest.digest().joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
     }.getOrNull()
 
-    /** Streams both files side by side and gives up at the first difference. */
+    /** Opens both files and compares them with [sameContent]. */
     private fun sameBytes(first: MediaItem, second: MediaItem): Boolean = runCatching {
         openMediaInputStream(context, first.uri).use { left ->
             openMediaInputStream(context, second.uri).use { right ->
-                if (left == null || right == null) return false
-                val leftBuffer = ByteArray(COMPARE_BUFFER_BYTES)
-                val rightBuffer = ByteArray(COMPARE_BUFFER_BYTES)
-                while (true) {
-                    val leftRead = left.read(leftBuffer)
-                    val rightRead = right.read(rightBuffer)
-                    if (leftRead != rightRead) return false
-                    if (leftRead <= 0) return true
-                    for (index in 0 until leftRead) {
-                        if (leftBuffer[index] != rightBuffer[index]) return false
-                    }
-                }
-                @Suppress("UNREACHABLE_CODE") true
+                left != null && right != null && sameContent(left, right)
             }
         }
     }.getOrDefault(false)
-
-    private fun cachedFingerprint(item: MediaItem, cache: MutableMap<String, String>): Fingerprint? {
-        val key = "fingerprint:${item.uri}"
-        val signature = analysisSignature(item)
-        cache[key]?.let { stored ->
-            runCatching {
-                val json = JSONObject(stored)
-                if (json.optString("signature") == signature) {
-                    return Fingerprint(
-                        item = item,
-                        hash = json.getString("hash").toLong(),
-                        width = json.getInt("width"),
-                        height = json.getInt("height"),
-                        size = json.getLong("size"),
-                        red = json.getDouble("red").toFloat(),
-                        green = json.getDouble("green").toFloat(),
-                        blue = json.getDouble("blue").toFloat()
-                    )
-                }
-            }
-        }
-        val fingerprint = fingerprint(item) ?: return null
-        cache[key] = JSONObject().apply {
-            put("signature", signature)
-            put("hash", fingerprint.hash.toString())
-            put("width", fingerprint.width)
-            put("height", fingerprint.height)
-            put("size", fingerprint.size)
-            put("red", fingerprint.red.toDouble())
-            put("green", fingerprint.green.toDouble())
-            put("blue", fingerprint.blue.toDouble())
-        }.toString()
-        return fingerprint
-    }
 
     /**
      * One line per cached value, `<key>\t<value>`. Loading is a single buffered
@@ -605,6 +445,9 @@ class CleanupRepository(private val context: Context) {
             temporary.bufferedWriter().use { writer ->
                 cache.forEach { (key, value) ->
                     val uri = key.substringAfter(':', "")
+                    // Only the head signatures are used now; drop anything left
+                    // over from earlier versions of the analysis.
+                    if (!key.startsWith("head:")) return@forEach
                     if (uri.isNotEmpty() && uri !in activeUris) return@forEach
                     writer.append(key).append('\t').append(value).append('\n')
                 }
@@ -619,104 +462,6 @@ class CleanupRepository(private val context: Context) {
     // The version suffix invalidates values computed by an older decoder or hash
     // implementation: the same picture would hash differently.
     private fun analysisSignature(item: MediaItem): String = "${item.size}:${item.dateModified}:fp3"
-
-    private fun fingerprint(item: MediaItem): Fingerprint? = runCatching {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        openMediaInputStream(context, item.uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        var sample = 1
-        // The fingerprint only needs a 9x8 luminance grid, so a coarse decode is
-        // plenty. Everything below works on one getPixels() array: the previous
-        // version built two filtered bitmaps and called getPixel() (a JNI hop)
-        // four thousand times per picture.
-        while (max(bounds.outWidth, bounds.outHeight) / sample > 128) sample *= 2
-        val decoded = openMediaInputStream(context, item.uri)?.use {
-            BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
-        } ?: return null
-        val width = decoded.width
-        val height = decoded.height
-        if (width <= 0 || height <= 0) {
-            decoded.recycle()
-            return null
-        }
-        val pixels = IntArray(width * height)
-        decoded.getPixels(pixels, 0, width, 0, 0, width, height)
-
-        var red = 0L
-        var green = 0L
-        var blue = 0L
-        pixels.forEach { color ->
-            red += (color shr 16) and 0xff
-            green += (color shr 8) and 0xff
-            blue += color and 0xff
-        }
-
-        // 9x8 grid of block averages: one pass over the pixels, no rescaling.
-        val grid = IntArray(9 * 8)
-        for (row in 0 until 8) {
-            val yStart = row * height / 8
-            val yEnd = ((row + 1) * height / 8).coerceAtLeast(yStart + 1).coerceAtMost(height)
-            for (column in 0 until 9) {
-                val xStart = column * width / 9
-                val xEnd = ((column + 1) * width / 9).coerceAtLeast(xStart + 1).coerceAtMost(width)
-                var sum = 0L
-                var samples = 0
-                for (y in yStart until yEnd) {
-                    val rowStart = y * width
-                    for (x in xStart until xEnd) {
-                        sum += luminance(pixels[rowStart + x])
-                        samples++
-                    }
-                }
-                grid[row * 9 + column] = if (samples == 0) 0 else (sum / samples).toInt()
-            }
-        }
-        decoded.recycle()
-        val count = pixels.size.toFloat().coerceAtLeast(1f)
-        Fingerprint(
-            item = item,
-            hash = dHashFromLuminanceGrid(grid),
-            width = width,
-            height = height,
-            size = mediaSize(item) ?: 0L,
-            red = red / count,
-            green = green / count,
-            blue = blue / count
-        )
-    }.getOrNull()
-
-    private fun luminance(color: Int): Int = (
-        android.graphics.Color.red(color) * 299 +
-            android.graphics.Color.green(color) * 587 +
-            android.graphics.Color.blue(color) * 114
-        ) / 1000
-
-    private data class Fingerprint(
-        val item: MediaItem,
-        val hash: Long,
-        val width: Int,
-        val height: Int,
-        val size: Long,
-        val red: Float,
-        val green: Float,
-        val blue: Float
-    ) {
-        val aspect: Float get() = width.toFloat() / height
-    }
-
-    private fun looksLikeSamePicture(first: Fingerprint, second: Fingerprint): Boolean =
-        looksLikeSamePicture(
-            hashA = first.hash,
-            hashB = second.hash,
-            aspectA = first.aspect,
-            aspectB = second.aspect,
-            redA = first.red,
-            greenA = first.green,
-            blueA = first.blue,
-            redB = second.red,
-            greenB = second.green,
-            blueB = second.blue
-        )
 
     private fun saveRecycleEntries(entries: List<RecycleEntry>) {
         val array = JSONArray()
@@ -766,11 +511,11 @@ internal fun hasEnoughBackupSpace(fileSize: Long, usableSpace: Long): Boolean =
 private const val MIN_BACKUP_FREE_SPACE_BYTES = 8L * 1024L * 1024L
 
 /**
- * How many pictures are decoded at once while fingerprinting. Decoding is CPU
- * and IO bound; four keeps a large scan to seconds instead of minutes without
- * competing with whatever the user is looking at.
+ * How many candidate files are read at once while checking for duplicates. The
+ * work is IO bound; six keeps a large library to seconds without competing with
+ * whatever the user is looking at.
  */
-private const val FINGERPRINT_CONCURRENCY = 6
+private const val ANALYSIS_CONCURRENCY = 6
 
 /** Head bytes hashed by the cheap signature before a direct comparison. */
 private const val HEAD_SIGNATURE_BYTES = 16 * 1024

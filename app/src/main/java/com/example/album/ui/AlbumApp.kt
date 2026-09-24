@@ -2408,7 +2408,6 @@ fun AlbumApp(
                 }
             },
             findDuplicates = { onProgress -> library.findDuplicates(onProgress) },
-            findLookalikes = { onProgress -> library.findLookalikes(onProgress) },
             confirmMediaDeletion = albumSettings.getBoolean("delete_confirmation", true),
             recycleMediaDeletion = albumSettings.getBoolean("recycle_bin", true),
             onDeleteMedia = { entries ->

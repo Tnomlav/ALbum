@@ -147,7 +147,6 @@ fun CleanupScreen(
     excludedMedia: List<MediaItem>,
     onBack: () -> Unit,
     findDuplicates: suspend (onProgress: (Int, Int) -> Unit) -> List<DuplicateGroup>,
-    findLookalikes: suspend (onProgress: (Int, Int) -> Unit) -> List<DuplicateGroup>,
     confirmMediaDeletion: Boolean = true,
     recycleMediaDeletion: Boolean = true,
     onDeleteMedia: suspend (List<MediaItem>) -> Unit,
@@ -164,7 +163,6 @@ fun CleanupScreen(
     var scanning by remember { mutableStateOf(false) }
     var scanProgress by remember { mutableStateOf(0 to 0) }
     var scanJob by remember { mutableStateOf<Job?>(null) }
-    var scanningLookalikes by remember { mutableStateOf(false) }
     var deletingMedia by remember { mutableStateOf(false) }
     var confirmDuplicateDelete by remember { mutableStateOf<List<MediaItem>?>(null) }
     var confirmRestore by remember { mutableStateOf<List<RecycleEntry>?>(null) }
@@ -198,11 +196,10 @@ fun CleanupScreen(
         CleanupToolbar(selectedTab = selectedTab, onTabSelected = { selectedTab = it }, onBack = onBack)
 
         when (selectedTab) {
-            CleanupTab.Duplicates -> DuplicateContent(media, groups, selectedUris, scanning, deletingMedia, scanProgress, scanningLookalikes, onScan = {
+            CleanupTab.Duplicates -> DuplicateContent(media, groups, selectedUris, scanning, deletingMedia, scanProgress, onScan = {
                 scanJob?.cancel()
                 scanJob = scope.launch {
                     scanning = true
-                    scanningLookalikes = false
                     scanProgress = 0 to 0
                     try {
                         val found = findDuplicates { done, total -> scanProgress = done to total }
@@ -213,23 +210,6 @@ fun CleanupScreen(
                         // the previous scan found instead of clearing the list.
                     } finally {
                         scanning = false
-                        scanJob = null
-                    }
-                }
-            }, onScanLookalikes = {
-                scanJob?.cancel()
-                scanJob = scope.launch {
-                    scanning = true
-                    scanningLookalikes = true
-                    scanProgress = 0 to 0
-                    try {
-                        val found = findLookalikes { done, total -> scanProgress = done to total }
-                        groups = found
-                        selectedUris = found.flatMap { it.items.drop(1) }.mapTo(mutableSetOf()) { it.uri.toString() }
-                    } catch (_: CancellationException) {
-                    } finally {
-                        scanning = false
-                        scanningLookalikes = false
                         scanJob = null
                     }
                 }
@@ -638,9 +618,7 @@ private fun DuplicateContent(
     scanning: Boolean,
     deleting: Boolean,
     progress: Pair<Int, Int>,
-    scanningLookalikes: Boolean,
     onScan: () -> Unit,
-    onScanLookalikes: () -> Unit,
     onCancelScan: () -> Unit,
     onToggle: (String) -> Unit,
     onDelete: (Set<String>) -> Unit,
@@ -688,7 +666,6 @@ private fun DuplicateContent(
                             CleanupCommand("停止", color = Color(0xFFFF453A), enabled = true, onClick = onCancelScan)
                         } else {
                             CleanupCommand("查重", color = Color(0xFF22A447), enabled = !deleting, onClick = onScan)
-                            CleanupCommand("相似图片", color = Color(0xFF3E7BFA), enabled = !deleting, onClick = onScanLookalikes)
                         }
                         if (liveGroups.isNotEmpty()) CleanupCommand("清理全部", color = Color(0xFFFF453A), enabled = !deleting, onClick = onDeleteAll)
                     }
@@ -701,11 +678,7 @@ private fun DuplicateContent(
             item {
                 CleanupBusy(
                     if (progress.second > 0) {
-                        if (english) {
-                            if (scanningLookalikes) "Comparing pictures ${progress.first}/${progress.second}…" else "Checking files ${progress.first}/${progress.second}…"
-                        } else {
-                            if (scanningLookalikes) "正在比对图片 ${progress.first}/${progress.second}…" else "正在核对文件 ${progress.first}/${progress.second}…"
-                        }
+                        if (english) "Checking files ${progress.first}/${progress.second}…" else "正在核对文件 ${progress.first}/${progress.second}…"
                     } else {
                         if (english) "Preparing…" else "正在准备…"
                     }
