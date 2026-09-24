@@ -2,6 +2,7 @@ package com.example.album.data
 
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -35,6 +36,88 @@ internal fun duplicateSizeCandidates(sizes: List<Long>): List<Int> {
         if (size > 0L) bySize.getOrPut(size) { mutableListOf() } += position
     }
     return bySize.values.filter { it.size > 1 }.flatten()
+}
+
+/**
+ * Candidates for "the same picture, saved twice".
+ *
+ * Re-encoding an image keeps its pixel dimensions and barely changes its file
+ * size, so two copies of one picture sit next to each other when a group with
+ * the same dimensions is sorted by size. Everything else is excluded before a
+ * single picture is decoded, which is what keeps this affordable: the archived
+ * folder that holds one artwork twice (dimensions equal, sizes 0.05% apart)
+ * yields exactly those files, not the whole library.
+ */
+internal fun nearDuplicateCandidates(
+    widths: List<Int>,
+    heights: List<Int>,
+    sizes: List<Long>,
+    tolerance: Float = .01f
+): Set<Int> {
+    val candidates = mutableSetOf<Int>()
+    val byDimensions = mutableMapOf<Long, MutableList<Int>>()
+    for (position in widths.indices) {
+        val width = widths[position]
+        val height = heights[position]
+        val size = sizes[position]
+        if (width <= 0 || height <= 0 || size <= 0L) continue
+        byDimensions.getOrPut(width.toLong() shl 32 or (height.toLong() and 0xffffffffL)) {
+            mutableListOf()
+        } += position
+    }
+    byDimensions.values.forEach { group ->
+        if (group.size < 2) return@forEach
+        val ordered = group.sortedBy { sizes[it] }
+        for (position in 1 until ordered.size) {
+            val previous = ordered[position - 1]
+            val current = ordered[position]
+            val difference = sizes[current] - sizes[previous]
+            if (difference <= tolerance * sizes[current]) {
+                candidates += previous
+                candidates += current
+            }
+        }
+    }
+    return candidates
+}
+
+/**
+ * The 64-bit dHash of a 9x8 luminance grid: a bit is set when the cell on the
+ * left is brighter than the one to its right. Pure, so the bit layout is pinned
+ * by a test instead of only existing inside the bitmap code.
+ */
+internal fun dHashFromLuminanceGrid(grid: IntArray): Long {
+    var hash = 0L
+    var bit = 0
+    for (row in 0 until 8) {
+        for (column in 0 until 8) {
+            if (grid[row * 9 + column] > grid[row * 9 + column + 1]) hash = hash or (1L shl bit)
+            bit++
+        }
+    }
+    return hash
+}
+
+/**
+ * Whether two fingerprints are the same picture rather than merely similar:
+ * at most six of the sixty-four dHash bits may differ and the average colour
+ * has to be within thirty of each other. Re-encoding stays well inside that.
+ */
+internal fun looksLikeSamePicture(
+    hashA: Long,
+    hashB: Long,
+    redA: Float,
+    greenA: Float,
+    blueA: Float,
+    redB: Float,
+    greenB: Float,
+    blueB: Float
+): Boolean {
+    if (java.lang.Long.bitCount(hashA xor hashB) > 6) return false
+    val red = (redA - redB).toDouble()
+    val green = (greenA - greenB).toDouble()
+    val blue = (blueA - blueB).toDouble()
+    return kotlin.math.sqrt(red * red + green * green + blue * blue) <= 30.0
 }
 
 /**
@@ -122,8 +205,17 @@ class CleanupRepository(private val context: Context) {
         // Only files whose size repeats can be identical, and the size comes
         // straight from the media metadata. Every loop checks for cancellation so
         // leaving the page stops the work instead of pinning the CPU.
-        val hashingCandidates = duplicateSizeCandidates(items.map { mediaSize(it) ?: 0L })
-        val totalWork = hashingCandidates.size
+        val sizes = items.map { mediaSize(it) ?: 0L }
+        val hashingCandidates = duplicateSizeCandidates(sizes)
+        // The same picture saved twice differs in its bytes, so it needs the
+        // perceptual check -- but only for files that share their dimensions and
+        // are within one percent of each other in size.
+        val nearCandidates = nearDuplicateCandidates(
+            widths = items.map { it.width },
+            heights = items.map { it.height },
+            sizes = sizes
+        ).toList()
+        val totalWork = hashingCandidates.size + nearCandidates.size
         var completedWork = 0
         onProgress(completedWork, totalWork)
 
@@ -168,6 +260,31 @@ class CleanupRepository(private val context: Context) {
             same.drop(1).forEach { index ->
                 coroutineContext.ensureActive()
                 if (sameBytes(items[representative], items[index])) union(representative, index)
+            }
+        }
+
+        // The same picture saved twice: verify the few candidates by decoding
+        // them. Nothing else in the library is decoded.
+        if (nearCandidates.isNotEmpty()) {
+            val fingerprints = coroutineScope {
+                val gate = Semaphore(ANALYSIS_CONCURRENCY)
+                nearCandidates.map { index ->
+                    async {
+                        gate.withPermit {
+                            val value = cachedFingerprint(items[index], cache)?.let { index to it }
+                            completedWork++
+                            onProgress(completedWork, totalWork)
+                            value
+                        }
+                    }
+                }.awaitAll().filterNotNull()
+            }
+            fingerprints.forEachIndexed { position, (index, candidate) ->
+                coroutineContext.ensureActive()
+                for (otherPosition in position + 1 until fingerprints.size) {
+                    val (otherIndex, other) = fingerprints[otherPosition]
+                    if (looksLikeSamePicture(candidate, other)) union(index, otherIndex)
+                }
             }
         }
 
@@ -461,7 +578,117 @@ class CleanupRepository(private val context: Context) {
 
     // The version suffix invalidates values computed by an older decoder or hash
     // implementation: the same picture would hash differently.
-    private fun analysisSignature(item: MediaItem): String = "${item.size}:${item.dateModified}:fp3"
+    private fun analysisSignature(item: MediaItem): String = "${item.size}:${item.dateModified}:fp4"
+
+    private data class Fingerprint(
+        val hash: Long,
+        val red: Float,
+        val green: Float,
+        val blue: Float
+    )
+
+    private fun looksLikeSamePicture(first: Fingerprint, second: Fingerprint): Boolean =
+        looksLikeSamePicture(
+            hashA = first.hash,
+            hashB = second.hash,
+            redA = first.red,
+            greenA = first.green,
+            blueA = first.blue,
+            redB = second.red,
+            greenB = second.green,
+            blueB = second.blue
+        )
+
+    private fun cachedFingerprint(item: MediaItem, cache: MutableMap<String, String>): Fingerprint? {
+        val key = "fingerprint:${item.uri}"
+        val signature = analysisSignature(item)
+        cache[key]?.let { stored ->
+            runCatching {
+                val parts = stored.split('|')
+                if (parts.size == 6 && parts[0] == signature) {
+                    return Fingerprint(
+                        hash = parts[1].toLong(),
+                        red = parts[2].toFloat(),
+                        green = parts[3].toFloat(),
+                        blue = parts[4].toFloat()
+                    )
+                }
+            }
+        }
+        val fingerprint = fingerprint(item) ?: return null
+        cache[key] = listOf(
+            signature,
+            fingerprint.hash.toString(),
+            fingerprint.red.toString(),
+            fingerprint.green.toString(),
+            fingerprint.blue.toString(),
+            "1"
+        ).joinToString("|")
+        return fingerprint
+    }
+
+    /**
+     * Decodes a coarse copy and reduces it to a dHash plus an average colour.
+     * Everything works on one getPixels() array: the earlier version built two
+     * filtered bitmaps and made a JNI call per pixel.
+     */
+    private fun fingerprint(item: MediaItem): Fingerprint? = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        openMediaInputStream(context, item.uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (max(bounds.outWidth, bounds.outHeight) / sample > 128) sample *= 2
+        val decoded = openMediaInputStream(context, item.uri)?.use {
+            BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+        } ?: return null
+        val width = decoded.width
+        val height = decoded.height
+        if (width <= 0 || height <= 0) {
+            decoded.recycle()
+            return null
+        }
+        val pixels = IntArray(width * height)
+        decoded.getPixels(pixels, 0, width, 0, 0, width, height)
+        decoded.recycle()
+
+        var red = 0L
+        var green = 0L
+        var blue = 0L
+        pixels.forEach { color ->
+            red += (color shr 16) and 0xff
+            green += (color shr 8) and 0xff
+            blue += color and 0xff
+        }
+
+        val grid = IntArray(9 * 8)
+        for (row in 0 until 8) {
+            val yStart = row * height / 8
+            val yEnd = ((row + 1) * height / 8).coerceAtLeast(yStart + 1).coerceAtMost(height)
+            for (column in 0 until 9) {
+                val xStart = column * width / 9
+                val xEnd = ((column + 1) * width / 9).coerceAtLeast(xStart + 1).coerceAtMost(width)
+                var sum = 0L
+                var samples = 0
+                for (y in yStart until yEnd) {
+                    val rowStart = y * width
+                    for (x in xStart until xEnd) {
+                        sum += ((pixels[rowStart + x] shr 16 and 0xff) * 299 +
+                            (pixels[rowStart + x] shr 8 and 0xff) * 587 +
+                            (pixels[rowStart + x] and 0xff) * 114) / 1000
+                        samples++
+                    }
+                }
+                grid[row * 9 + column] = if (samples == 0) 0 else (sum / samples).toInt()
+            }
+        }
+        val count = pixels.size.toFloat().coerceAtLeast(1f)
+        Fingerprint(
+            hash = dHashFromLuminanceGrid(grid),
+            red = red / count,
+            green = green / count,
+            blue = blue / count
+        )
+    }.getOrNull()
 
     private fun saveRecycleEntries(entries: List<RecycleEntry>) {
         val array = JSONArray()
