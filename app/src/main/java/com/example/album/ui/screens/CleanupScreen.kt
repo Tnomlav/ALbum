@@ -112,7 +112,6 @@ import com.example.album.data.PixivArchiveRepository
 import com.example.album.data.openMediaInputStream
 import com.example.album.data.PixivArchiveStatus
 import com.example.album.data.RecycleEntry
-import com.example.album.data.SimilarGroup
 import com.example.album.data.ThumbnailRepository
 import com.example.album.PixivWebActivity
 import com.example.album.ui.components.MediaThumbnail

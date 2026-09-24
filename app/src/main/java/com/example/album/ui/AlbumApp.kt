@@ -1002,7 +1002,7 @@ fun AlbumApp(
             .filter { it.folder.equals("Pixiv", ignoreCase = true) }
             .distinctBy { it.uri.toString() }
     } }
-    suspend fun reloadPixivPage(forceWalk: Boolean = true) {
+    suspend fun reloadPixivPage(forceWalk: Boolean = true, showIndicator: Boolean = false) {
         if (selectedTab != MainTab.Pixiv || cleanupOpen) {
             // The request was made while another page is showing: it never walks,
             // so it must not leave the indicator it lit up running.
@@ -1035,7 +1035,9 @@ fun AlbumApp(
                 // like a load.
                 return
             }
-            pixivPageRefreshing = true
+            // The indicator is for the user's own pull: a walk the app starts by
+            // itself (tab changes, settings, archiving) must stay silent.
+            if (showIndicator) pixivPageRefreshing = true
             walking = true
             walkStartedAt = System.nanoTime()
             // A full SAF walk can take several seconds. Partial snapshots are
@@ -1074,7 +1076,7 @@ fun AlbumApp(
             // milliseconds, which is short enough that the indicator could come
             // and go inside a single frame -- "the pull did something" has to
             // stay visible.
-            if (walkStartedAt > 0L) {
+            if (showIndicator && walkStartedAt > 0L) {
                 val elapsedMs = (System.nanoTime() - walkStartedAt) / 1_000_000L
                 if (elapsedMs < MIN_PIXIV_REFRESH_INDICATOR_MS) {
                     delay(MIN_PIXIV_REFRESH_INDICATOR_MS - elapsedMs)
@@ -1083,18 +1085,21 @@ fun AlbumApp(
             if (generation == pixivReloadGeneration) pixivPageRefreshing = false
         }
     }
-    fun requestPixivReload(forceWalk: Boolean = true) {
+    /**
+     * [showIndicator] is only for the pull-to-refresh gesture: a load the app
+     * starts on its own should not look like something the user asked for.
+     */
+    fun requestPixivReload(forceWalk: Boolean = true, showIndicator: Boolean = false) {
         pixivReloadJob?.cancel()
-        // A real walk is what the P page's pull-to-refresh asks for, so light
-        // the indicator up now: waiting for the 350ms debounce below left the
-        // gesture's spinner sitting still until the walk got going.
-        if (forceWalk) pixivPageRefreshing = true
+        // Light the indicator up now: waiting for the 350ms debounce below left
+        // the gesture's spinner sitting still until the walk got going.
+        if (showIndicator) pixivPageRefreshing = true
         pixivReloadJob = scope.launch {
             // Triggers often arrive together (a library refresh plus an explicit
             // request); the short wait collapses them into one SAF walk instead
             // of cancelling and restarting a walk that just started.
             delay(350L)
-            reloadPixivPage(forceWalk)
+            reloadPixivPage(forceWalk, showIndicator)
         }
     }
     LaunchedEffect(pixivTabEnabled, cleanupOpen) {
@@ -3522,12 +3527,11 @@ fun AlbumApp(
                     isVideo = false,
                     query = if (pixivSearchMode == PixivSearchMode.Tag) "" else appliedQuery,
                     searchingFolders = false,
-                    // The P page streams its folders as the walk progresses, so
-                    // it does not need a blocking spinner -- but its refresh
-                    // indicator has to follow the Pixiv walk it actually starts
-                    // (pixivPageRefreshing), which is not the same state as the
-                    // media library's loading flag.
-                    loading = pixivPageRefreshing || library.loading,
+                    // Only the finger pull shows a spinner here: pixivPageRefreshing
+                    // is set by that gesture alone. Loads the app starts by itself
+                    // (the media library refresh, settings changes, archiving) stay
+                    // silent on this page.
+                    loading = pixivPageRefreshing,
                     scanning = library.scanning,
                     suppressRefreshIndicator = !startupLibraryReadDone,
                     permissionGranted = true,
@@ -3567,7 +3571,8 @@ fun AlbumApp(
                     },
                     onAlbumSelectionGestureEnd = { selectionGestureActive = false; selectionMode = true },
                     onRefresh = {
-                        requestPixivReload()
+                        // Only this path (the finger pull) shows the spinner.
+                        requestPixivReload(showIndicator = true)
                     },
                     openedFolder = openedFolder,
                     onOpenedFolderChange = { folder -> if (folder != null && selectionMode && selectingFolders) { selectedFolders = if (folder in selectedFolders) selectedFolders - folder else selectedFolders + folder } else openFolder(folder) },

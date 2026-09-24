@@ -24,17 +24,63 @@ import org.json.JSONObject
 
 data class DuplicateGroup(val hash: String, val items: List<MediaItem>)
 
-data class SimilarItem(
-    val item: MediaItem,
-    val width: Int,
-    val height: Int,
-    val size: Long,
-    val sharpness: Float
-) {
-    val pixels: Long get() = width.toLong() * height
+/**
+ * Positions of the pictures that share an aspect ratio (within [tolerance])
+ * with at least one other picture.
+ *
+ * The duplicate matcher requires the aspect ratios to agree, so nothing outside
+ * this set can be a duplicate. Decoding every picture in a large library took
+ * minutes; this is what makes the scan skip most of it. Entries whose aspect is
+ * unknown stay in the set: they are rare and must not be silently skipped.
+ */
+internal fun aspectCandidatePositions(aspects: List<Float>, tolerance: Float = .03f): Set<Int> {
+    val candidates = mutableSetOf<Int>()
+    val ordered = mutableListOf<Int>()
+    aspects.forEachIndexed { position, aspect ->
+        if (aspect.isFinite() && aspect > 0f) ordered += position else candidates += position
+    }
+    ordered.sortBy { aspects[it] }
+    var left = 0
+    ordered.forEachIndexed { right, _ ->
+        while (aspects[ordered[right]] - aspects[ordered[left]] > tolerance * aspects[ordered[right]]) left++
+        if (right > left) {
+            for (position in left..right) candidates += ordered[position]
+        }
+    }
+    return candidates
 }
 
-data class SimilarGroup(val id: String, val items: List<SimilarItem>, val bestUri: String)
+/**
+ * Whether two fingerprints are the same picture rather than merely similar.
+ *
+ * Deliberately strict, because these groups are offered for deletion: at most
+ * six of the sixty-four dHash bits may differ, the aspect ratio has to match
+ * within three percent, and the average colour has to be within thirty of each
+ * other. A re-encode, a resize or a quality change stays well inside that;
+ * two different photos of the same scene usually do not.
+ */
+internal fun looksLikeSamePicture(
+    hashA: Long,
+    hashB: Long,
+    aspectA: Float,
+    aspectB: Float,
+    redA: Float,
+    greenA: Float,
+    blueA: Float,
+    redB: Float,
+    greenB: Float,
+    blueB: Float
+): Boolean {
+    if (java.lang.Long.bitCount(hashA xor hashB) > 6) return false
+    if (!aspectA.isFinite() || !aspectB.isFinite()) return false
+    val largerAspect = max(aspectA, aspectB)
+    if (largerAspect <= 0f) return false
+    if (kotlin.math.abs(aspectA - aspectB) / largerAspect > .03f) return false
+    val red = (redA - redB).toDouble()
+    val green = (greenA - greenB).toDouble()
+    val blue = (blueA - blueB).toDouble()
+    return kotlin.math.sqrt(red * red + green * green + blue * blue) <= 30.0
+}
 
 data class RecycleEntry(
     val id: String,
@@ -76,15 +122,20 @@ class CleanupRepository(private val context: Context) {
         result
     }
 
-    suspend fun findSimilarImages(items: List<MediaItem>): List<SimilarGroup> = withContext(Dispatchers.IO) {
+    /**
+     * Duplicate groups: files that are byte-for-byte identical **and** the ones
+     * that are plainly the same picture after being re-encoded, resized or
+     * saved at a different quality.
+     *
+     * The page used to compare SHA-256 only, so two copies that look identical
+     * by eye never showed up unless their bytes matched exactly. The perceptual
+     * fingerprint that could have caught them was computed by a function
+     * nothing ever called.
+     */
+    suspend fun findDuplicateGroups(items: List<MediaItem>): List<DuplicateGroup> = withContext(Dispatchers.IO) {
         pruneAnalysisCache(items)
         val cacheEditor = analysisPreferences.edit()
-        val fingerprints = items.asSequence().filterNot { it.isVideo }.mapNotNull { cachedFingerprint(it, cacheEditor) }.toList()
-        if (fingerprints.size < 2) {
-            cacheEditor.apply()
-            return@withContext emptyList()
-        }
-        val parents = IntArray(fingerprints.size) { it }
+        val parents = IntArray(items.size) { it }
         fun root(value: Int): Int {
             var current = value
             while (parents[current] != current) {
@@ -99,43 +150,73 @@ class CleanupRepository(private val context: Context) {
             if (a != b) parents[b] = a
         }
 
-        val buckets = mutableMapOf<Long, MutableList<Int>>()
-        fingerprints.forEachIndexed { index, candidate ->
-            val possible = mutableSetOf<Int>()
-            repeat(4) { band ->
-                val segment = (candidate.hash ushr (band * 16)) and 0xffffL
-                buckets[(band.toLong() shl 16) or segment]?.let(possible::addAll)
-            }
-            possible.forEach { otherIndex ->
-                val other = fingerprints[otherIndex]
-                val aspectDifference = kotlin.math.abs(candidate.aspect - other.aspect) / max(candidate.aspect, other.aspect)
-                val colorDistance = kotlin.math.sqrt(
-                    ((candidate.red - other.red) * (candidate.red - other.red) +
-                        (candidate.green - other.green) * (candidate.green - other.green) +
-                        (candidate.blue - other.blue) * (candidate.blue - other.blue)).toDouble()
-                )
-                if (aspectDifference <= .08f && colorDistance <= 58.0 && java.lang.Long.bitCount(candidate.hash xor other.hash) <= 8) {
-                    union(index, otherIndex)
-                }
-            }
-            repeat(4) { band ->
-                val segment = (candidate.hash ushr (band * 16)) and 0xffffL
-                buckets.getOrPut((band.toLong() shl 16) or segment) { mutableListOf() } += index
+        // Identical bytes: only files of the same size can be, so the hashing
+        // stays limited to the sizes that repeat.
+        val sized = items.mapIndexedNotNull { index, item ->
+            mediaSize(item)?.takeIf { it > 0 }?.let { it to index }
+        }
+        sized.groupBy({ it.first }, { it.second }).values.filter { it.size > 1 }.forEach { candidates ->
+            val hashed = candidates.mapNotNull { index -> cachedSha256(items[index], cacheEditor)?.let { it to index } }
+            hashed.groupBy({ it.first }, { it.second }).values.filter { it.size > 1 }.forEach { same ->
+                same.drop(1).forEach { union(same.first(), it) }
             }
         }
 
-        val result = fingerprints.indices.groupBy(::root).values.filter { it.size > 1 }.map { indexes ->
-            val ranked = indexes.map { fingerprints[it] }.sortedWith(
-                compareByDescending<Fingerprint> { it.width.toLong() * it.height }
-                    .thenByDescending { it.sharpness }
-                    .thenByDescending { it.size }
-            )
-            SimilarGroup(
-                id = ranked.joinToString("-") { it.item.uri.toString().hashCode().toString(16) },
-                items = ranked.map { SimilarItem(it.item, it.width, it.height, it.size, it.sharpness) },
-                bestUri = ranked.first().item.uri.toString()
-            )
-        }.sortedByDescending { it.items.size }
+        // The same picture at another size or quality. Eight 8-bit bands keep
+        // the candidate search cheap while still guaranteeing a hit: a pair that
+        // differs in at most six of sixty-four bits must share a whole band.
+        // Decoding is the expensive part, so only pictures that could possibly
+        // match are decoded (the matcher requires the aspect ratio to agree
+        // within three percent) and the decodes run a few at a time.
+        val pictures = items.withIndex().filterNot { it.value.isVideo }
+        val candidatePositions = aspectCandidatePositions(
+            pictures.map { it.value.width.toFloat() / it.value.height.coerceAtLeast(1) }
+        )
+        val pendingWrites = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+        val fingerprints = coroutineScope {
+            val gate = Semaphore(FINGERPRINT_CONCURRENCY)
+            pictures.filterIndexed { position, _ -> position in candidatePositions }
+                .map { (index, item) ->
+                    async {
+                        gate.withPermit {
+                            cachedFingerprint(item) { key, value -> pendingWrites += key to value }
+                                ?.let { index to it }
+                        }
+                    }
+                }
+                .awaitAll()
+                .filterNotNull()
+        }
+        pendingWrites.forEach { (key, value) -> cacheEditor.putString(key, value) }
+        val buckets = mutableMapOf<Long, MutableList<Int>>()
+        fingerprints.forEachIndexed { position, (index, candidate) ->
+            val possible = mutableSetOf<Int>()
+            repeat(8) { band ->
+                val segment = (candidate.hash ushr (band * 8)) and 0xffL
+                buckets[(band.toLong() shl 8) or segment]?.let(possible::addAll)
+            }
+            possible.forEach { otherPosition ->
+                val other = fingerprints[otherPosition].second
+                if (looksLikeSamePicture(candidate, other)) {
+                    union(index, fingerprints[otherPosition].first)
+                }
+            }
+            repeat(8) { band ->
+                val segment = (candidate.hash ushr (band * 8)) and 0xffL
+                buckets.getOrPut((band.toLong() shl 8) or segment) { mutableListOf() } += position
+            }
+        }
+
+        val result = items.indices.groupBy(::root).values
+            .filter { it.size > 1 }
+            .map { members ->
+                val duplicates = members.map { items[it] }.sortedByDescending { it.dateTaken }
+                DuplicateGroup(
+                    hash = duplicates.joinToString("-") { it.uri.toString().hashCode().toString(16) },
+                    items = duplicates
+                )
+            }
+            .sortedByDescending { it.items.size }
         cacheEditor.apply()
         result
     }
@@ -367,7 +448,7 @@ class CleanupRepository(private val context: Context) {
         return hash
     }
 
-    private fun cachedFingerprint(item: MediaItem, editor: android.content.SharedPreferences.Editor): Fingerprint? {
+    private fun cachedFingerprint(item: MediaItem, onStore: (String, String) -> Unit): Fingerprint? {
         val key = "fingerprint:${item.uri}"
         val signature = analysisSignature(item)
         analysisPreferences.getString(key, null)?.let { stored ->
@@ -389,7 +470,7 @@ class CleanupRepository(private val context: Context) {
             }
         }
         val fingerprint = fingerprint(item) ?: return null
-        editor.putString(key, JSONObject().apply {
+        onStore(key, JSONObject().apply {
             put("signature", signature)
             put("hash", fingerprint.hash.toString())
             put("width", fingerprint.width)
@@ -491,6 +572,20 @@ class CleanupRepository(private val context: Context) {
         val aspect: Float get() = width.toFloat() / height
     }
 
+    private fun looksLikeSamePicture(first: Fingerprint, second: Fingerprint): Boolean =
+        looksLikeSamePicture(
+            hashA = first.hash,
+            hashB = second.hash,
+            aspectA = first.aspect,
+            aspectB = second.aspect,
+            redA = first.red,
+            greenA = first.green,
+            blueA = first.blue,
+            redB = second.red,
+            greenB = second.green,
+            blueB = second.blue
+        )
+
     private fun saveRecycleEntries(entries: List<RecycleEntry>) {
         val array = JSONArray()
         entries.forEach { entry ->
@@ -537,3 +632,10 @@ internal fun hasEnoughBackupSpace(fileSize: Long, usableSpace: Long): Boolean =
     usableSpace >= fileSize.coerceAtLeast(1L) + MIN_BACKUP_FREE_SPACE_BYTES
 
 private const val MIN_BACKUP_FREE_SPACE_BYTES = 8L * 1024L * 1024L
+
+/**
+ * How many pictures are decoded at once while fingerprinting. Decoding is CPU
+ * and IO bound; four keeps a large scan to seconds instead of minutes without
+ * competing with whatever the user is looking at.
+ */
+private const val FINGERPRINT_CONCURRENCY = 4

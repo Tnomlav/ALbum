@@ -643,7 +643,7 @@ class MediaLibraryState(context: Context) {
         applyExclusions()
     }
 
-    suspend fun findDuplicates(): List<DuplicateGroup> = cleanup.findExactDuplicates(
+    suspend fun findDuplicates(): List<DuplicateGroup> = cleanup.findDuplicateGroups(
         (allImages + localImages).distinctBy { it.uri.toString() }
     )
 
