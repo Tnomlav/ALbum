@@ -146,7 +146,7 @@ fun CleanupScreen(
     recycleEntries: List<RecycleEntry>,
     excludedMedia: List<MediaItem>,
     onBack: () -> Unit,
-    findDuplicates: suspend () -> List<DuplicateGroup>,
+    findDuplicates: suspend (onProgress: (Int, Int) -> Unit) -> List<DuplicateGroup>,
     confirmMediaDeletion: Boolean = true,
     recycleMediaDeletion: Boolean = true,
     onDeleteMedia: suspend (List<MediaItem>) -> Unit,
@@ -161,6 +161,8 @@ fun CleanupScreen(
     var groups by remember { mutableStateOf<List<DuplicateGroup>>(emptyList()) }
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var scanning by remember { mutableStateOf(false) }
+    var scanProgress by remember { mutableStateOf(0 to 0) }
+    var scanJob by remember { mutableStateOf<Job?>(null) }
     var deletingMedia by remember { mutableStateOf(false) }
     var confirmDuplicateDelete by remember { mutableStateOf<List<MediaItem>?>(null) }
     var confirmRestore by remember { mutableStateOf<List<RecycleEntry>?>(null) }
@@ -194,16 +196,25 @@ fun CleanupScreen(
         CleanupToolbar(selectedTab = selectedTab, onTabSelected = { selectedTab = it }, onBack = onBack)
 
         when (selectedTab) {
-            CleanupTab.Duplicates -> DuplicateContent(media, groups, selectedUris, scanning, deletingMedia, onScan = {
-                scanning = true
-                scope.launch {
+            CleanupTab.Duplicates -> DuplicateContent(media, groups, selectedUris, scanning, deletingMedia, scanProgress, onScan = {
+                scanJob?.cancel()
+                scanJob = scope.launch {
+                    scanning = true
+                    scanProgress = 0 to 0
                     try {
-                        groups = findDuplicates()
-                        selectedUris = groups.flatMap { it.items.drop(1) }.mapTo(mutableSetOf()) { it.uri.toString() }
+                        val found = findDuplicates { done, total -> scanProgress = done to total }
+                        groups = found
+                        selectedUris = found.flatMap { it.items.drop(1) }.mapTo(mutableSetOf()) { it.uri.toString() }
+                    } catch (_: CancellationException) {
+                        // Stopped by the user, or the page was left: keep whatever
+                        // the previous scan found instead of clearing the list.
                     } finally {
                         scanning = false
+                        scanJob = null
                     }
                 }
+            }, onCancelScan = {
+                scanJob?.cancel()
             }, onToggle = { uri -> selectedUris = if (uri in selectedUris) selectedUris - uri else selectedUris + uri }, onDelete = { requestedUris ->
                 val liveUris = media.mapTo(hashSetOf()) { it.uri.toString() }
                 val deleting = groups.flatMap { it.items }.distinctBy { it.uri }.filter { it.uri.toString() in requestedUris && it.uri.toString() in liveUris }
@@ -606,7 +617,9 @@ private fun DuplicateContent(
     selectedUris: Set<String>,
     scanning: Boolean,
     deleting: Boolean,
+    progress: Pair<Int, Int>,
     onScan: () -> Unit,
+    onCancelScan: () -> Unit,
     onToggle: (String) -> Unit,
     onDelete: (Set<String>) -> Unit,
     onDeleteAll: () -> Unit,
@@ -647,7 +660,13 @@ private fun DuplicateContent(
                         Text(if (english) "${liveGroups.size} duplicate groups" else "${liveGroups.size} 组重复图片", fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        CleanupCommand("全盘查重", color = Color(0xFF22A447), enabled = !scanning && !deleting, onClick = onScan)
+                        if (scanning) {
+                            // A working stop button: "is it stuck?" needs an answer
+                            // the user can act on.
+                            CleanupCommand("停止", color = Color(0xFFFF453A), enabled = true, onClick = onCancelScan)
+                        } else {
+                            CleanupCommand("全盘查重", color = Color(0xFF22A447), enabled = !deleting, onClick = onScan)
+                        }
                         if (liveGroups.isNotEmpty()) CleanupCommand("清理全部", color = Color(0xFFFF453A), enabled = !deleting, onClick = onDeleteAll)
                     }
                 }
@@ -656,7 +675,23 @@ private fun DuplicateContent(
         if (deleting) {
             item { CleanupBusy(if (english) "Deleting duplicate photos…" else "正在删除重复图片…") }
         } else if (scanning) {
-            item { CleanupBusy(if (english) "Hashing files…" else "正在计算文件哈希…") }
+            item {
+                CleanupBusy(
+                    if (progress.second > 0) {
+                        if (english) "Analysing ${progress.first}/${progress.second}…" else "正在分析 ${progress.first}/${progress.second}…"
+                    } else {
+                        if (english) "Preparing…" else "正在准备…"
+                    }
+                )
+            }
+            if (progress.second > 0) {
+                item {
+                    LinearProgressIndicator(
+                        progress = { progress.first.toFloat() / progress.second.toFloat() },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp)
+                    )
+                }
+            }
         } else if (liveGroups.isEmpty()) {
             item { CleanupEmpty("没有发现重复图片") }
         }
@@ -959,7 +994,7 @@ private fun RecycleContent(
                     Text(if (english) "${entries.size} items" else "${entries.size} 项", fontSize = 17.sp, fontWeight = FontWeight.Medium)
                 }
                 if (entries.isEmpty()) {
-                    Text(if (english) "Nothing to restore" else "没有可还原的项目", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    Text(if (english) "Empty" else "暂无内容", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         CleanupCommand(if (selectedIds.isEmpty()) "全部还原" else "还原选中", onClick = onRestoreAll)
@@ -971,9 +1006,9 @@ private fun RecycleContent(
         item {
             Text(
                 if (english) {
-                    "Trash lives in the app's private storage. The retention period is set in Settings; uninstalling Album or clearing its data deletes everything still inside."
+                    "Retention is set in Settings; uninstalling Album or clearing its data empties the trash."
                 } else {
-                    "回收站保存在应用私有目录，保留期限在设置中调整；卸载 Album 或清除应用数据会删除其中仍在的文件。"
+                    "保留期限在设置中调整；卸载或清除数据会清空回收站。"
                 },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,

@@ -2407,7 +2407,7 @@ fun AlbumApp(
                     }
                 }
             },
-            findDuplicates = library::findDuplicates,
+            findDuplicates = { onProgress -> library.findDuplicates(onProgress) },
             confirmMediaDeletion = albumSettings.getBoolean("delete_confirmation", true),
             recycleMediaDeletion = albumSettings.getBoolean("recycle_bin", true),
             onDeleteMedia = { entries ->

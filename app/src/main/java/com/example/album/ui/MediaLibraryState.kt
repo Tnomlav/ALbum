@@ -643,8 +643,11 @@ class MediaLibraryState(context: Context) {
         applyExclusions()
     }
 
-    suspend fun findDuplicates(): List<DuplicateGroup> = cleanup.findDuplicateGroups(
-        (allImages + localImages).distinctBy { it.uri.toString() }
+    suspend fun findDuplicates(
+        onProgress: (Int, Int) -> Unit = { _, _ -> }
+    ): List<DuplicateGroup> = cleanup.findDuplicateGroups(
+        (allImages + localImages).distinctBy { it.uri.toString() },
+        onProgress
     )
 
     suspend fun stageForRecycle(items: List<MediaItem>): List<RecycleEntry> {

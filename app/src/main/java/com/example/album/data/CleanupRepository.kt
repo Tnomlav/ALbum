@@ -16,9 +16,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -132,9 +134,31 @@ class CleanupRepository(private val context: Context) {
      * fingerprint that could have caught them was computed by a function
      * nothing ever called.
      */
-    suspend fun findDuplicateGroups(items: List<MediaItem>): List<DuplicateGroup> = withContext(Dispatchers.IO) {
+    suspend fun findDuplicateGroups(
+        items: List<MediaItem>,
+        onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> }
+    ): List<DuplicateGroup> = withContext(Dispatchers.IO) {
         pruneAnalysisCache(items)
         val cacheEditor = analysisPreferences.edit()
+        // Two passes: hashing files that share a size, then decoding the
+        // pictures that could be the same image at another size or quality.
+        // Progress is reported over both, and every loop checks for cancellation
+        // so leaving the page stops the work instead of pinning the CPU.
+        val sized = items.mapIndexedNotNull { index, item ->
+            mediaSize(item)?.takeIf { it > 0 }?.let { it to index }
+        }
+        val hashingCandidates = sized.groupBy({ it.first }, { it.second }).values
+            .filter { it.size > 1 }
+            .flatten()
+        val pictures = items.withIndex().filterNot { it.value.isVideo }
+        val candidatePositions = aspectCandidatePositions(
+            pictures.map { it.value.width.toFloat() / it.value.height.coerceAtLeast(1) }
+        )
+        val decoding = pictures.filterIndexed { position, _ -> position in candidatePositions }
+        val totalWork = hashingCandidates.size + decoding.size
+        var completedWork = 0
+        onProgress(completedWork, totalWork)
+
         val parents = IntArray(items.size) { it }
         fun root(value: Int): Int {
             var current = value
@@ -152,11 +176,15 @@ class CleanupRepository(private val context: Context) {
 
         // Identical bytes: only files of the same size can be, so the hashing
         // stays limited to the sizes that repeat.
-        val sized = items.mapIndexedNotNull { index, item ->
-            mediaSize(item)?.takeIf { it > 0 }?.let { it to index }
-        }
         sized.groupBy({ it.first }, { it.second }).values.filter { it.size > 1 }.forEach { candidates ->
-            val hashed = candidates.mapNotNull { index -> cachedSha256(items[index], cacheEditor)?.let { it to index } }
+            coroutineContext.ensureActive()
+            val hashed = candidates.mapNotNull { index ->
+                coroutineContext.ensureActive()
+                val value = cachedSha256(items[index], cacheEditor)?.let { it to index }
+                completedWork++
+                onProgress(completedWork, totalWork)
+                value
+            }
             hashed.groupBy({ it.first }, { it.second }).values.filter { it.size > 1 }.forEach { same ->
                 same.drop(1).forEach { union(same.first(), it) }
             }
@@ -168,19 +196,18 @@ class CleanupRepository(private val context: Context) {
         // Decoding is the expensive part, so only pictures that could possibly
         // match are decoded (the matcher requires the aspect ratio to agree
         // within three percent) and the decodes run a few at a time.
-        val pictures = items.withIndex().filterNot { it.value.isVideo }
-        val candidatePositions = aspectCandidatePositions(
-            pictures.map { it.value.width.toFloat() / it.value.height.coerceAtLeast(1) }
-        )
         val pendingWrites = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
         val fingerprints = coroutineScope {
             val gate = Semaphore(FINGERPRINT_CONCURRENCY)
-            pictures.filterIndexed { position, _ -> position in candidatePositions }
+            decoding
                 .map { (index, item) ->
                     async {
                         gate.withPermit {
-                            cachedFingerprint(item) { key, value -> pendingWrites += key to value }
+                            val value = cachedFingerprint(item) { key, stored -> pendingWrites += key to stored }
                                 ?.let { index to it }
+                            completedWork++
+                            onProgress(completedWork, totalWork)
+                            value
                         }
                     }
                 }
@@ -498,14 +525,18 @@ class CleanupRepository(private val context: Context) {
         editor.apply()
     }
 
-    private fun analysisSignature(item: MediaItem): String = "${item.size}:${item.dateModified}"
+    // The version suffix invalidates fingerprints computed by an older decoder
+    // (the sample size changed, so the same picture would hash differently).
+    private fun analysisSignature(item: MediaItem): String = "${item.size}:${item.dateModified}:fp2"
 
     private fun fingerprint(item: MediaItem): Fingerprint? = runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         openMediaInputStream(context, item.uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var sample = 1
-        while (max(bounds.outWidth, bounds.outHeight) / sample > 256) sample *= 2
+        // The fingerprint only needs 64x64, so 128px is plenty: decoding at half
+        // the previous size is what keeps a full-library scan to a sane time.
+        while (max(bounds.outWidth, bounds.outHeight) / sample > 128) sample *= 2
         val decoded = openMediaInputStream(context, item.uri)?.use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
         } ?: return null
