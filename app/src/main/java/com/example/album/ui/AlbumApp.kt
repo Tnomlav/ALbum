@@ -2161,17 +2161,24 @@ fun AlbumApp(
                         // Folder entries are displayed by leaf name in the
                         // album grid, while the destination picker may carry
                         // a parent path such as "Pictures/Wallpapers".
-                        openedFolder = destination.substringAfterLast('/')
+                        val destinationFolder = destination.substringAfterLast('/')
                             .trim()
                             .takeIf { it.isNotBlank() }
                         selectedTab = when {
+                            // An archive move/copy lands in the artist folders
+                            // the Pixiv page owns.
+                            request.fromPixivArchive -> MainTab.Pixiv
                             request.items.isNotEmpty() && request.items.all { it.isVideo } -> MainTab.Videos
                             request.items.isNotEmpty() && request.items.all { !it.isVideo } -> MainTab.Albums
                             else -> selectedTab
                         }
-                        query = ""
+                        // Open the folder through the normal navigation: the top
+                        // bar then shows the folder's name (not the search field)
+                        // and back walks the same path. Setting [openedFolder]
+                        // directly left the search open and the folder stack
+                        // empty, which made back leave the page altogether.
+                        openFolder(destinationFolder)
                         suspendedSearchQuery = null
-                        searchOpen = true
                         favoriteFilter = false
                     }
 
@@ -2344,7 +2351,7 @@ fun AlbumApp(
                     // composed while it is open), so leave it first.
                     pixivFilesChanged = true
                     pixivArchiveOpen = false
-                    transferRequest = TransferRequest(items, TransferMode.Copy)
+                    transferRequest = TransferRequest(items, TransferMode.Copy, fromPixivArchive = true)
                 }
             },
             onRename = { item, newName ->
@@ -2363,7 +2370,7 @@ fun AlbumApp(
                     pixivFilesChanged = true
                     pixivArchiveMoveUris = items.mapTo(hashSetOf()) { it.uri.toString() }
                     pixivArchiveOpen = false
-                    transferRequest = TransferRequest(items, TransferMode.Move)
+                    transferRequest = TransferRequest(items, TransferMode.Move, fromPixivArchive = true)
                 }
             },
             onDelete = { items ->
@@ -2494,10 +2501,9 @@ fun AlbumApp(
                 cleanupOpen = false
                 albumShowsVideos = isVideo
                 selectedTab = MainTab.Albums
-                openedFolder = folder
-                folderScope = null
-                query = ""
-                searchOpen = false
+                // Same as everywhere else: open through the folder navigation so
+                // the top bar and the back stack agree.
+                openFolder(folder)
             }
         )
         return

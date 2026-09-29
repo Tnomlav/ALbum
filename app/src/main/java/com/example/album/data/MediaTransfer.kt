@@ -29,7 +29,13 @@ data class DirectMoveResult(
 
 data class TransferRequest(
     val items: List<MediaItem>,
-    val mode: TransferMode
+    val mode: TransferMode,
+    /**
+     * The transfer was started from the Pixiv archive page. Its destination is
+     * an artist folder that the Pixiv page owns, so the app returns there and
+     * opens the folder instead of jumping to the album grid.
+     */
+    val fromPixivArchive: Boolean = false
 )
 
 data class TransferTargetName(
