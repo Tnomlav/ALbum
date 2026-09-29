@@ -2156,18 +2156,35 @@ fun AlbumApp(
                     val updatedRecent = (listOf(destination) + recentFolders).distinct().take(8)
                     transferPreferences.edit().putString("recent_folders", updatedRecent.joinToString("\u001f")).apply()
                     library.refresh(library.permissionGranted, scheduleThumbnailOptimization = false)
+                    if (request.fromPixivArchive) {
+                        // The Pixiv page walks the archive's own SAF tree; without
+                        // a fresh walk the artist folder still lists what it held
+                        // before the move, which looks like an empty folder.
+                        pixivFilesChanged = false
+                        pixivRefreshKey++
+                    }
 
                     if (completed.isNotEmpty()) {
                         // Folder entries are displayed by leaf name in the
                         // album grid, while the destination picker may carry
                         // a parent path such as "Pictures/Wallpapers".
-                        val destinationFolder = destination.substringAfterLast('/')
-                            .trim()
-                            .takeIf { it.isNotBlank() }
+                        // The Pixiv page only owns the archive target's top-level
+                        // artist folders: a move into a folder *inside* one of them
+                        // has to open that artist folder, otherwise this page has
+                        // no album with the nested name and shows an empty folder.
+                        val pathParts = destination.split('/').map { it.trim() }.filter { it.isNotEmpty() }
+                        val pixivFolder = if (request.fromPixivArchive) {
+                            pathParts.lastOrNull { it in pixivFolderNames }
+                        } else {
+                            null
+                        }
+                        val destinationFolder = (pixivFolder ?: pathParts.lastOrNull())
+                            ?.trim()
+                            ?.takeIf { it.isNotBlank() }
                         selectedTab = when {
-                            // An archive move/copy lands in the artist folders
-                            // the Pixiv page owns.
-                            request.fromPixivArchive -> MainTab.Pixiv
+                            // An archive move/copy into a folder the Pixiv page
+                            // knows stays there; anything else follows the media.
+                            pixivFolder != null -> MainTab.Pixiv
                             request.items.isNotEmpty() && request.items.all { it.isVideo } -> MainTab.Videos
                             request.items.isNotEmpty() && request.items.all { !it.isVideo } -> MainTab.Albums
                             else -> selectedTab
