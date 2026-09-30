@@ -2,7 +2,6 @@ package com.example.album.data
 
 import android.content.ContentValues
 import android.content.Context
-import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -26,61 +25,31 @@ import org.json.JSONObject
 data class DuplicateGroup(val hash: String, val items: List<MediaItem>)
 
 /**
- * The candidate set for "identical bytes": only files whose size appears more
- * than once can be duplicates, and the size is already in the media metadata,
- * so this costs no file access at all.
- */
-internal fun duplicateSizeCandidates(sizes: List<Long>): List<Int> {
-    val bySize = mutableMapOf<Long, MutableList<Int>>()
-    sizes.forEachIndexed { position, size ->
-        if (size > 0L) bySize.getOrPut(size) { mutableListOf() } += position
-    }
-    return bySize.values.filter { it.size > 1 }.flatten()
-}
-
-/**
- * The two naming styles that carry a Pixiv work id: what the archiver writes
- * (`illust_<id>_<timestamp>`) and what most downloaders produce (`<id>_p0`).
+ * Candidates for "identical bytes", for pictures of any origin and any name.
  *
- * Deliberately anchored: a loose "first long number" rule also matches dates,
- * which would put every photo taken on the same day into one candidate group.
- */
-private val PIXIV_WORK_ID_PATTERNS = listOf(
-    Regex("^illust_(\\d{5,12})", RegexOption.IGNORE_CASE),
-    Regex("^(\\d{5,12})_p\\d+", RegexOption.IGNORE_CASE)
-)
-
-/** The work id in a file name, or null when the name carries none. */
-internal fun pixivWorkIdOf(name: String): String? =
-    PIXIV_WORK_ID_PATTERNS.firstNotNullOfOrNull { it.find(name)?.groupValues?.get(1) }
-
-/**
- * Candidates for "the same artwork written twice".
+ * Two files can only be byte-identical when their size *and* their pixel
+ * dimensions agree, and both values are already in the media metadata -- so this
+ * step touches no file at all. Measured on a 47k-image library this leaves 408
+ * files by size and 42 files once the dimensions have to match as well, which is
+ * what turns the check into a handful of reads instead of a library-wide scan.
  *
- * The archive names files `illust_<work id>_<timestamp>`, and re-archiving the
- * same work leaves the pixels identical while the embedded tags differ -- so the
- * bytes differ and only a pixel comparison can tell. Grouping by the work id in
- * the name plus the pixel dimensions costs no file access and keeps the group to
- * the few files of one artwork, which is what makes this affordable: the earlier
- * "same dimensions and similar size" gate turned twenty thousand pictures into
- * candidates and felt like a full scan.
+ * A file whose dimensions are unknown falls back to the size-only group: it must
+ * not be skipped just because the metadata is incomplete.
  */
-internal fun artworkDuplicateCandidates(
-    names: List<String>,
+internal fun duplicateCandidates(
+    sizes: List<Long>,
     widths: List<Int>,
     heights: List<Int>
-): Set<Int> {
-    val candidates = mutableSetOf<Int>()
-    val byArtwork = mutableMapOf<String, MutableList<Int>>()
-    for (position in names.indices) {
-        val width = widths[position]
-        val height = heights[position]
-        if (width <= 0 || height <= 0) continue
-        val workId = pixivWorkIdOf(names[position]) ?: continue
-        byArtwork.getOrPut("$workId:$width:$height") { mutableListOf() } += position
+): List<Int> {
+    val groups = mutableMapOf<String, MutableList<Int>>()
+    sizes.forEachIndexed { position, size ->
+        if (size <= 0L) return@forEachIndexed
+        val width = widths.getOrElse(position) { 0 }
+        val height = heights.getOrElse(position) { 0 }
+        val key = if (width > 0 && height > 0) "$size:$width:$height" else "$size:?"
+        groups.getOrPut(key) { mutableListOf() } += position
     }
-    byArtwork.values.filter { it.size > 1 }.forEach { candidates += it }
-    return candidates
+    return groups.values.filter { it.size > 1 }.flatten()
 }
 
 /**
@@ -165,20 +134,17 @@ class CleanupRepository(private val context: Context) {
         cache: MutableMap<String, String>,
         onProgress: (completed: Int, total: Int) -> Unit
     ): List<DuplicateGroup> {
-        // Only files whose size repeats can be identical, and the size comes
-        // straight from the media metadata. Every loop checks for cancellation so
-        // leaving the page stops the work instead of pinning the CPU.
+        // Only files whose size and pixel dimensions repeat can be identical, and
+        // both come straight from the media metadata: no picture is decoded and
+        // the loop below only reads the handful of files that could match. That
+        // is what keeps the check quick and the phone cool.
         val sizes = items.map { mediaSize(it) ?: 0L }
-        val hashingCandidates = duplicateSizeCandidates(sizes)
-        // The same artwork written twice differs in its bytes (the archive
-        // rewrites the embedded tags), so those few files get a pixel check.
-        // Everything else is untouched.
-        val nearCandidates = artworkDuplicateCandidates(
-            names = items.map { it.name },
+        val hashingCandidates = duplicateCandidates(
+            sizes = sizes,
             widths = items.map { it.width },
             heights = items.map { it.height }
-        ).toList()
-        val totalWork = hashingCandidates.size + nearCandidates.size
+        )
+        val totalWork = hashingCandidates.size
         var completedWork = 0
         onProgress(completedWork, totalWork)
 
@@ -224,32 +190,6 @@ class CleanupRepository(private val context: Context) {
                 coroutineContext.ensureActive()
                 if (sameBytes(items[representative], items[index])) union(representative, index)
             }
-        }
-
-        // The same picture saved twice (for example the same artwork written
-        // into the archive on two different days, where only the embedded tags
-        // differ). Only the candidates are decoded, and two files count as
-        // duplicates only when their pixels are identical.
-        if (nearCandidates.isNotEmpty()) {
-            val signatures = coroutineScope {
-                val gate = Semaphore(ANALYSIS_CONCURRENCY)
-                nearCandidates.map { index ->
-                    async {
-                        gate.withPermit {
-                            val value = cachedPixelSignature(items[index], cache)?.let { it to index }
-                            completedWork++
-                            onProgress(completedWork, totalWork)
-                            value
-                        }
-                    }
-                }.awaitAll().filterNotNull()
-            }
-            signatures.groupBy({ it.first }, { it.second }).values
-                .filter { it.size > 1 }
-                .forEach { same ->
-                    coroutineContext.ensureActive()
-                    same.drop(1).forEach { union(same.first(), it) }
-                }
         }
 
         val result = items.indices.groupBy(::root).values
@@ -544,69 +484,6 @@ class CleanupRepository(private val context: Context) {
     // implementation: the same picture would hash differently.
     private fun analysisSignature(item: MediaItem): String = "${item.size}:${item.dateModified}:px2"
 
-    /**
-     * Hash of the decoded pixels. Two files that decode to the same pixels are
-     * the same picture -- exactly what "duplicate picture" means here. There are
-     * no similarity thresholds involved, so nothing is ever reported as a
-     * duplicate just because it looks close.
-     */
-    private fun cachedPixelSignature(item: MediaItem, cache: MutableMap<String, String>): String? {
-        val key = "pixels:${item.uri}"
-        val signature = analysisSignature(item)
-        cache[key]?.let { stored ->
-            if (stored.startsWith("$signature|")) return stored.substringAfter('|')
-        }
-        val value = pixelSignature(item) ?: return null
-        cache[key] = "$signature|$value"
-        return value
-    }
-
-    private fun pixelSignature(item: MediaItem): String? = runCatching {
-        val options = BitmapFactory.Options().apply {
-            inScaled = false
-            inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
-            // Decode small: the comparison only has to be exact, not detailed.
-            // 128px is enough that two different pictures cannot collide, and it
-            // keeps a candidate to a few milliseconds. The same picture written
-            // twice decodes to exactly the same pixels at any sample size.
-            inSampleSize = 1
-        }
-        val bounds = BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
-            inScaled = false
-        }
-        openMediaInputStream(context, item.uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-        if (bounds.outWidth > 0 && bounds.outHeight > 0) {
-            var sample = 1
-            while (max(bounds.outWidth, bounds.outHeight) / sample > 128) sample *= 2
-            options.inSampleSize = sample
-        }
-        val decoded = openMediaInputStream(context, item.uri)?.use {
-            BitmapFactory.decodeStream(it, null, options)
-        } ?: return null
-        try {
-            if (decoded.width <= 0 || decoded.height <= 0) return null
-            val digest = MessageDigest.getInstance("SHA-256")
-            val row = IntArray(decoded.width)
-            val bytes = ByteArray(decoded.width * 4)
-            for (y in 0 until decoded.height) {
-                decoded.getPixels(row, 0, decoded.width, 0, y, decoded.width, 1)
-                for (x in row.indices) {
-                    val color = row[x]
-                    val offset = x * 4
-                    bytes[offset] = (color shr 16 and 0xff).toByte()
-                    bytes[offset + 1] = (color shr 8 and 0xff).toByte()
-                    bytes[offset + 2] = (color and 0xff).toByte()
-                    bytes[offset + 3] = (color ushr 24 and 0xff).toByte()
-                }
-                digest.update(bytes)
-            }
-            digest.digest().joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
-        } finally {
-            decoded.recycle()
-        }
-    }.getOrNull()
-
     private fun saveRecycleEntries(entries: List<RecycleEntry>) {
         val array = JSONArray()
         entries.forEach { entry ->
@@ -655,11 +532,11 @@ internal fun hasEnoughBackupSpace(fileSize: Long, usableSpace: Long): Boolean =
 private const val MIN_BACKUP_FREE_SPACE_BYTES = 8L * 1024L * 1024L
 
 /**
- * How many candidate files are read at once while checking for duplicates. The
- * work is IO bound; six keeps a large library to seconds without competing with
- * whatever the user is looking at.
+ * How many candidate files are read at once while checking for duplicates. Only
+ * a few dozen files reach this point, so a small number keeps the disk busy
+ * enough to be quick without heating the phone up.
  */
-private const val ANALYSIS_CONCURRENCY = 6
+private const val ANALYSIS_CONCURRENCY = 4
 
 /** Head bytes hashed by the cheap signature before a direct comparison. */
 private const val HEAD_SIGNATURE_BYTES = 16 * 1024

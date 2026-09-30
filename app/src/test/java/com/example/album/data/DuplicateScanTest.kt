@@ -39,53 +39,43 @@ class DuplicateScanTest {
     }
 
     @Test
-    fun onlySizesThatRepeatBecomeCandidates() {
-        // 10 appears twice (positions 0, 2) and 20 twice (positions 1, 4).
-        assertEquals(listOf(0, 2, 1, 4), duplicateSizeCandidates(listOf(10L, 20L, 10L, 30L, 20L, 0L)))
-        assertTrue(duplicateSizeCandidates(listOf(1L, 2L, 3L)).isEmpty())
-        // An unknown size is not a match for another unknown size.
-        assertTrue(duplicateSizeCandidates(listOf(0L, 0L)).isEmpty())
-    }
-
-    @Test
-    fun theSameArtworkArchivedTwiceIsACandidate() {
-        // What an archived folder actually looks like: one artwork, written
-        // twice on different days. Only the work id and the pixel size match.
-        val names = listOf(
-            "illust_149789152_20260918_230340.png",
-            "illust_149789152_20260924_020854.png",
-            "illust_149789999_20260924_020854.png"
-        )
-        val widths = listOf(1200, 1200, 1200)
-        val heights = listOf(1600, 1600, 1600)
-        assertEquals(setOf(0, 1), artworkDuplicateCandidates(names, widths, heights))
-    }
-
-    @Test
-    fun theWorkIdIsReadFromBothNamingStyles() {
-        assertEquals("149789152", pixivWorkIdOf("illust_149789152_20260918_230340.png"))
-        assertEquals("149789152", pixivWorkIdOf("149789152_p0.jpg"))
-        assertEquals(null, pixivWorkIdOf("IMG_20260918_230340.jpg"))
-    }
-
-    @Test
-    fun differentArtworksOrShapesAreNotCandidates() {
-        // Two pages of one work at the same dimensions cannot be told apart by
-        // name, but a different shape is never a candidate.
+    fun onlyFilesWithTheSameSizeAndShapeBecomeCandidates() {
+        val sizes = listOf(10L, 20L, 10L, 30L, 20L, 0L)
+        val widths = listOf(100, 100, 100, 100, 100, 100)
+        val heights = listOf(200, 200, 200, 200, 200, 200)
+        // 10 appears twice (0, 2) and 20 twice (1, 4); the zero size is skipped.
+        assertEquals(listOf(0, 2, 1, 4), duplicateCandidates(sizes, widths, heights))
+        assertTrue(duplicateCandidates(listOf(1L, 2L, 3L), widths, heights).isEmpty())
+        // Same size, different shape: cannot be byte-identical.
         assertTrue(
-            artworkDuplicateCandidates(
-                names = listOf("123456_p0.jpg", "123456_p1.jpg"),
-                widths = listOf(1200, 840),
-                heights = listOf(1600, 1120)
+            duplicateCandidates(
+                sizes = listOf(10L, 10L),
+                widths = listOf(100, 120),
+                heights = listOf(200, 200)
             ).isEmpty()
         )
-        // Names without a work id stay out of the pixel check entirely.
-        assertTrue(
-            artworkDuplicateCandidates(
-                names = listOf("IMG_0001.jpg", "IMG_0002.jpg"),
+        // Unknown shape falls back to the size-only group rather than being skipped.
+        assertEquals(
+            listOf(0, 1),
+            duplicateCandidates(
+                sizes = listOf(10L, 10L),
+                widths = listOf(0, 0),
+                heights = listOf(0, 0)
+            )
+        )
+    }
+
+    @Test
+    fun theCheckNeverLooksAtNamesOrPictures() {
+        // The same file name or the same artwork id must not matter: only the
+        // bytes do, so the candidate step works for any picture on the device.
+        assertEquals(
+            listOf(0, 1),
+            duplicateCandidates(
+                sizes = listOf(64L, 64L),
                 widths = listOf(1200, 1200),
                 heights = listOf(1600, 1600)
-            ).isEmpty()
+            )
         )
     }
 

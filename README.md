@@ -31,10 +31,10 @@ Album 主要服务于希望直接管理本机媒体文件的用户：不上传�
 - 已发布版本与更新清单见 [GitHub Releases](https://github.com/Tnomlav/ALbum/releases)（资产名固定为 `album-update.json`，APK 按 ABI 分包）
 - 版本号只在 `version.properties` 中维护，不在本文件写具体数字
 
-本地签名构建产物位于 `app/release/`，仅用于交付前验证，不纳入版本控制（历史上的提交把每个版本的 APK 都存进了仓库，仓库因此膨胀到 200 MB 以上）。当前本地验证构建为 `1.2.77`（arm64-v8a 分包，其余架构见构建输出目录 `app/build/outputs/apk/release/`），其 SHA-256 为：
+本地签名构建产物位于 `app/release/`，仅用于交付前验证，不纳入版本控制（历史上的提交把每个版本的 APK 都存进了仓库，仓库因此膨胀到 200 MB 以上）。当前本地验证构建为 `1.2.78`（arm64-v8a 分包，其余架构见构建输出目录 `app/build/outputs/apk/release/`），其 SHA-256 为：
 
 ```text
-A1CF8E6E9F70111EA5696BBD590786F1EFFB1DEFE091B9B1444BCDAB2EAD3BE3
+10062D9D8807977A7F7D0941C9D962A8247BCB13F2C6B19FB2DB874973FD6763
 ```
 
 安装前请确认文件来自本仓库，并通过 SHA-256 校验下载完整性。正式发布版本和发布说明会优先放在 GitHub Releases。
