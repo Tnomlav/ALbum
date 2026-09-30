@@ -535,6 +535,11 @@ fun AlbumApp(
     var wallpaperSort by rememberSaveable { mutableStateOf(WallpaperSort.Time) }
     var wallpaperSortDirection by rememberSaveable { mutableStateOf(SortDirection.Descending) }
     var pixivArchiveOpen by rememberSaveable { mutableStateOf(false) }
+    /**
+     * A move/copy was started from the archive page and has not finished being
+     * "returned to" yet: leaving the destination folder reopens that page.
+     */
+    var pixivArchiveReturnPending by remember { mutableStateOf(false) }
     var favoriteFilter by rememberSaveable { mutableStateOf(false) }
     var mediaSort by rememberSaveable { mutableStateOf(initialSort) }
     var sortDirection by rememberSaveable { mutableStateOf(SortDirection.Descending) }
@@ -1548,6 +1553,13 @@ fun AlbumApp(
         appliedQuery = restoredQuery
         folderReturnQuery = null
         searchOpen = true
+        // A move/copy started from the Pixiv archive page belongs to that page:
+        // leaving the folder it dropped the user into has to go back there, not
+        // to whichever tab happened to be underneath.
+        if (pixivArchiveReturnPending) {
+            pixivArchiveReturnPending = false
+            pixivArchiveOpen = true
+        }
     }
 
     fun openFolder(folder: String?) {
@@ -1604,6 +1616,9 @@ fun AlbumApp(
     fun selectMainTab(tab: MainTab) {
         if (selectedTab == tab) return
         selectedTab = tab
+        // The user chose a different page: a pending "back to the archive" no
+        // longer applies.
+        pixivArchiveReturnPending = false
         query = ""
         suspendedSearchQuery = null
         searchOpen = true
@@ -2134,7 +2149,15 @@ fun AlbumApp(
                 else -> com.example.album.data.ConflictPolicy.KeepBoth
             },
             defaultPreserveDate = albumSettings.getBoolean("preserve_date", true),
-            onBack = { transferRequest = null },
+            onBack = {
+                transferRequest = null
+                // Cancelling a move that started on the archive page returns
+                // there instead of leaving the user on another tab.
+                if (pixivArchiveReturnPending) {
+                    pixivArchiveReturnPending = false
+                    pixivArchiveOpen = true
+                }
+            },
             onCreateFolder = { parent, name ->
                 library.createTransferFolder(parent, request.items, name)
             },
@@ -2191,8 +2214,11 @@ fun AlbumApp(
                             ?.takeIf { it.isNotBlank() }
                         selectedTab = when {
                             // An archive move/copy into a folder the Pixiv page
-                            // knows stays there; anything else follows the media.
+                            // knows stays there; anything else stays on the tab
+                            // the user came from instead of jumping to another
+                            // page and flashing it on the way.
                             pixivFolder != null -> MainTab.Pixiv
+                            request.fromPixivArchive -> selectedTab
                             request.items.isNotEmpty() && request.items.all { it.isVideo } -> MainTab.Videos
                             request.items.isNotEmpty() && request.items.all { !it.isVideo } -> MainTab.Albums
                             else -> selectedTab
@@ -2376,6 +2402,7 @@ fun AlbumApp(
                     // composed while it is open), so leave it first.
                     pixivFilesChanged = true
                     pixivArchiveOpen = false
+                    pixivArchiveReturnPending = true
                     transferRequest = TransferRequest(items, TransferMode.Copy, fromPixivArchive = true)
                 }
             },
@@ -2395,6 +2422,7 @@ fun AlbumApp(
                     pixivFilesChanged = true
                     pixivArchiveMoveUris = items.mapTo(hashSetOf()) { it.uri.toString() }
                     pixivArchiveOpen = false
+                    pixivArchiveReturnPending = true
                     transferRequest = TransferRequest(items, TransferMode.Move, fromPixivArchive = true)
                 }
             },
