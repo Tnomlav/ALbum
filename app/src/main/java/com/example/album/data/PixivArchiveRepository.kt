@@ -329,7 +329,21 @@ class PixivArchiveRepository(private val context: Context) {
      * the page shows this immediately while a fresh walk runs in the
      * background.
      */
-    fun loadCachedLibrary(): PixivLibrarySnapshot? = runCatching {
+    fun loadCachedLibrary(): PixivLibrarySnapshot? {
+        // Keep the parsed snapshot in memory: parsing the (library-sized) file
+        // took long enough that opening the Pixiv page showed an empty grid for
+        // a moment. A warm process now returns instantly, and the pre-warm below
+        // does the parsing while the app is still starting.
+        inMemoryLibrary?.let { return it }
+        val loaded = readCachedLibraryFile()
+        if (loaded != null) inMemoryLibrary = loaded
+        return loaded
+    }
+
+    @Volatile
+    private var inMemoryLibrary: PixivLibrarySnapshot? = null
+
+    private fun readCachedLibraryFile(): PixivLibrarySnapshot? = runCatching {
         val file = java.io.File(context.filesDir, LIBRARY_CACHE_FILE)
         if (!file.isFile) return@runCatching null
         val root = org.json.JSONObject(file.readText())
@@ -382,6 +396,7 @@ class PixivArchiveRepository(private val context: Context) {
 
     private fun writeLibraryCache(snapshot: PixivLibrarySnapshot) {
         if (snapshot.items.isEmpty()) return
+        inMemoryLibrary = snapshot
         val array = org.json.JSONArray()
         snapshot.items.forEach { item ->
             array.put(

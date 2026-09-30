@@ -1098,7 +1098,9 @@ fun AlbumApp(
             // Triggers often arrive together (a library refresh plus an explicit
             // request); the short wait collapses them into one SAF walk instead
             // of cancelling and restarting a walk that just started.
-            delay(350L)
+            // A cached-snapshot load (forceWalk = false) is cheap and is exactly
+            // what the page's first paint waits for, so it runs immediately.
+            if (forceWalk) delay(350L)
             reloadPixivPage(forceWalk, showIndicator)
         }
     }
@@ -1107,6 +1109,12 @@ fun AlbumApp(
         // refresh below or by the first visit when nothing is cached, never by
         // opening the app or another page.
         requestPixivReload(forceWalk = false)
+    }
+    LaunchedEffect(Unit) {
+        // Parse the Pixiv snapshot while the app is starting, so the page has it
+        // in memory the moment it is opened instead of showing an empty grid
+        // while the (library-sized) JSON is read.
+        withContext(Dispatchers.IO) { runCatching { pixivRepository.loadCachedLibrary() } }
     }
     LaunchedEffect(pixivRefreshKey) {
         if (pixivRefreshKey > 0) requestPixivReload(forceWalk = true)

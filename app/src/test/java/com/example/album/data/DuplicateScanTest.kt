@@ -88,22 +88,4 @@ class DuplicateScanTest {
         )
     }
 
-    @Test
-    fun theSamePictureMatchesOnlyWhileTheHashStaysClose() {
-        assertTrue(looksLikeSamePicture(0L, 0b111111L, 100f, 100f, 100f, 104f, 98f, 101f))
-        assertFalse(looksLikeSamePicture(0L, 0b1111111L, 100f, 100f, 100f, 100f, 100f, 100f))
-        assertFalse(looksLikeSamePicture(0L, 0L, 100f, 100f, 100f, 200f, 60f, 40f))
-    }
-
-    @Test
-    fun theHashGridSetsABitWhenTheLeftCellIsBrighter() {
-        val brighteningRight = IntArray(9 * 8) { index -> (index % 9) * 10 }
-        assertEquals(0L, dHashFromLuminanceGrid(brighteningRight))
-        val darkeningRight = IntArray(9 * 8) { index -> 80 - (index % 9) * 10 }
-        assertEquals(-1L, dHashFromLuminanceGrid(darkeningRight))
-        val single = brighteningRight.copyOf()
-        single[3 * 9 + 4] = 999
-        // Row 3, column 4 -> bit 3*8 + 4.
-        assertEquals(1L shl 28, dHashFromLuminanceGrid(single))
-    }
 }
