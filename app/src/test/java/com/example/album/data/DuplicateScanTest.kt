@@ -48,42 +48,43 @@ class DuplicateScanTest {
     }
 
     @Test
-    fun theSameArtworkArchivedTwiceIsANearDuplicateCandidate() {
+    fun theSameArtworkArchivedTwiceIsACandidate() {
         // What an archived folder actually looks like: one artwork, written
-        // twice on different days, so the bytes differ slightly but the pixel
-        // size is the same and the file sizes are 0.05% apart.
-        val widths = listOf(1200, 1200, 900)
+        // twice on different days. Only the work id and the pixel size match.
+        val names = listOf(
+            "illust_149789152_20260918_230340.png",
+            "illust_149789152_20260924_020854.png",
+            "illust_149789999_20260924_020854.png"
+        )
+        val widths = listOf(1200, 1200, 1200)
         val heights = listOf(1600, 1600, 1600)
-        val sizes = listOf(1_516_874L, 1_516_168L, 1_516_000L)
-        assertEquals(setOf(0, 1), nearDuplicateCandidates(widths, heights, sizes))
+        assertEquals(setOf(0, 1), artworkDuplicateCandidates(names, widths, heights))
     }
 
     @Test
-    fun differentDimensionsOrVeryDifferentSizesAreNotCandidates() {
-        // Same dimensions but a completely different amount of data: a different
-        // picture that happens to be the same shape.
+    fun theWorkIdIsReadFromBothNamingStyles() {
+        assertEquals("149789152", pixivWorkIdOf("illust_149789152_20260918_230340.png"))
+        assertEquals("149789152", pixivWorkIdOf("149789152_p0.jpg"))
+        assertEquals(null, pixivWorkIdOf("IMG_20260918_230340.jpg"))
+    }
+
+    @Test
+    fun differentArtworksOrShapesAreNotCandidates() {
+        // Two pages of one work at the same dimensions cannot be told apart by
+        // name, but a different shape is never a candidate.
         assertTrue(
-            nearDuplicateCandidates(
-                widths = listOf(1200, 1200),
-                heights = listOf(1600, 1600),
-                sizes = listOf(1_500_000L, 600_000L)
-            ).isEmpty()
-        )
-        // Same size, different shape: a resize, which this check deliberately
-        // does not cover.
-        assertTrue(
-            nearDuplicateCandidates(
+            artworkDuplicateCandidates(
+                names = listOf("123456_p0.jpg", "123456_p1.jpg"),
                 widths = listOf(1200, 840),
-                heights = listOf(1600, 1120),
-                sizes = listOf(1_500_000L, 1_500_000L)
+                heights = listOf(1600, 1120)
             ).isEmpty()
         )
-        // Unknown dimensions cannot be compared.
+        // Names without a work id stay out of the pixel check entirely.
         assertTrue(
-            nearDuplicateCandidates(
-                widths = listOf(0, 0),
-                heights = listOf(0, 0),
-                sizes = listOf(1_500_000L, 1_500_000L)
+            artworkDuplicateCandidates(
+                names = listOf("IMG_0001.jpg", "IMG_0002.jpg"),
+                widths = listOf(1200, 1200),
+                heights = listOf(1600, 1600)
             ).isEmpty()
         )
     }

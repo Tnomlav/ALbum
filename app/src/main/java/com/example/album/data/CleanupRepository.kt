@@ -39,48 +39,47 @@ internal fun duplicateSizeCandidates(sizes: List<Long>): List<Int> {
 }
 
 /**
- * Candidates for "the same picture, saved twice".
+ * The two naming styles that carry a Pixiv work id: what the archiver writes
+ * (`illust_<id>_<timestamp>`) and what most downloaders produce (`<id>_p0`).
  *
- * Re-encoding an image keeps its pixel dimensions and barely changes its file
- * size, so two copies of one picture sit next to each other when a group with
- * the same dimensions is sorted by size. Everything else is excluded before a
- * single picture is decoded, which is what keeps this affordable: the archived
- * folder that holds one artwork twice (dimensions equal, sizes 0.05% apart)
- * yields exactly those files, not the whole library.
+ * Deliberately anchored: a loose "first long number" rule also matches dates,
+ * which would put every photo taken on the same day into one candidate group.
  */
-internal fun nearDuplicateCandidates(
+private val PIXIV_WORK_ID_PATTERNS = listOf(
+    Regex("^illust_(\\d{5,12})", RegexOption.IGNORE_CASE),
+    Regex("^(\\d{5,12})_p\\d+", RegexOption.IGNORE_CASE)
+)
+
+/** The work id in a file name, or null when the name carries none. */
+internal fun pixivWorkIdOf(name: String): String? =
+    PIXIV_WORK_ID_PATTERNS.firstNotNullOfOrNull { it.find(name)?.groupValues?.get(1) }
+
+/**
+ * Candidates for "the same artwork written twice".
+ *
+ * The archive names files `illust_<work id>_<timestamp>`, and re-archiving the
+ * same work leaves the pixels identical while the embedded tags differ -- so the
+ * bytes differ and only a pixel comparison can tell. Grouping by the work id in
+ * the name plus the pixel dimensions costs no file access and keeps the group to
+ * the few files of one artwork, which is what makes this affordable: the earlier
+ * "same dimensions and similar size" gate turned twenty thousand pictures into
+ * candidates and felt like a full scan.
+ */
+internal fun artworkDuplicateCandidates(
+    names: List<String>,
     widths: List<Int>,
-    heights: List<Int>,
-    sizes: List<Long>,
-    // Ten percent: the same picture saved again as PNG or at another JPEG
-    // quality keeps its dimensions and stays close in size, while unrelated
-    // pictures of the same shape do not.
-    tolerance: Float = .10f
+    heights: List<Int>
 ): Set<Int> {
     val candidates = mutableSetOf<Int>()
-    val byDimensions = mutableMapOf<Long, MutableList<Int>>()
-    for (position in widths.indices) {
+    val byArtwork = mutableMapOf<String, MutableList<Int>>()
+    for (position in names.indices) {
         val width = widths[position]
         val height = heights[position]
-        val size = sizes[position]
-        if (width <= 0 || height <= 0 || size <= 0L) continue
-        byDimensions.getOrPut(width.toLong() shl 32 or (height.toLong() and 0xffffffffL)) {
-            mutableListOf()
-        } += position
+        if (width <= 0 || height <= 0) continue
+        val workId = pixivWorkIdOf(names[position]) ?: continue
+        byArtwork.getOrPut("$workId:$width:$height") { mutableListOf() } += position
     }
-    byDimensions.values.forEach { group ->
-        if (group.size < 2) return@forEach
-        val ordered = group.sortedBy { sizes[it] }
-        for (position in 1 until ordered.size) {
-            val previous = ordered[position - 1]
-            val current = ordered[position]
-            val difference = sizes[current] - sizes[previous]
-            if (difference <= tolerance * sizes[current]) {
-                candidates += previous
-                candidates += current
-            }
-        }
-    }
+    byArtwork.values.filter { it.size > 1 }.forEach { candidates += it }
     return candidates
 }
 
@@ -171,13 +170,13 @@ class CleanupRepository(private val context: Context) {
         // leaving the page stops the work instead of pinning the CPU.
         val sizes = items.map { mediaSize(it) ?: 0L }
         val hashingCandidates = duplicateSizeCandidates(sizes)
-        // The same picture saved twice differs in its bytes, so it needs the
-        // perceptual check -- but only for files that share their dimensions and
-        // are within one percent of each other in size.
-        val nearCandidates = nearDuplicateCandidates(
+        // The same artwork written twice differs in its bytes (the archive
+        // rewrites the embedded tags), so those few files get a pixel check.
+        // Everything else is untouched.
+        val nearCandidates = artworkDuplicateCandidates(
+            names = items.map { it.name },
             widths = items.map { it.width },
-            heights = items.map { it.height },
-            sizes = sizes
+            heights = items.map { it.height }
         ).toList()
         val totalWork = hashingCandidates.size + nearCandidates.size
         var completedWork = 0
@@ -543,7 +542,7 @@ class CleanupRepository(private val context: Context) {
 
     // The version suffix invalidates values computed by an older decoder or hash
     // implementation: the same picture would hash differently.
-    private fun analysisSignature(item: MediaItem): String = "${item.size}:${item.dateModified}:px1"
+    private fun analysisSignature(item: MediaItem): String = "${item.size}:${item.dateModified}:px2"
 
     /**
      * Hash of the decoded pixels. Two files that decode to the same pixels are
@@ -566,6 +565,21 @@ class CleanupRepository(private val context: Context) {
         val options = BitmapFactory.Options().apply {
             inScaled = false
             inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+            // Decode small: the comparison only has to be exact, not detailed.
+            // 128px is enough that two different pictures cannot collide, and it
+            // keeps a candidate to a few milliseconds. The same picture written
+            // twice decodes to exactly the same pixels at any sample size.
+            inSampleSize = 1
+        }
+        val bounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+            inScaled = false
+        }
+        openMediaInputStream(context, item.uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+            var sample = 1
+            while (max(bounds.outWidth, bounds.outHeight) / sample > 128) sample *= 2
+            options.inSampleSize = sample
         }
         val decoded = openMediaInputStream(context, item.uri)?.use {
             BitmapFactory.decodeStream(it, null, options)
