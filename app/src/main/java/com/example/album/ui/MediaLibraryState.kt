@@ -650,6 +650,18 @@ class MediaLibraryState(context: Context) {
         onProgress
     )
 
+    /**
+     * The deep check: the same picture even when the bytes differ. Has to touch
+     * every picture, so it only runs when the user asks for it.
+     */
+    suspend fun findVisualDuplicates(
+        onProgress: (Int, Int) -> Unit = { _, _ -> }
+    ): List<DuplicateGroup> = cleanup.findVisualDuplicateGroups(
+        (allImages + localImages).distinctBy { it.uri.toString() },
+        settingsPreferences,
+        onProgress
+    )
+
 
     suspend fun stageForRecycle(items: List<MediaItem>): List<RecycleEntry> {
         val staged = cleanup.stageForRecycle(items)

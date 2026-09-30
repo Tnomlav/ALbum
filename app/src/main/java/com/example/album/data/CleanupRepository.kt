@@ -53,6 +53,102 @@ internal fun duplicateCandidates(
 }
 
 /**
+ * A picture reduced to what "same picture" means: a 64-bit difference hash of
+ * the luminance grid, the average colour, and the aspect ratio.
+ *
+ * Computed from a thumbnail rather than the original, which is what keeps the
+ * deep check affordable -- and it is deliberately strict, because these groups
+ * are offered for deletion.
+ */
+internal data class ImageFingerprint(
+    val hash: Long,
+    val red: Float,
+    val green: Float,
+    val blue: Float,
+    val aspect: Float
+)
+
+/**
+ * The 64-bit dHash of a 9x8 luminance grid: a bit is set when the cell on the
+ * left is brighter than the one to its right. Pure, so the bit layout is pinned
+ * by a test instead of only existing inside the bitmap code.
+ */
+internal fun dHashFromLuminanceGrid(grid: IntArray): Long {
+    var hash = 0L
+    var bit = 0
+    for (row in 0 until 8) {
+        for (column in 0 until 8) {
+            if (grid[row * 9 + column] > grid[row * 9 + column + 1]) hash = hash or (1L shl bit)
+            bit++
+        }
+    }
+    return hash
+}
+
+/**
+ * Whether two fingerprints are the same picture rather than merely similar: at
+ * most six of the sixty-four hash bits may differ, the aspect ratio has to agree
+ * within three percent, and the average colour has to be within thirty.
+ * Re-encoding, resizing or a quality change stays inside that; two different
+ * photos of the same scene usually do not.
+ */
+internal fun looksLikeSamePicture(first: ImageFingerprint, second: ImageFingerprint): Boolean {
+    if (java.lang.Long.bitCount(first.hash xor second.hash) > 6) return false
+    if (!first.aspect.isFinite() || !second.aspect.isFinite()) return false
+    val largerAspect = max(first.aspect, second.aspect)
+    if (largerAspect <= 0f) return false
+    if (kotlin.math.abs(first.aspect - second.aspect) / largerAspect > .03f) return false
+    val red = (first.red - second.red).toDouble()
+    val green = (first.green - second.green).toDouble()
+    val blue = (first.blue - second.blue).toDouble()
+    return kotlin.math.sqrt(red * red + green * green + blue * blue) <= 30.0
+}
+
+/**
+ * Groups the positions of pictures that are the same image.
+ *
+ * Eight 8-bit bands keep the candidate search cheap while still guaranteeing a
+ * hit: a pair that differs in at most six of sixty-four bits must share a whole
+ * band. Only the few candidates are compared, so the grouping itself stays
+ * linear in the number of pictures.
+ */
+internal fun perceptualGroups(fingerprints: List<ImageFingerprint>): List<List<Int>> {
+    if (fingerprints.size < 2) return emptyList()
+    val parents = IntArray(fingerprints.size) { it }
+    fun root(value: Int): Int {
+        var current = value
+        while (parents[current] != current) {
+            parents[current] = parents[parents[current]]
+            current = parents[current]
+        }
+        return current
+    }
+    fun union(first: Int, second: Int) {
+        val a = root(first)
+        val b = root(second)
+        if (a != b) parents[b] = a
+    }
+    val buckets = mutableMapOf<Long, MutableList<Int>>()
+    fingerprints.forEachIndexed { position, candidate ->
+        val possible = mutableSetOf<Int>()
+        repeat(8) { band ->
+            val segment = (candidate.hash ushr (band * 8)) and 0xffL
+            buckets[(band.toLong() shl 8) or segment]?.let(possible::addAll)
+        }
+        possible.forEach { otherPosition ->
+            if (looksLikeSamePicture(candidate, fingerprints[otherPosition])) {
+                union(position, otherPosition)
+            }
+        }
+        repeat(8) { band ->
+            val segment = (candidate.hash ushr (band * 8)) and 0xffL
+            buckets.getOrPut((band.toLong() shl 8) or segment) { mutableListOf() } += position
+        }
+    }
+    return fingerprints.indices.groupBy(::root).values.filter { it.size > 1 }.toList()
+}
+
+/**
  * Streams two files side by side and gives up at the first difference. Byte
  * equality is what "duplicate" means here, and stopping early is what makes a
  * library-wide check take seconds instead of minutes.
@@ -127,6 +223,144 @@ class CleanupRepository(private val context: Context) {
             // next scan picks up where this one stopped instead of redoing it.
             saveAnalysisCache(cache, activeUris)
         }
+    }
+
+    /**
+     * The deep check: pictures that are the same image even when the bytes
+     * differ (re-encoded, resized, re-archived). Fingerprints come from the
+     * app's thumbnail pipeline, which keeps its own disk cache, so the first run
+     * is the only expensive one.
+     *
+     * Only started when the user asks for it: this one has to touch every
+     * picture, so it is slower than the byte check by design.
+     */
+    suspend fun findVisualDuplicateGroups(
+        items: List<MediaItem>,
+        preferences: android.content.SharedPreferences,
+        onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> }
+    ): List<DuplicateGroup> = withContext(Dispatchers.IO) {
+        withAnalysisCache(items) { cache ->
+            val pendingWrites = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+            val pictures = items.filterNot { it.isVideo }
+            val total = pictures.size
+            var completed = 0
+            onProgress(completed, total)
+            val fingerprints = coroutineScope {
+                val gate = Semaphore(ANALYSIS_CONCURRENCY)
+                pictures.mapIndexed { index, item ->
+                    async {
+                        gate.withPermit {
+                            // The thumbnail cache is also what the grid uses, so
+                            // browsing beforehand makes this much cheaper.
+                            val bitmap = com.example.album.data.ThumbnailRepository.load(
+                                context,
+                                item,
+                                VISUAL_FINGERPRINT_SIZE,
+                                preferences
+                            )
+                            val fingerprint = bitmap?.let { cachedVisualFingerprint(item, it, cache) { key, value -> pendingWrites += key to value } }
+                            completed++
+                            onProgress(completed, total)
+                            fingerprint?.let { index to it }
+                        }
+                    }
+                }.awaitAll().filterNotNull()
+            }
+            pendingWrites.forEach { (key, value) -> cache[key] = value }
+            perceptualGroups(fingerprints.map { it.second })
+                .map { group ->
+                    val itemsInGroup = group.map { fingerprints[it].first }
+                        .map { pictures[it] }
+                        .sortedByDescending { it.dateTaken }
+                    DuplicateGroup(
+                        hash = VISUAL_GROUP_PREFIX + itemsInGroup.joinToString("-") {
+                            it.uri.toString().hashCode().toString(16)
+                        },
+                        items = itemsInGroup
+                    )
+                }
+                .sortedByDescending { it.items.size }
+        }
+    }
+
+    private fun cachedVisualFingerprint(
+        item: MediaItem,
+        bitmap: android.graphics.Bitmap,
+        cache: MutableMap<String, String>,
+        onStore: (String, String) -> Unit
+    ): ImageFingerprint? {
+        val key = "visual:${item.uri}"
+        val signature = "${item.size}:${item.dateModified}:${VISUAL_FINGERPRINT_VERSION}"
+        cache[key]?.let { stored ->
+            val parts = stored.split('|')
+            if (parts.size == 6 && parts[0] == signature) {
+                runCatching {
+                    return ImageFingerprint(
+                        hash = parts[1].toLong(),
+                        red = parts[2].toFloat(),
+                        green = parts[3].toFloat(),
+                        blue = parts[4].toFloat(),
+                        aspect = parts[5].toFloat()
+                    )
+                }
+            }
+        }
+        val fingerprint = fingerprintOf(bitmap) ?: return null
+        onStore(
+            key,
+            listOf(
+                signature,
+                fingerprint.hash.toString(),
+                fingerprint.red.toString(),
+                fingerprint.green.toString(),
+                fingerprint.blue.toString(),
+                fingerprint.aspect.toString()
+            ).joinToString("|")
+        )
+        return fingerprint
+    }
+
+    /** dHash, average colour and aspect of an already decoded thumbnail. */
+    private fun fingerprintOf(bitmap: android.graphics.Bitmap): ImageFingerprint? {
+        val width = bitmap.width
+        val height = bitmap.height
+        if (width <= 0 || height <= 0) return null
+        // One bulk read: the per-pixel accessor is a JNI call each time.
+        val pixels = IntArray(width * height)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        var red = 0L
+        var green = 0L
+        var blue = 0L
+        val grid = IntArray(9 * 8)
+        val cellCounts = IntArray(9 * 8)
+        for (y in 0 until height) {
+            val rowIndex = (y * 8 / height).coerceIn(0, 7)
+            val rowStart = y * width
+            for (x in 0 until width) {
+                val color = pixels[rowStart + x]
+                val r = color shr 16 and 0xff
+                val g = color shr 8 and 0xff
+                val b = color and 0xff
+                red += r.toLong()
+                green += g.toLong()
+                blue += b.toLong()
+                val columnIndex = (x * 9 / width).coerceIn(0, 8)
+                val cell = rowIndex * 9 + columnIndex
+                grid[cell] += (r * 299 + g * 587 + b * 114) / 1000
+                cellCounts[cell] += 1
+            }
+        }
+        for (cell in grid.indices) {
+            grid[cell] = if (cellCounts[cell] == 0) 0 else grid[cell] / cellCounts[cell]
+        }
+        val count = (width.toLong() * height).coerceAtLeast(1L)
+        return ImageFingerprint(
+            hash = dHashFromLuminanceGrid(grid),
+            red = red.toFloat() / count,
+            green = green.toFloat() / count,
+            blue = blue.toFloat() / count,
+            aspect = width.toFloat() / height
+        )
     }
 
     private suspend fun duplicateGroups(
@@ -537,6 +771,15 @@ private const val MIN_BACKUP_FREE_SPACE_BYTES = 8L * 1024L * 1024L
  * enough to be quick without heating the phone up.
  */
 private const val ANALYSIS_CONCURRENCY = 4
+
+/** Thumbnail size the deep check fingerprints; matches the grid's own cache. */
+private const val VISUAL_FINGERPRINT_SIZE = 256
+
+/** Bumped when the fingerprint changes, so stale cached values are ignored. */
+private const val VISUAL_FINGERPRINT_VERSION = "v1"
+
+/** Marks the groups produced by the deep check, so the page can label them. */
+internal const val VISUAL_GROUP_PREFIX = "vis:"
 
 /** Head bytes hashed by the cheap signature before a direct comparison. */
 private const val HEAD_SIGNATURE_BYTES = 16 * 1024

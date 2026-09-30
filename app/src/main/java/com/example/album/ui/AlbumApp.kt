@@ -2468,6 +2468,7 @@ fun AlbumApp(
                 }
             },
             findDuplicates = { onProgress -> library.findDuplicates(onProgress) },
+            findVisualDuplicates = { onProgress -> library.findVisualDuplicates(onProgress) },
             confirmMediaDeletion = albumSettings.getBoolean("delete_confirmation", true),
             recycleMediaDeletion = albumSettings.getBoolean("recycle_bin", true),
             onDeleteMedia = { entries ->

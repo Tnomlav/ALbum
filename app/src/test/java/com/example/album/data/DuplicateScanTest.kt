@@ -79,4 +79,37 @@ class DuplicateScanTest {
         )
     }
 
+    @Test
+    fun theSamePictureMatchesOnlyWhileTheFingerprintStaysClose() {
+        val base = ImageFingerprint(hash = 0L, red = 100f, green = 100f, blue = 100f, aspect = 1.5f)
+        // A re-encode: a few hash bits and a small colour shift.
+        assertTrue(looksLikeSamePicture(base, base.copy(hash = 0b111111L, green = 104f, blue = 98f)))
+        // A different picture: many bits apart.
+        assertFalse(looksLikeSamePicture(base, base.copy(hash = 0b1111111L)))
+        // A different colour balance.
+        assertFalse(looksLikeSamePicture(base, base.copy(red = 200f, green = 60f, blue = 40f)))
+        // A different shape (a crop).
+        assertFalse(looksLikeSamePicture(base, base.copy(aspect = 1.1f)))
+    }
+
+    @Test
+    fun theHashGridSetsABitWhenTheLeftCellIsBrighter() {
+        val brighteningRight = IntArray(9 * 8) { index -> (index % 9) * 10 }
+        assertEquals(0L, dHashFromLuminanceGrid(brighteningRight))
+        val darkeningRight = IntArray(9 * 8) { index -> 80 - (index % 9) * 10 }
+        assertEquals(-1L, dHashFromLuminanceGrid(darkeningRight))
+        val single = brighteningRight.copyOf()
+        single[3 * 9 + 4] = 999
+        // Row 3, column 4 -> bit 3*8 + 4.
+        assertEquals(1L shl 28, dHashFromLuminanceGrid(single))
+    }
+
+    @Test
+    fun onlyGroupsOfTwoOrMoreSurvive() {
+        val same = ImageFingerprint(hash = 0L, red = 10f, green = 10f, blue = 10f, aspect = 1f)
+        val other = ImageFingerprint(hash = -1L, red = 200f, green = 10f, blue = 10f, aspect = 1f)
+        assertEquals(listOf(listOf(0, 1)), perceptualGroups(listOf(same, same.copy(red = 12f), other)))
+        assertTrue(perceptualGroups(listOf(same, other)).isEmpty())
+    }
+
 }
