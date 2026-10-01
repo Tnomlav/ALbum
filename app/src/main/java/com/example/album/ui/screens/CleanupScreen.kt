@@ -112,6 +112,9 @@ import com.example.album.data.PixivArchiveRepository
 import com.example.album.data.openMediaInputStream
 import com.example.album.data.PixivArchiveStatus
 import com.example.album.data.RecycleEntry
+import com.example.album.data.RECYCLE_DAY_MILLIS
+import com.example.album.data.privateRecycleBytes
+import com.example.album.data.recycleRemainingDays
 import com.example.album.data.ThumbnailRepository
 import com.example.album.PixivWebActivity
 import com.example.album.ui.components.MediaThumbnail
@@ -150,6 +153,8 @@ fun CleanupScreen(
     findVisualDuplicates: suspend (onProgress: (Int, Int) -> Unit) -> List<DuplicateGroup>,
     confirmMediaDeletion: Boolean = true,
     recycleMediaDeletion: Boolean = true,
+    /** Retention the Settings page currently has; shown as "days left" per item. */
+    recycleRetentionDays: Int = 60,
     onDeleteMedia: suspend (List<MediaItem>) -> Unit,
     onRestoreRecycle: (List<RecycleEntry>) -> Unit,
     onDeleteRecycle: (List<RecycleEntry>) -> Unit,
@@ -252,6 +257,7 @@ fun CleanupScreen(
             }, onLongClick = { infoItem = it })
             CleanupTab.Recycle -> RecycleContent(
                 entries = recycleEntries,
+                retentionDays = recycleRetentionDays,
                 selectedIds = selectedRecycleIds,
                 onToggle = { entry -> selectedRecycleIds = if (entry.id in selectedRecycleIds) selectedRecycleIds - entry.id else selectedRecycleIds + entry.id },
                 onOpen = { entry ->
@@ -359,7 +365,11 @@ fun CleanupScreen(
         VaultInfoSheet(appText("信息", english), cleanupMediaInfo(item), onDismiss = { infoItem = null })
     }
     infoRecycleEntry?.let { entry ->
-        VaultInfoSheet(appText("信息", english), cleanupRecycleInfo(entry), onDismiss = { infoRecycleEntry = null })
+        VaultInfoSheet(
+            appText("信息", english),
+            cleanupRecycleInfo(entry, recycleRetentionDays),
+            onDismiss = { infoRecycleEntry = null }
+        )
     }
 }
 
@@ -861,7 +871,20 @@ private fun cleanupMediaInfo(item: MediaItem): String = buildString {
     if (item.width > 0 || item.height > 0) appendLine("尺寸：${item.width} × ${item.height}")
 }
 
-private fun cleanupRecycleInfo(entry: RecycleEntry): String = buildString {
+/**
+ * What the row shows instead of a date: the recycle bin is about "how long do I
+ * still have", and the dates stay available in the info sheet.
+ */
+private fun recycleExpiryLabel(entry: RecycleEntry, retentionDays: Int, english: Boolean): String = when {
+    entry.systemTrashed -> if (english) "System Trash" else "系统回收站"
+    retentionDays <= 0 -> ""
+    else -> when (val days = recycleRemainingDays(entry.deletedAt, retentionDays)) {
+        0 -> if (english) "Expires today" else "今天清理"
+        else -> if (english) "${days}d left" else "剩 ${days} 天"
+    }
+}
+
+private fun cleanupRecycleInfo(entry: RecycleEntry, retentionDays: Int): String = buildString {
     appendLine("名称：${entry.originalName}")
     appendLine("原文件夹：${entry.originalFolder}")
     appendLine("原相对路径：${entry.originalRelativePath.orEmpty()}")
@@ -872,6 +895,10 @@ private fun cleanupRecycleInfo(entry: RecycleEntry): String = buildString {
     appendLine("拍摄日期：${formatCleanupDate(entry.dateTaken)}")
     appendLine("删除日期：${formatCleanupDate(entry.deletedAt)}")
     appendLine("回收站类型：${if (entry.systemTrashed) "系统回收站" else "应用回收站"}")
+    if (!entry.systemTrashed && retentionDays > 0) {
+        appendLine("保留至：${formatCleanupDate(entry.deletedAt + retentionDays * RECYCLE_DAY_MILLIS)}")
+        appendLine("剩余：${recycleExpiryLabel(entry, retentionDays, english = false)}")
+    }
     if (entry.duration > 0) appendLine("时长：${entry.duration} ms")
 }
 
@@ -991,6 +1018,7 @@ private fun CleanupScrollBar(
 @OptIn(ExperimentalFoundationApi::class)
 private fun RecycleContent(
     entries: List<RecycleEntry>,
+    retentionDays: Int,
     selectedIds: Set<String>,
     onToggle: (RecycleEntry) -> Unit,
     onOpen: (RecycleEntry) -> Unit,
@@ -1004,6 +1032,9 @@ private fun RecycleContent(
     var collapsed by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scrollMetrics = cleanupScrollMetrics(listState)
+    // The private copies are the only reason the app can restore anything, so
+    // what they cost is worth showing next to the count.
+    val usageBytes = remember(entries) { privateRecycleBytes(entries) }
     Box(Modifier.fillMaxSize()) {
     LazyColumn(
         state = listState,
@@ -1030,7 +1061,14 @@ private fun RecycleContent(
                             )
                         }
                     }
-                    Text(if (english) "${entries.size} items" else "${entries.size} 项", fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        buildString {
+                            append(if (english) "${entries.size} items" else "${entries.size} 项")
+                            if (usageBytes > 0L) append(" · ${formatMediaSize(usageBytes)}")
+                        },
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
                 if (entries.isEmpty()) {
                     Text(if (english) "Empty" else "暂无内容", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
@@ -1082,7 +1120,7 @@ private fun RecycleContent(
                 }
             }
         } else {
-            items(entries, key = { it.id }) { entry -> RecycleMediaRow(entry, entry.id in selectedIds, { onToggle(entry) }, { onOpen(entry) }, { onLongClick(entry) }, { onRestore(entry) }, { onDelete(entry) }) }
+            items(entries, key = { it.id }) { entry -> RecycleMediaRow(entry, retentionDays, entry.id in selectedIds, { onToggle(entry) }, { onOpen(entry) }, { onLongClick(entry) }, { onRestore(entry) }, { onDelete(entry) }) }
         }
     }
     CleanupScrollBar(listState, scrollMetrics, Modifier.align(Alignment.CenterEnd))
@@ -1091,7 +1129,7 @@ private fun RecycleContent(
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-private fun RecycleMediaRow(entry: RecycleEntry, selected: Boolean, onToggle: () -> Unit, onOpen: () -> Unit, onLongClick: () -> Unit, onRestore: () -> Unit, onDelete: () -> Unit) {
+private fun RecycleMediaRow(entry: RecycleEntry, retentionDays: Int, selected: Boolean, onToggle: () -> Unit, onOpen: () -> Unit, onLongClick: () -> Unit, onRestore: () -> Unit, onDelete: () -> Unit) {
     val english = LocalAppEnglish.current
     val bytes = remember(entry.id, entry.storedPath) { runCatching { File(entry.storedPath).length() }.getOrDefault(0L) }
     Row(Modifier.fillMaxWidth().height(72.dp).combinedClickable(onClick = onOpen, onLongClick = onLongClick), verticalAlignment = Alignment.CenterVertically) {
@@ -1106,7 +1144,7 @@ private fun RecycleMediaRow(entry: RecycleEntry, selected: Boolean, onToggle: ()
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CleanupProperty(formatMediaSize(bytes), Modifier.weight(1f))
-                CleanupProperty(formatCleanupDate(entry.dateTaken.takeIf { it > 0 } ?: entry.deletedAt), Modifier.weight(1f))
+                CleanupProperty(recycleExpiryLabel(entry, retentionDays, english), Modifier.weight(1f))
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {

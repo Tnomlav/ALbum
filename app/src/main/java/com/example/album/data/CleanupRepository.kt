@@ -9,6 +9,7 @@ import android.provider.OpenableColumns
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -444,38 +445,23 @@ class CleanupRepository(private val context: Context) {
         val pendingItems = pendingRecycleItems(items, existing)
         if (pendingItems.isEmpty()) return@withContext emptyList()
         val gate = Semaphore(3)
+        // Three copies run at the same time, so a free-space reading taken right
+        // before each one starts would let all three pass a check that only one
+        // of them really fits. Reserving the size of every copy in flight makes a
+        // batch of large videos fail before it fills the data partition.
+        val reserved = AtomicLong(0L)
         val staged = coroutineScope {
             pendingItems.map { item ->
                 async {
                     gate.withPermit {
-                        if (!hasEnoughBackupSpace(item.size, recycleDirectory.usableSpace)) return@withPermit null
-                        var target: File? = null
-                        runCatching {
-                            val id = UUID.randomUUID().toString()
-                            val extension = item.name.substringAfterLast('.', if (item.isVideo) "mp4" else "jpg")
-                            target = File(recycleDirectory, "$id.$extension")
-                            openMediaInputStream(context, item.uri).use { input ->
-                                requireNotNull(input)
-                                requireNotNull(target).outputStream().use(input::copyTo)
-                            }
-                            RecycleEntry(
-                                id = id,
-                                sourceUri = item.uri.toString(),
-                                storedPath = requireNotNull(target).absolutePath,
-                                originalName = item.name,
-                                originalFolder = item.folder,
-                                originalRelativePath = item.relativePath,
-                                mimeType = item.mimeType,
-                                dateTaken = item.dateTaken,
-                                dateModified = item.dateModified,
-                                duration = item.duration,
-                                isVideo = item.isVideo,
-                                deletedAt = System.currentTimeMillis()
-                            )
-                        }.getOrElse {
-                            // A failed copy must not leave an untracked partial backup consuming storage.
-                            runCatching { target?.delete() }
-                            null
+                        val size = item.size.coerceAtLeast(1L)
+                        val available = recycleDirectory.usableSpace - reserved.get()
+                        if (!hasEnoughBackupSpace(item.size, available)) return@withPermit null
+                        reserved.addAndGet(size)
+                        try {
+                            copyIntoRecycle(item)
+                        } finally {
+                            reserved.addAndGet(-size)
                         }
                     }
                 }
@@ -483,6 +469,38 @@ class CleanupRepository(private val context: Context) {
         }
         if (staged.isNotEmpty()) saveRecycleEntries(existing + staged)
         staged
+    }
+
+    /** Copies one item into the private recycle folder; null when the copy fails. */
+    private fun copyIntoRecycle(item: MediaItem): RecycleEntry? {
+        var target: File? = null
+        return runCatching {
+            val id = UUID.randomUUID().toString()
+            val extension = item.name.substringAfterLast('.', if (item.isVideo) "mp4" else "jpg")
+            target = File(recycleDirectory, "$id.$extension")
+            openMediaInputStream(context, item.uri).use { input ->
+                requireNotNull(input)
+                requireNotNull(target).outputStream().use(input::copyTo)
+            }
+            RecycleEntry(
+                id = id,
+                sourceUri = item.uri.toString(),
+                storedPath = requireNotNull(target).absolutePath,
+                originalName = item.name,
+                originalFolder = item.folder,
+                originalRelativePath = item.relativePath,
+                mimeType = item.mimeType,
+                dateTaken = item.dateTaken,
+                dateModified = item.dateModified,
+                duration = item.duration,
+                isVideo = item.isVideo,
+                deletedAt = System.currentTimeMillis()
+            )
+        }.getOrElse {
+            // A failed copy must not leave an untracked partial backup consuming storage.
+            runCatching { target?.delete() }
+            null
+        }
     }
 
     suspend fun stageForSystemRecycle(items: List<MediaItem>): List<RecycleEntry> = withContext(Dispatchers.IO) {
@@ -622,7 +640,7 @@ class CleanupRepository(private val context: Context) {
     }
 
     fun purgeExpired(retentionDays: Int) {
-        val cutoff = System.currentTimeMillis() - retentionDays * 24L * 60L * 60L * 1000L
+        val cutoff = System.currentTimeMillis() - retentionDays * RECYCLE_DAY_MILLIS
         val entries = loadRecycleEntries()
         val expiredPrivateEntries = entries.filter { !it.systemTrashed && it.deletedAt < cutoff }
         expiredPrivateEntries.forEach(::deletePrivateBackup)
@@ -762,6 +780,29 @@ internal fun pendingRecycleSourceUris(
 
 internal fun hasEnoughBackupSpace(fileSize: Long, usableSpace: Long): Boolean =
     usableSpace >= fileSize.coerceAtLeast(1L) + MIN_BACKUP_FREE_SPACE_BYTES
+
+/** Bytes the private recycle bin currently occupies on disk. */
+internal fun privateRecycleBytes(entries: List<RecycleEntry>): Long =
+    entries.filterNot { it.systemTrashed }
+        .sumOf { entry -> runCatching { File(entry.storedPath).length() }.getOrDefault(0L) }
+
+/**
+ * Whole days left before the retention pass removes the entry, so a file with
+ * a few hours to go still reads as "1 day" instead of "0". Zero means the entry
+ * is due today; callers should skip the label when the retention is disabled.
+ */
+internal fun recycleRemainingDays(
+    deletedAt: Long,
+    retentionDays: Int,
+    now: Long = System.currentTimeMillis()
+): Int {
+    if (retentionDays <= 0) return 0
+    val remaining = deletedAt + retentionDays * RECYCLE_DAY_MILLIS - now
+    if (remaining <= 0L) return 0
+    return ((remaining + RECYCLE_DAY_MILLIS - 1) / RECYCLE_DAY_MILLIS).toInt()
+}
+
+internal const val RECYCLE_DAY_MILLIS = 24L * 60L * 60L * 1000L
 
 private const val MIN_BACKUP_FREE_SPACE_BYTES = 8L * 1024L * 1024L
 

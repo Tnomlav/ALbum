@@ -194,6 +194,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.channels.Channel
+import kotlin.coroutines.resume
 import kotlin.coroutines.coroutineContext
 import kotlin.math.roundToInt
 
@@ -508,6 +509,9 @@ fun AlbumApp(
     var pendingDeletes by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var pixivArchivePendingDeleteUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pendingAppDelete by remember { mutableStateOf<List<MediaItem>?>(null) }
+    // Items the recycle bin refused to hold (almost always "not enough room").
+    // They keep their originals until the user decides what to do with them.
+    var pendingUnbackedDelete by remember { mutableStateOf<List<MediaItem>?>(null) }
     var pendingRename by remember { mutableStateOf<Pair<MediaItem, String>?>(null) }
     var pendingRecycleIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var externalDeleteRequestInFlight by remember { mutableStateOf(false) }
@@ -1800,6 +1804,30 @@ fun AlbumApp(
         pendingDeletes = emptyList()
         pendingRecycleIds = emptySet()
     }
+    // Android 10 has no MediaStore.createDeleteRequest, so a delete of media
+    // owned by another app comes back as a RecoverableSecurityException: the
+    // user has to approve that one file in a system dialog. Holding the
+    // continuation keeps performDelete linear instead of a state machine.
+    var deleteConsentContinuation by remember { mutableStateOf<kotlinx.coroutines.CancellableContinuation<Boolean>?>(null) }
+    val deleteConsentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        val continuation = deleteConsentContinuation
+        deleteConsentContinuation = null
+        continuation?.resume(result.resultCode == Activity.RESULT_OK)
+    }
+    suspend fun requestDeleteConsent(sender: android.content.IntentSender): Boolean =
+        kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            deleteConsentContinuation = continuation
+            continuation.invokeOnCancellation {
+                if (deleteConsentContinuation === continuation) deleteConsentContinuation = null
+            }
+            val launched = runCatching {
+                deleteConsentLauncher.launch(IntentSenderRequest.Builder(sender).build())
+            }.isSuccess
+            if (!launched) {
+                deleteConsentContinuation = null
+                continuation.resume(false)
+            }
+        }
     val trashLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         externalDeleteRequestInFlight = false
         if (result.resultCode == Activity.RESULT_OK) {
@@ -1913,25 +1941,30 @@ fun AlbumApp(
             Toast.makeText(context, if (english) "Local folder added" else "已添加本地文件夹", Toast.LENGTH_SHORT).show()
         }
     }
-    suspend fun performDelete(deleting: List<MediaItem>) {
+    /**
+     * @param permanent the user already chose "delete for good", so the files
+     *   must not be copied into the recycle bin a second time. Used by the
+     *   "could not be backed up" dialog.
+     */
+    suspend fun performDelete(deleting: List<MediaItem>, permanent: Boolean = false) {
         if (deleting.isEmpty() || externalDeleteRequestInFlight) {
             return
         }
-            val recycleEnabled = albumSettings.getBoolean("recycle_bin", true)
+            val recycleEnabled = !permanent && albumSettings.getBoolean("recycle_bin", true)
             // Keep the app's recycle bin authoritative. Using MediaStore's
             // system Trash here makes the persisted recycle records depend on
             // OEM-specific Trash URI and permission behavior, which can make
             // items disappear from this screen or fail to restore.
-            val staged = when {
-                recycleEnabled -> library.stageForRecycle(deleting)
-                else -> emptyList()
-            }
+            val staged = if (recycleEnabled) library.stageForRecycle(deleting) else emptyList()
             val stagedSources = staged.mapTo(mutableSetOf()) { it.sourceUri }
             val deletableSources = resolveDeletionSources(deleting.map { it.uri.toString() }, stagedSources, recycleEnabled)
             val deletable = deleting.filter { it.uri.toString() in deletableSources }
-            val unstagedCount = deleting.size - deletable.size
-            if (unstagedCount > 0) {
-                Toast.makeText(context, if (english) "$unstagedCount items could not be backed up; originals were kept" else "$unstagedCount 项无法备份，已保留原文件", Toast.LENGTH_LONG).show()
+            val unbacked = deleting.filterNot { it.uri.toString() in deletableSources }
+            if (unbacked.isNotEmpty()) {
+                // Originals stay untouched. Ask instead of dropping the request:
+                // the usual cause is a data partition too full for another copy
+                // of a large video, and "delete for good" is still a valid answer.
+                pendingUnbackedDelete = unbacked
             }
             if (deletable.isEmpty()) {
                 pixivArchivePendingDeleteUris = emptySet()
@@ -1962,10 +1995,20 @@ fun AlbumApp(
                 }
             } else {
                 val failedUris = mutableSetOf<String>()
-                val deletedMedia = deletable.mapNotNull { media ->
-                    if (library.deleteLegacy(media)) media else {
+                val deletedMedia = mutableListOf<MediaItem>()
+                deletable.forEach { media ->
+                    val deleted = when (val outcome = library.deleteMedia(media)) {
+                        DeleteOutcome.Deleted -> true
+                        // Android 10 only: one system dialog per file, then retry.
+                        is DeleteOutcome.NeedsConsent ->
+                            requestDeleteConsent(outcome.sender) &&
+                                library.deleteMedia(media) == DeleteOutcome.Deleted
+                        DeleteOutcome.Failed -> false
+                    }
+                    if (deleted) {
+                        deletedMedia += media
+                    } else {
                         failedUris += media.uri.toString()
-                        null
                     }
                 }
                 library.remove(deletedMedia)
@@ -1979,6 +2022,14 @@ fun AlbumApp(
                             if (english) "Permanently deleted ${deletedUris.size} items" else "已彻底删除 ${deletedUris.size} 项"
                         },
                         Toast.LENGTH_SHORT
+                    ).show()
+                }
+                if (failedUris.isNotEmpty()) {
+                    Toast.makeText(
+                        context,
+                        if (english) "${failedUris.size} item(s) could not be deleted; originals were kept"
+                        else "${failedUris.size} 项删除失败，原文件已保留",
+                        Toast.LENGTH_LONG
                     ).show()
                 }
                 pixivArchiveSession.records.value = pixivArchiveSession.records.value.filterNot {
@@ -2471,6 +2522,10 @@ fun AlbumApp(
             findVisualDuplicates = { onProgress -> library.findVisualDuplicates(onProgress) },
             confirmMediaDeletion = albumSettings.getBoolean("delete_confirmation", true),
             recycleMediaDeletion = albumSettings.getBoolean("recycle_bin", true),
+            recycleRetentionDays = albumSettings.getString("retention", "60")
+                ?.filter(Char::isDigit)
+                ?.toIntOrNull()
+                ?: 60,
             onDeleteMedia = { entries ->
                 pixivFilesChanged = true
                 performDelete(entries)
@@ -2481,7 +2536,24 @@ fun AlbumApp(
                 val privateEntries = entries.filterNot { it.systemTrashed }
                 if (privateEntries.isNotEmpty()) scope.launch {
                     val restored = library.restoreRecycle(privateEntries).size
-                    Toast.makeText(context, if (english) "Restored $restored items" else "已还原 $restored 项", Toast.LENGTH_SHORT).show()
+                    val failed = privateEntries.size - restored
+                    Toast.makeText(
+                        context,
+                        when {
+                            failed <= 0 -> if (english) "Restored $restored items" else "已还原 $restored 项"
+                            restored <= 0 -> if (english) {
+                                "$failed item(s) could not be restored and stay in Trash"
+                            } else {
+                                "$failed 项还原失败，仍保留在回收站"
+                            }
+                            else -> if (english) {
+                                "Restored $restored items, $failed failed and stay in Trash"
+                            } else {
+                                "已还原 $restored 项，$failed 项失败仍保留在回收站"
+                            }
+                        },
+                        if (failed <= 0) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                    ).show()
                 }
                 if (systemEntries.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     val requestableEntries = systemEntries.filter { entry ->
@@ -4243,6 +4315,27 @@ fun AlbumApp(
                         Toast.LENGTH_SHORT
                     ).show()
                 }
+            }
+        )
+    }
+    // Held back while a system delete dialog is up, so the two prompts never
+    // stack and the retry cannot be swallowed by externalDeleteRequestInFlight.
+    if (!externalDeleteRequestInFlight) pendingUnbackedDelete?.let { unbacked ->
+        VaultConfirmationSheet(
+            title = if (english) "Cannot move to Trash" else "无法移到回收站",
+            body = if (english) {
+                "${unbacked.size} item(s) could not be copied into the Trash, usually because there is not enough free space. The originals are still here. Delete them for good instead?"
+            } else {
+                "${unbacked.size} 项无法复制到回收站，通常是可用空间不足。原文件仍然保留。要改为永久删除吗？"
+            },
+            confirmLabel = if (english) "Delete permanently" else "永久删除",
+            danger = true,
+            onDismiss = { pendingUnbackedDelete = null },
+            onConfirm = {
+                pendingUnbackedDelete = null
+                pixivFilesChanged = true
+                pixivArchivePendingDeleteUris = unbacked.mapTo(hashSetOf()) { it.uri.toString() }
+                scope.launch { performDelete(unbacked, permanent = true) }
             }
         )
     }

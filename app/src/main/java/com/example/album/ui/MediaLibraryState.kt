@@ -1,7 +1,9 @@
 package com.example.album.ui
 
 import android.Manifest
+import android.app.RecoverableSecurityException
 import android.content.Context
+import android.content.IntentSender
 import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
@@ -550,6 +552,22 @@ class MediaLibraryState(context: Context) {
         runCatching { repository.delete(item) > 0 }.getOrDefault(false)
     }
 
+    /**
+     * Deletes one item and says *why* a failure happened. On Android 10 a delete
+     * of media owned by another app throws [RecoverableSecurityException] instead
+     * of failing outright: the caller has to show the system's per-file consent
+     * dialog and retry, and that needs the IntentSender handed back here.
+     */
+    suspend fun deleteMedia(item: MediaItem): DeleteOutcome = withContext(Dispatchers.IO) {
+        try {
+            if (repository.delete(item) > 0) DeleteOutcome.Deleted else DeleteOutcome.Failed
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            consentSenderOrNull(error)?.let(DeleteOutcome::NeedsConsent) ?: DeleteOutcome.Failed
+        }
+    }
+
     suspend fun rename(item: MediaItem, newName: String): MediaItem? = withContext(Dispatchers.IO) {
         val renamed = repository.rename(item, newName) ?: return@withContext null
         if (item.isDocument) {
@@ -730,6 +748,28 @@ sealed interface MediaScanResult {
     data object PermissionRequired : MediaScanResult
     data object NotRequested : MediaScanResult
 }
+
+/** Outcome of one delete attempt; see [MediaLibraryState.deleteMedia]. */
+sealed interface DeleteOutcome {
+    data object Deleted : DeleteOutcome
+
+    /** The system wants the user to approve this single file before it goes. */
+    data class NeedsConsent(val sender: IntentSender) : DeleteOutcome
+
+    data object Failed : DeleteOutcome
+}
+
+/**
+ * The IntentSender of the consent dialog for a delete the system refused. Only
+ * Android 10 (API 29) reports it this way: newer versions either delete directly
+ * or are routed through MediaStore.createDeleteRequest.
+ */
+internal fun consentSenderOrNull(error: Throwable): IntentSender? =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && error is RecoverableSecurityException) {
+        runCatching { error.userAction.actionIntent.intentSender }.getOrNull()
+    } else {
+        null
+    }
 
 private fun hasImageReadAccess(context: Context): Boolean = when {
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
