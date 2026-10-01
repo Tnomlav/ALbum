@@ -171,6 +171,32 @@ internal fun VlcVideoPlayer(
         androidx.compose.runtime.mutableIntStateOf(preferences.getInt("video_orientation_mode", 0).coerceIn(0, 3))
     }
     val activity = context as? Activity
+
+    @android.annotation.SuppressLint("WrongConstant")
+    fun orientationRequest(mode: Int): Int = when (mode) {
+        1 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        2 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        3 -> if (current.width > current.height && current.height > 0) {
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else if (current.height > 0) {
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        } else {
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        }
+        else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+    }
+
+    @android.annotation.SuppressLint("WrongConstant")
+    fun applyOrientationMode(mode: Int) {
+        activity?.requestedOrientation = orientationRequest(mode)
+    }
+
+    // The saved policy has to be applied when this player opens, and again when
+    // the file changes. Leaving that to the menu button meant an AVI opened in
+    // whatever orientation the previous screen happened to use.
+    LaunchedEffect(orientationMode, current.uri, current.width, current.height) {
+        applyOrientationMode(orientationMode)
+    }
     var speed by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
     var playerMenuOpen by remember { androidx.compose.runtime.mutableStateOf(false) }
     var gestureHud by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
@@ -600,16 +626,7 @@ internal fun VlcVideoPlayer(
                             val next = (orientationMode + 1) % 4
                             orientationMode = next
                             preferences.edit().putInt("video_orientation_mode", next).apply()
-                            activity?.requestedOrientation = when (next) {
-                                1 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                                2 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                                3 -> if (current.width > current.height && current.height > 0) {
-                                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                                } else {
-                                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                                }
-                                else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
-                            }
+                            applyOrientationMode(next)
                             controlsInteraction++
                         },
                         modifier = Modifier.weight(1f).height(46.dp)

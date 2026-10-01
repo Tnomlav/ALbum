@@ -328,7 +328,7 @@ class LocalFolderRepository(private val context: Context) {
         val mime = file.type ?: context.contentResolver.getType(file.uri).orEmpty()
         val isVideo = mime.startsWith("video/")
         if (!isVideo && !mime.startsWith("image/")) return null
-        val duration = if (isVideo) readVideoDuration(file.uri) else 0L
+        val video = if (isVideo) readVideoMetadata(file.uri) else VideoMetadata()
         val stableId = file.uri.toString().hashCode().toLong() and 0xffffffffL
         return MediaItem(
             id = stableId,
@@ -339,26 +339,61 @@ class LocalFolderRepository(private val context: Context) {
             dateTaken = file.lastModified().takeIf { it > 0 } ?: 0L,
             mimeType = mime.ifBlank { if (isVideo) "video/*" else "image/*" },
             size = file.length(),
-            duration = duration,
+            duration = video.durationMs,
+            width = video.width,
+            height = video.height,
             dateModified = file.lastModified().takeIf { it > 0 }?.div(1000L) ?: 0L,
             isVideo = isVideo,
             isDocument = true
         )
     }
 
-    private fun readVideoDuration(uri: Uri): Long = runCatching {
+    /**
+     * Duration plus display size. Authorized folders have no MediaStore row, so
+     * this is the only place their dimensions can come from; the player needs
+     * them to follow the video's own orientation.
+     */
+    private fun readVideoMetadata(uri: Uri): VideoMetadata = runCatching {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(context, uri)
-            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull() ?: 0L
+            val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                ?.toIntOrNull() ?: 0
+            val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                ?.toIntOrNull() ?: 0
+            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull() ?: 0
+            val (displayWidth, displayHeight) = rotatedVideoSize(width, height, rotation)
+            VideoMetadata(
+                durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L,
+                width = displayWidth,
+                height = displayHeight
+            )
         } finally {
             retriever.release()
         }
-    }.getOrDefault(0L)
+    }.getOrDefault(VideoMetadata())
 
     companion object {
         private const val PREFERENCES = "local_folder_preferences"
         private const val KEY_TREE_URIS = "tree_uris"
     }
+}
+
+/** What an authorized-folder video can tell us; zeros mean "not reported". */
+internal data class VideoMetadata(
+    val durationMs: Long = 0L,
+    val width: Int = 0,
+    val height: Int = 0
+)
+
+/**
+ * Display size of a coded frame. A quarter turn means the pixels are stored
+ * sideways, so the viewer sees the swapped dimensions.
+ */
+internal fun rotatedVideoSize(width: Int, height: Int, rotationDegrees: Int): Pair<Int, Int> {
+    if (width <= 0 || height <= 0) return 0 to 0
+    val turn = ((rotationDegrees % 360) + 360) % 360
+    return if (turn == 90 || turn == 270) height to width else width to height
 }

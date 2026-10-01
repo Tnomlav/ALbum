@@ -407,6 +407,10 @@ internal fun Media3VideoPlayer(
     var sensorOrientation by remember { mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) }
     val sensorLandscape = sensorOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE ||
         sensorOrientation == ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+    // Decoder-reported video size. "Match video ratio" needs the aspect of the
+    // file that is playing, and a library row or an authorized folder does not
+    // always carry width/height; this is the fallback for those.
+    var decodedVideoSize by remember { mutableStateOf(IntSize.Zero) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     var miniWidthPx by remember { mutableFloatStateOf(0f) }
     var miniOffset by remember { mutableStateOf(Offset.Zero) }
@@ -519,16 +523,29 @@ internal fun Media3VideoPlayer(
         }
     }
 
+    /**
+     * Whether the file being played is wider than it is tall. The MediaStore row
+     * is the usual source; the decoder fills in for authorized folders and
+     * containers that carry no dimensions. Null means "not known yet", which is
+     * different from "portrait".
+     */
+    fun videoIsLandscape(): Boolean? = when {
+        current.width > 0 && current.height > 0 -> current.width > current.height
+        decodedVideoSize.width > 0 && decodedVideoSize.height > 0 ->
+            decodedVideoSize.width > decodedVideoSize.height
+        else -> null
+    }
+
     @android.annotation.SuppressLint("WrongConstant")
     fun orientationRequest(mode: Int): Int = when (mode) {
         1 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         2 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        3 -> if (current.width > current.height && current.height > 0) {
-            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-        } else if (current.height > 0) {
-            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        } else {
-            ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        3 -> when (videoIsLandscape()) {
+            true -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            false -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            // Aspect unknown (metadata missing and the decoder has not reported
+            // a size yet): follow gravity instead of guessing.
+            null -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
         }
         else -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
     }
@@ -541,7 +558,21 @@ internal fun Media3VideoPlayer(
     // Let the player own the window orientation while it is open. This gives
     // the landscape layout the real physical window width instead of rotating
     // a portrait-sized canvas inside a portrait Activity.
-    LaunchedEffect(orientationMode, controlsLocked, lockedOrientation, sensorOrientation) {
+    //
+    // The keys include the playing file and its aspect: this composable keeps
+    // its effects when the player advances to the next item, so without them
+    // "match video ratio" only ran once and a portrait video that followed a
+    // landscape one stayed in the old window.
+    LaunchedEffect(
+        orientationMode,
+        controlsLocked,
+        lockedOrientation,
+        sensorOrientation,
+        current.uri,
+        current.width,
+        current.height,
+        decodedVideoSize
+    ) {
         val requested = if (controlsLocked) {
             lockedOrientation
         } else if (orientationMode == 0) {
@@ -646,6 +677,17 @@ internal fun Media3VideoPlayer(
                             )
                         }
                     }
+
+                    override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                        // Media3 applies rotation before reporting, so these are
+                        // the dimensions the viewer actually shows.
+                        val size = if (videoSize.width > 0 && videoSize.height > 0) {
+                            IntSize(videoSize.width, videoSize.height)
+                        } else {
+                            IntSize.Zero
+                        }
+                        if (size != decodedVideoSize) decodedVideoSize = size
+                    }
                 })
                 val items = videos.map { item ->
                     Builder()
@@ -666,6 +708,9 @@ internal fun Media3VideoPlayer(
 
     LaunchedEffect(current.uri) {
         compatFallbackRequested = false
+        // The size reported by the decoder belongs to the file that was just
+        // playing; drop it until this item reports its own.
+        decodedVideoSize = IntSize.Zero
         if (!current.isVideo || !usesMedia3LegacyContainer(current)) return@LaunchedEffect
         // AVI/MPEG-PS files that Media3 opens but cannot describe produce no
         // track at all: the player would sit on a black screen forever, so
