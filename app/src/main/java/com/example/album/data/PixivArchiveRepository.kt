@@ -292,8 +292,11 @@ class PixivArchiveRepository(private val context: Context) {
      */
     suspend fun backfillAdultTags(onFolderDone: () -> Unit = {}): Int = withContext(Dispatchers.IO) {
         val preferences = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
-        val key = libraryCacheKey()
-        if (preferences.getString(ADULT_BACKFILL_KEY, null) == key) return@withContext 0
+        // The marker carries a version: the first pass (1.2.61) only looked for
+        // the literal R-18 tag, so an archive it walked has to be checked again
+        // instead of being skipped as "already done".
+        val marker = "$ADULT_BACKFILL_VERSION|${libraryCacheKey()}"
+        if (preferences.getString(ADULT_BACKFILL_KEY, null) == marker) return@withContext 0
         val targetUri = preferences.getString("target_uri", null)?.toUri()
         val root = targetUri?.let { treeDocumentFile(it) } ?: return@withContext 0
 
@@ -313,15 +316,28 @@ class PixivArchiveRepository(private val context: Context) {
                         DocumentFile.fromSingleUri(context, sidecar.uri.toUri())?.let(::readSidecarTags)
                     }.orEmpty()
                 }
-                if (AdultTagStore.hasAdultTag(tags)) {
-                    AdultTagStore.record(context, entry.uri, entry.name, tags)
+                val adultTags = adultTagsForArchivedFile(entry.name, tags)
+                if (adultTags.isNotEmpty()) {
+                    AdultTagStore.record(context, entry.uri, entry.name, adultTags)
                     recorded++
                 }
             },
             onFolderDone = onFolderDone
         )
-        preferences.edit().putString(ADULT_BACKFILL_KEY, key).apply()
+        preferences.edit().putString(ADULT_BACKFILL_KEY, marker).apply()
         recorded
+    }
+
+    /**
+     * The adult identity of an archived file: what is written into the file
+     * first, then - for a file whose tags were never written or were replaced
+     * later - what Pixiv's metadata cache knows about its artwork id.
+     */
+    private fun adultTagsForArchivedFile(filename: String, fileTags: List<String>): List<String> {
+        if (AdultTagStore.hasAdultTag(fileTags)) return fileTags
+        val pid = parsePixivFilename(filename)?.first ?: return emptyList()
+        val cached = readPersistedMetadata(pid)?.tags ?: return emptyList()
+        return if (AdultTagStore.hasAdultTag(cached)) cached else emptyList()
     }
 
     /**
@@ -1091,7 +1107,7 @@ class PixivArchiveRepository(private val context: Context) {
             title = body.optString("illustTitle").ifBlank { "PID $pid" },
             artist = body.optString("userName").ifBlank { "未知画师" },
             artistId = body.optString("userId").ifBlank { "unknown" },
-            tags = tags,
+            tags = adultTagsForRating(pixivAdultRating(body.opt("xRestrict")), tags),
             tagTranslations = translations
         )
     }
@@ -1374,6 +1390,12 @@ private const val LIBRARY_CACHE_FILE = "pixiv_library_cache.json"
 /** Set once the archive has been scanned for adult tags (per configuration). */
 private const val ADULT_BACKFILL_KEY = "adult_backfill_key"
 
+/**
+ * Bumped when the adult scan changes what it can find, so an archive that an
+ * older pass already walked is checked once more.
+ */
+private const val ADULT_BACKFILL_VERSION = "v2"
+
 /** How often the P page is handed a partial snapshot while the tree is read. */
 private const val LIBRARY_PROGRESS_INTERVAL_MS = 250L
 
@@ -1396,6 +1418,33 @@ internal fun hasPixivSessionCookie(cookies: String?): Boolean = cookies.orEmpty(
     val value = cookie.substringAfter('=', "").trim()
     val userId = value.substringBefore('_', "")
     userId.isNotBlank() && userId.all(Char::isDigit) && value.substringAfter('_', "").isNotBlank()
+}
+
+/**
+ * Pixiv's age rating from `xRestrict`: 1 is R-18, 2 is R-18G. The field is a
+ * number in the ajax payload, but a string in some responses.
+ */
+internal fun pixivAdultRating(value: Any?): Int = when (value) {
+    is Number -> value.toInt()
+    is String -> value.trim().toIntOrNull() ?: 0
+    else -> 0
+}
+
+/**
+ * The R-18 filter decides on tags, but Pixiv marks restricted works with
+ * `xRestrict` rather than a guaranteed "R-18" tag: a work can be rated R-18 and
+ * still have a tag list that never says so. Turning the rating into the tag is
+ * what makes the archiver record (and write) the same identity the filter looks
+ * for. An existing adult tag wins, so the stronger R-18G is never downgraded.
+ */
+internal fun adultTagsForRating(rating: Int, tags: List<String>): List<String> {
+    val implied = when {
+        rating >= 2 -> "R-18G"
+        rating == 1 -> "R-18"
+        else -> return tags
+    }
+    if (tags.any(AdultTagStore::isAdultTag)) return tags
+    return tags + implied
 }
 
 private const val VERIFIED_SESSION_KEY = "session_verified_api_v2"

@@ -2933,33 +2933,18 @@ fun AlbumApp(
                         else listOf("重新扫描", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
                     }
                     MainTab.Pixiv -> if (appLanguage == "English") {
-                        if (pixivSearchMode == PixivSearchMode.Tag) listOf("Search by artist", "Rescan", "Columns", "Layout", "Sort", "Select", "Notes")
-                        else if (openedFolder == null) listOf("Search by tag", "Rescan", "Columns", "Sort", "Select", "Notes")
+                        if (pixivSearchMode == PixivSearchMode.Tag) listOf("Rescan", "Columns", "Layout", "Sort", "Select", "Notes")
+                        else if (openedFolder == null) listOf("Rescan", "Columns", "Sort", "Select", "Notes")
                         else listOf("Rescan", "New folder", "Columns", "Layout", "Sort", "Select", "Notes")
                     } else if (pixivSearchMode == PixivSearchMode.Tag) {
-                        listOf("按画师搜索", "重新扫描", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
+                        listOf("重新扫描", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
                     } else if (openedFolder == null) {
-                        listOf("按 Tag 搜索", "重新扫描", "列数", "排序方式", "进入多选", "注意事项")
+                        listOf("重新扫描", "列数", "排序方式", "进入多选", "注意事项")
                     } else listOf("重新扫描", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
                     MainTab.Tools -> emptyList()
                     MainTab.Settings -> emptyList()
                 },
                 onMenuItemClick = { action ->
-                    // Explicit alternative to the title switch for the P page's
-                    // search mode: the switch is the only other way to change
-                    // it, and this path cannot be missed.
-                    if (tab == MainTab.Pixiv && (action == "按画师搜索" || action == "按 Tag 搜索" ||
-                            action == "Search by artist" || action == "Search by tag")
-                    ) {
-                        pixivSearchMode = if (pixivSearchMode == PixivSearchMode.Tag) {
-                            PixivSearchMode.Artist
-                        } else {
-                            PixivSearchMode.Tag
-                        }
-                        openedFolder = null
-                        folderScope = null
-                        return@VaultTopBar
-                    }
                     when (MainMenuAction.fromLabel(action)) {
                         MainMenuAction.Scan -> scope.launch {
                             requestMediaScan(true)
@@ -3792,12 +3777,35 @@ fun AlbumApp(
                     },
                     onHideAdultTaggedChange = { enabled ->
                         scope.launch {
+                            // Apply the switch before the archive walk: whatever is
+                            // already recorded hides right away, and the walk below
+                            // only adds to that list.
+                            library.setHideAdultTagged(enabled)
+                            pixivRefreshKey++
+                            if (!enabled) return@launch
+                            Toast.makeText(
+                                context,
+                                if (english) "Checking the archive for R-18 tags…" else "正在检查归档里的 R-18 标记…",
+                                Toast.LENGTH_SHORT
+                            ).show()
                             // Older archives carry the tags in their files but not
                             // in the filter store, so record them before the
                             // library re-filters.
-                            if (enabled) pixivRepository.backfillAdultTags()
-                            library.setHideAdultTagged(enabled)
-                            pixivRefreshKey++
+                            val marked = pixivRepository.backfillAdultTags()
+                            if (marked > 0) library.refresh(library.permissionGranted)
+                            Toast.makeText(
+                                context,
+                                if (marked > 0) {
+                                    if (english) "Marked $marked R-18 image(s)" else "已标记 $marked 张 R-18 图片"
+                                } else {
+                                    if (english) {
+                                        "No R-18 tag found in the archive"
+                                    } else {
+                                        "归档里没有找到带 R-18 标记的图片"
+                                    }
+                                },
+                                Toast.LENGTH_LONG
+                            ).show()
                         }
                     },
                     onRenameExtensionChange = { showRenameExtension = it },

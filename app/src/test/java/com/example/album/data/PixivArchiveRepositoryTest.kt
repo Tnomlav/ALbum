@@ -12,6 +12,35 @@ import org.junit.Test
 
 class PixivArchiveRepositoryTest {
     @Test
+    fun readsPixivAgeRatingFromNumbersAndStrings() {
+        assertEquals(1, pixivAdultRating(1))
+        assertEquals(1, pixivAdultRating(1.0))
+        assertEquals(1, pixivAdultRating("1"))
+        assertEquals(2, pixivAdultRating("2"))
+        assertEquals(0, pixivAdultRating(null))
+        assertEquals(0, pixivAdultRating("0"))
+        assertEquals(0, pixivAdultRating("R-18"))
+    }
+
+    @Test
+    fun ratingBecomesTheAdultTagTheFilterLooksFor() {
+        assertEquals(listOf("オリジナル", "R-18"), adultTagsForRating(1, listOf("オリジナル")))
+        assertEquals(listOf("オリジナル", "R-18G"), adultTagsForRating(2, listOf("オリジナル")))
+    }
+
+    @Test
+    fun allAgesWorksKeepTheirTags() {
+        val tags = listOf("オリジナル", "風景")
+        assertEquals(tags, adultTagsForRating(0, tags))
+    }
+
+    @Test
+    fun anExistingTagWinsSoTheStrongerOneIsNeverDowngraded() {
+        assertEquals(listOf("R-18G"), adultTagsForRating(1, listOf("R-18G")))
+        assertEquals(listOf("【R-18】"), adultTagsForRating(1, listOf("【R-18】")))
+    }
+
+    @Test
     fun parsesStrictPixivExportName() {
         assertEquals("147958029" to 2, parsePixivFilename("illust_147958029_p2_20260805_120000.png"))
     }

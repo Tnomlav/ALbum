@@ -36,11 +36,13 @@ object AdultTagStore {
         if (uri.isBlank() || !hasAdultTag(tags)) return
         val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
         val uris = preferences.getStringSet(KEY_URIS, emptySet()).orEmpty() + uri
-        val names = preferences.getStringSet(KEY_NAMES, emptySet()).orEmpty() +
-            name?.takeIf { it.isNotBlank() } ?: emptySet()
+        // The name set only ever holds real names: a null would be written into
+        // the preference file as an element of the string set.
+        val trimmedName = name?.trim().orEmpty()
+        val names = preferences.getStringSet(KEY_NAMES, emptySet()).orEmpty()
         preferences.edit {
             putStringSet(KEY_URIS, uris)
-            putStringSet(KEY_NAMES, names)
+            if (trimmedName.isNotEmpty()) putStringSet(KEY_NAMES, names + trimmedName)
         }
     }
 
