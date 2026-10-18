@@ -12,6 +12,14 @@ import org.junit.Test
 
 class PixivArchiveRepositoryTest {
     @Test
+    fun onlyACountWhereEveryLookupMissedIsABrokenScan() {
+        assertTrue(allMetadataLookupsFailed(pidCount = 3, resolvedCount = 0))
+        assertFalse(allMetadataLookupsFailed(pidCount = 3, resolvedCount = 1))
+        // A folder with no Pixiv names at all is not a failed scan.
+        assertFalse(allMetadataLookupsFailed(pidCount = 0, resolvedCount = 0))
+    }
+
+    @Test
     fun readsPixivAgeRatingFromNumbersAndStrings() {
         assertEquals(1, pixivAdultRating(1))
         assertEquals(1, pixivAdultRating(1.0))

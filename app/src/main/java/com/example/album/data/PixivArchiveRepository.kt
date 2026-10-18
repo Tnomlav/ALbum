@@ -128,6 +128,20 @@ class PixivArchiveRepository(private val context: Context) {
     // WebView creation and JS callbacks are main-thread bound on real devices.
     // Keep fallback lookups single-file to avoid starving the UI thread.
     private val webViewFallbackSemaphore = Semaphore(1)
+    /**
+     * One WebView for a whole scan, kept on the loaded Pixiv page.
+     *
+     * This used to be created and destroyed per artwork. Every one of those
+     * objects spawns its own sandboxed renderer, and a 200-file batch left
+     * enough of them behind (the system reported "tile memory limits exceeded")
+     * that the next scan's WebViews never loaded: every lookup failed until the
+     * app process was restarted. One page plus one fetch per artwork keeps a
+     * single renderer alive for the entire scan.
+     */
+    private var metadataWebView: WebView? = null
+    private var metadataWebViewBroken = false
+    private var metadataWebViewFailures = 0
+
 
     fun hasAuthenticatedSession(): Boolean = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
         .getBoolean(VERIFIED_SESSION_KEY, false)
@@ -672,7 +686,26 @@ class PixivArchiveRepository(private val context: Context) {
                 record
             }
         }
-        onProgress(PixivArchiveProgress(PixivArchivePhase.Ready, records.size - warnings, records.size, warnings, message = "${records.size - warnings} 张可归档，$warnings 张需确认", log = "扫描完成"))
+        // When not a single PID resolved, "every file needs manual confirmation"
+        // hides the real problem: the lookups never worked. Say so, so the next
+        // attempt starts with the network/session instead of the filenames.
+        val pidCount = parsed.count { it.second?.first != null }
+        val allLookupsFailed = allMetadataLookupsFailed(pidCount, records.count { it.metadata != null })
+        if (allLookupsFailed) {
+            android.util.Log.w("AlbumPixivMeta", "no artwork info resolved for $pidCount pid(s)")
+        }
+        onProgress(PixivArchiveProgress(
+            PixivArchivePhase.Ready,
+            records.size - warnings,
+            records.size,
+            warnings,
+            message = if (allLookupsFailed) {
+                t("没有取到任何作品信息，请检查网络或重新登录 Pixiv", "No artwork info was returned; check the network or sign in again")
+            } else {
+                "${records.size - warnings} 张可归档，$warnings 张需确认"
+            },
+            log = if (allLookupsFailed) t("Pixiv 查询全部失败", "Every Pixiv lookup failed") else "扫描完成"
+        ))
         records
     }
 
@@ -1038,51 +1071,135 @@ class PixivArchiveRepository(private val context: Context) {
      * the logged-in WebView can still fetch the same Pixiv endpoint. Keep the
      * WebView fallback isolated so normal scans do not create a WebView unless
      * the native request actually failed.
+     *
+     * All lookups of one scan share [metadataWebView]: creating one per artwork
+     * exhausted the system's WebView renderers and made the *next* scan fail
+     * wholesale until the app process was restarted.
      */
     private suspend fun requestMetadataFromWebView(pid: String): PixivMetadata? =
         withContext(Dispatchers.Main.immediate) {
             webViewFallbackSemaphore.withPermit {
-                withTimeoutOrNull(12_000L) {
-                kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                    val webView = WebView(context)
-                    var completed = false
-                    fun finish(result: PixivMetadata?) {
-                        if (completed) return
-                        completed = true
-                        webView.stopLoading()
-                        webView.destroy()
-                        if (continuation.isActive) continuation.resume(result)
+                val webView = ensureMetadataWebView(pid) ?: return@withPermit null
+                val metadata = fetchMetadataInWebView(webView, pid)
+                if (metadata != null) {
+                    metadataWebViewFailures = 0
+                } else {
+                    metadataWebViewFailures++
+                    if (metadataWebViewFailures >= WEBVIEW_RECREATE_AFTER_FAILURES) {
+                        // Consecutive misses usually mean a wedged renderer, not
+                        // three deleted artworks: start over with a fresh one.
+                        android.util.Log.w("AlbumPixivMeta", "recreating the metadata WebView after $metadataWebViewFailures misses")
+                        destroyMetadataWebView()
+                        metadataWebViewFailures = 0
                     }
-                    webView.settings.javaScriptEnabled = true
-                    webView.settings.domStorageEnabled = true
-                    CookieManager.getInstance().apply {
-                        setAcceptCookie(true)
-                        setAcceptThirdPartyCookies(webView, true)
-                    }
-                    webView.webViewClient = object : WebViewClient() {
-                        override fun onPageFinished(view: WebView, url: String) {
-                            val host = url.toUri().host.orEmpty().lowercase(Locale.ROOT)
-                            if (host != "www.pixiv.net" && host != "pixiv.net") return
-                            view.evaluateJavascript(
-                                """fetch('/ajax/illust/$pid?lang=zh',{credentials:'include',cache:'no-store'}).then(r=>r.text()).catch(()=> '')"""
-                            ) { raw ->
-                                val jsonText = runCatching {
-                                    JSONObject("{\"value\":$raw}").optString("value")
-                                }.getOrNull().orEmpty()
-                                val metadata = runCatching { parseArtworkMetadata(pid, JSONObject(jsonText)) }.getOrNull()
-                                finish(metadata)
-                            }
-                        }
-                    }
-                    continuation.invokeOnCancellation {
-                        webView.post { webView.stopLoading(); webView.destroy() }
-                    }
-                    CookieManager.getInstance().flush()
-                    webView.loadUrl("https://www.pixiv.net/artworks/$pid")
                 }
+                metadata
+            }
+        }
+
+    /**
+     * The scan's shared WebView, loaded on a Pixiv artwork page and ready for
+     * `fetch`. Opening an artwork page (rather than the home page) is the same
+     * thing the old per-artwork WebView did, so a redirect to a login or landing
+     * page cannot silently break every later lookup.
+     */
+    private suspend fun ensureMetadataWebView(pid: String): WebView? {
+        metadataWebView?.takeIf { !metadataWebViewBroken }?.let { return it }
+        destroyMetadataWebView()
+        metadataWebViewBroken = false
+        val webView = WebView(context)
+        webView.settings.javaScriptEnabled = true
+        webView.settings.domStorageEnabled = true
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(webView, true)
+        }
+        metadataWebView = webView
+        val loaded = withTimeoutOrNull(WEBVIEW_LOAD_TIMEOUT_MS) {
+            kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                webView.webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView, url: String) {
+                        val host = url.toUri().host.orEmpty().lowercase(Locale.ROOT)
+                        if (host != "www.pixiv.net" && host != "pixiv.net") return
+                        if (continuation.isActive) continuation.resume(true)
+                    }
+
+                    override fun onReceivedError(
+                        view: WebView,
+                        request: android.webkit.WebResourceRequest,
+                        error: android.webkit.WebResourceError
+                    ) {
+                        if (!request.isForMainFrame) return
+                        if (continuation.isActive) continuation.resume(false)
+                    }
+
+                    override fun onRenderProcessGone(
+                        view: WebView,
+                        detail: android.webkit.RenderProcessGoneDetail
+                    ): Boolean {
+                        // The renderer died: this WebView can never be used
+                        // again, so let the next lookup create another one.
+                        metadataWebViewBroken = true
+                        if (continuation.isActive) continuation.resume(false)
+                        return true
+                    }
+                }
+                CookieManager.getInstance().flush()
+                webView.loadUrl("https://www.pixiv.net/artworks/$pid")
+            }
+        } ?: false
+        if (!loaded) {
+            android.util.Log.w("AlbumPixivMeta", "metadata WebView did not load")
+            destroyMetadataWebView()
+            return null
+        }
+        return webView
+    }
+
+    /** One artwork lookup on the already-loaded page. */
+    private suspend fun fetchMetadataInWebView(webView: WebView, pid: String): PixivMetadata? =
+        withTimeoutOrNull(WEBVIEW_FETCH_TIMEOUT_MS) {
+            kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                val script = "fetch('/ajax/illust/$pid?lang=zh',{credentials:'include',cache:'no-store'}).then(r=>r.text()).catch(()=> '')"
+                runCatching {
+                    webView.evaluateJavascript(script) { raw ->
+                        val jsonText = runCatching {
+                            JSONObject("{\"value\":$raw}").optString("value")
+                        }.getOrNull().orEmpty()
+                        val metadata = runCatching {
+                            parseArtworkMetadata(pid, JSONObject(jsonText))
+                        }.getOrNull()
+                        if (continuation.isActive) continuation.resume(metadata)
+                    }
+                }.onFailure {
+                    if (continuation.isActive) continuation.resume(null)
                 }
             }
         }
+
+    private fun destroyMetadataWebView() {
+        val webView = metadataWebView ?: return
+        metadataWebView = null
+        runCatching {
+            webView.stopLoading()
+            webView.webViewClient = WebViewClient()
+            (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+            webView.destroy()
+        }
+    }
+
+    /**
+     * Releases the shared metadata WebView. A scan creates exactly one, so
+     * whoever started the scan should call this when it finishes.
+     */
+    fun close() {
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            destroyMetadataWebView()
+        } else {
+            main.post { destroyMetadataWebView() }
+        }
+    }
 
     private fun parseArtworkMetadata(pid: String, root: JSONObject): PixivMetadata? {
         if (root.optBoolean("error", true)) return null
@@ -1386,6 +1503,16 @@ private val COMMON_PIXIV_FILENAME = Regex(
 )
 private const val PROGRESS_UPDATE_INTERVAL_MS = 120L
 private const val PIXIV_METADATA_CONCURRENCY = 3
+
+/** How long the shared WebView may take to load Pixiv before it is dropped. */
+private const val WEBVIEW_LOAD_TIMEOUT_MS = 15_000L
+
+/** One `fetch` on the already-loaded Pixiv page. */
+private const val WEBVIEW_FETCH_TIMEOUT_MS = 10_000L
+
+/** Consecutive misses that mean "the renderer is wedged" rather than "no work". */
+private const val WEBVIEW_RECREATE_AFTER_FAILURES = 3
+
 private const val LIBRARY_CACHE_FILE = "pixiv_library_cache.json"
 /** Set once the archive has been scanned for adult tags (per configuration). */
 private const val ADULT_BACKFILL_KEY = "adult_backfill_key"
@@ -1429,6 +1556,14 @@ internal fun pixivAdultRating(value: Any?): Int = when (value) {
     is String -> value.trim().toIntOrNull() ?: 0
     else -> 0
 }
+
+/**
+ * True when the scan asked Pixiv about artworks and got nothing back at all.
+ * That is a broken lookup path (network, session, or a dead WebView), not a
+ * folder full of files that need manual confirmation.
+ */
+internal fun allMetadataLookupsFailed(pidCount: Int, resolvedCount: Int): Boolean =
+    pidCount > 0 && resolvedCount == 0
 
 /**
  * The R-18 filter decides on tags, but Pixiv marks restricted works with

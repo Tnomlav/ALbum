@@ -54,6 +54,7 @@ class PixivArchiveScanService : Service() {
         startAsForeground(buildNotification("正在准备 Pixiv 扫描"))
         scanJob = serviceScope.launch {
             val session = PixivArchiveSession(applicationContext)
+            var repository: PixivArchiveRepository? = null
             session.setScanState(ArchiveUiState.Scanning)
             session.persistScanProgress(PixivArchiveProgress(
                 phase = com.example.album.data.PixivArchivePhase.Discover,
@@ -63,7 +64,7 @@ class PixivArchiveScanService : Service() {
                 message = "正在读取来源目录"
             ))
             try {
-                val repository = PixivArchiveRepository(applicationContext)
+                repository = PixivArchiveRepository(applicationContext)
                 val onProgress: suspend (PixivArchiveProgress) -> Unit = { update ->
                     ensureActive()
                     if (session.isScanCancellationRequested()) throw CancellationException("扫描已终止")
@@ -108,6 +109,9 @@ class PixivArchiveScanService : Service() {
                     log = error.message ?: "扫描失败"
                 ))
             } finally {
+                // The scan owns exactly one metadata WebView; releasing it here
+                // keeps the renderer from outliving the batch.
+                repository?.close()
                 // An older cancelled job must not stop the foreground state
                 // or the service instance that now owns a newer scan.
                 if (generation == scanGeneration) {

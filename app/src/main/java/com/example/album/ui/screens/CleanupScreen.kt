@@ -71,6 +71,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -1480,7 +1481,10 @@ class PixivArchiveSession(context: Context) {
         if (scanJob?.isActive == true || state.value == ArchiveUiState.Scanning) return
         records.value = emptyList()
         preferences.edit().remove(KEY_SCAN_RECORDS).remove(KEY_SCAN_STATE)
-            .remove(KEY_SCAN_ACTIVITY).remove(KEY_SCAN_COMPLETED).remove(KEY_SCAN_FAILED).apply()
+            .remove(KEY_SCAN_ACTIVITY).remove(KEY_SCAN_COMPLETED).remove(KEY_SCAN_FAILED)
+            // A finished or cancelled scan is over; a stale "cancelled" mark made
+            // the primary button read "clear all" on the next visit.
+            .remove(KEY_SCAN_CANCELLED).apply()
         preferences.edit().remove(KEY_SCAN_ACTIVE).apply()
         state.value = ArchiveUiState.Idle
         completed.intValue = 0
@@ -1489,6 +1493,7 @@ class PixivArchiveSession(context: Context) {
         selectedUris.value = emptySet()
         selectableUris.value = emptySet()
         selectionMode.value = false
+        scanCancelled.value = false
     }
 
     private companion object {
@@ -1542,6 +1547,10 @@ private fun ArchiveContent(
     val english = LocalAppEnglish.current
     val scope = rememberCoroutineScope()
     val repository = remember { PixivArchiveRepository(context) }
+    // A scan keeps one metadata WebView alive; release it with the screen.
+    DisposableEffect(repository) {
+        onDispose { repository.close() }
+    }
     val preferences = remember { context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE) }
     val defaultPixivSourceUri = remember {
         DocumentsContract.buildTreeDocumentUri(
