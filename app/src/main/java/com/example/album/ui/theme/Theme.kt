@@ -17,7 +17,11 @@ private fun darkScheme(accent: Color, background: Color, surface: Color, onSurfa
     surface = surface,
     onBackground = onSurface,
     onSurface = onSurface,
-    onSurfaceVariant = onSurfaceVariant
+    onSurfaceVariant = onSurfaceVariant,
+    // Material's default here is a light grey-purple that turns every card into
+    // a bright block. A surface one step above the vault background keeps the
+    // same contrast order as the light theme (page < card < text).
+    surfaceVariant = Color(0xFF242B27)
 )
 
 private fun lightScheme(accent: Color, background: Color, surface: Color, onSurface: Color, onSurfaceVariant: Color) = lightColorScheme(

@@ -17,25 +17,36 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.CleaningServices
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Height
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Slideshow
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -62,8 +73,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.album.ui.theme.VaultDimens
 import com.example.album.ui.appText
@@ -291,74 +304,76 @@ fun SettingsScreen(
         )
     } }
     Box(Modifier.fillMaxWidth().statusBarsPadding()) {
-    LazyColumn(modifier = Modifier.fillMaxWidth(), state = listState, contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
+    LazyColumn(
+        modifier = Modifier.fillMaxWidth(),
+        state = listState,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            start = 12.dp,
+            end = 12.dp,
+            top = 6.dp,
+            bottom = 28.dp
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         if (settingsSection != null) {
             item {
-                Row(
-                    Modifier.fillMaxWidth()
-                        .clickable { onSettingsSectionChange(null) }
-                        .padding(start = 6.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Outlined.ArrowBack,
-                        contentDescription = settingsText("返回", isEnglish),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        settingsText(settingsSection!!, isEnglish),
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(start = 10.dp)
-                    )
+                SettingsSectionHeader(
+                    title = settingsText(settingsSection!!, isEnglish),
+                    onBack = { onSettingsSectionChange(null) }
+                )
+            }
+        } else {
+            item { SettingsPageHeader(isEnglish) }
+            items(settingsCategories) { category ->
+                SettingsCategoryCard(category) { onSettingsSectionChange(category.title) }
+            }
+        }
+        if (settingsSection == "主题") {
+        item {
+            SettingsCard {
+                ValueRow("主题模式", if (isEnglish && themeMode == "自动") "System" else themeMode) { choose("主题模式", "theme_mode", listOf("自动", "浅色", "深色"), themeMode) { themeMode = it; onThemeModeChange(it) } }
+                SettingsRowDivider()
+                ThemeColorRow(themeAccent.label) { showThemeColors = true }
+                SettingsRowDivider()
+                ValueRow("语言", language) {
+                    choose("语言", "language", listOf("简体中文", "English"), language, onLanguageChange)
                 }
             }
         }
-        if (settingsSection == null) {
-        // One row per category. Tapping a row opens that category's own page;
-        // the arrow always points into the category.
-        item { SettingsHeader("主题", expanded = false) { onSettingsSectionChange("主题") } }
-        item { SettingsHeader("文件操作", expanded = false) { onSettingsSectionChange("文件操作") } }
-        item { SettingsHeader("显示", expanded = false) { onSettingsSectionChange("显示") } }
-        item { SettingsHeader("视频", expanded = false) { onSettingsSectionChange("视频") } }
-        item { SettingsHeader("滚动条", expanded = false) { onSettingsSectionChange("滚动条") } }
-        item { SettingsHeader("幻灯片", expanded = false) { onSettingsSectionChange("幻灯片") } }
-        item { SettingsHeader("缓存", expanded = false) { onSettingsSectionChange("缓存") } }
-        item { SettingsHeader("关于", expanded = false) { onSettingsSectionChange("关于") } }
-        }
-        if (settingsSection == "主题") {
-        item { ValueRow("主题模式", if (isEnglish && themeMode == "自动") "System" else themeMode) { choose("主题模式", "theme_mode", listOf("自动", "浅色", "深色"), themeMode) { themeMode = it; onThemeModeChange(it) } } }
-        item { ThemeColorRow(themeAccent.label) { showThemeColors = true } }
-        item { ValueRow("语言", language) {
-            choose("语言", "language", listOf("简体中文", "English"), language, onLanguageChange)
-        } }
-        item { ValueRow("主页", value("default_home", "相册")) {
-            choose(
-                "主页",
-                "default_home",
-                // Videos are part of Albums now, so the list only offers pages
-                // that exist as tabs.
-                buildList {
-                    add("相册")
-                    add("时间轴")
-                    if (pixivTabEnabled) add("Pixiv")
-                    add("工具箱")
-                    add("设置")
-                },
-                value("default_home", "相册")
-            )
-        } }
-        item { ToggleRow("下拉刷新", "在支持扫描的页面顶部下拉触发扫描", pullRefresh) { setBoolean("pull_refresh", it) { pullRefresh = it } } }
-        item { ToggleRow("长按移动底栏图标", "长按拖动底栏图标排序", navReorder) { setBoolean("nav_reorder", it) { navReorder = it; onNavReorderChange(it) } } }
-        item { ToggleRow("长按移动工具箱组件", "开启后可长按并拖动工具箱内的条目调整顺序", toolsReorder) { setBoolean("tools_reorder", it) { toolsReorder = it; onToolsReorderChange(it) } } }
         item {
-            ToggleRow("显示 Pixiv 底栏页面", "在底栏显示 Pixiv 页面", pixivTabEnabled) { enabled ->
-                setBoolean("pixiv_tab_enabled", enabled) {
-                    pixivTabEnabled = it
-                    if (!it && value("default_home", "相册") == "Pixiv") {
-                        choiceValues["default_home"] = "相册"
-                        preferences.edit().putString("default_home", "相册").apply()
+            SettingsCard {
+                ValueRow("主页", value("default_home", "相册")) {
+                    choose(
+                        "主页",
+                        "default_home",
+                        // Videos are part of Albums now, so the list only offers pages
+                        // that exist as tabs.
+                        buildList {
+                            add("相册")
+                            add("时间轴")
+                            if (pixivTabEnabled) add("Pixiv")
+                            add("工具箱")
+                            add("设置")
+                        },
+                        value("default_home", "相册")
+                    )
+                }
+                SettingsRowDivider()
+                ToggleRow("下拉刷新", "在支持扫描的页面顶部下拉触发扫描", pullRefresh) { setBoolean("pull_refresh", it) { pullRefresh = it } }
+                SettingsRowDivider()
+                ToggleRow("长按移动底栏图标", "长按拖动底栏图标排序", navReorder) { setBoolean("nav_reorder", it) { navReorder = it; onNavReorderChange(it) } }
+                SettingsRowDivider()
+                ToggleRow("长按移动工具箱组件", "开启后可长按并拖动工具箱内的条目调整顺序", toolsReorder) { setBoolean("tools_reorder", it) { toolsReorder = it; onToolsReorderChange(it) } }
+                SettingsRowDivider()
+                ToggleRow("显示 Pixiv 底栏页面", "在底栏显示 Pixiv 页面", pixivTabEnabled) { enabled ->
+                    setBoolean("pixiv_tab_enabled", enabled) {
+                        pixivTabEnabled = it
+                        if (!it && value("default_home", "相册") == "Pixiv") {
+                            choiceValues["default_home"] = "相册"
+                            preferences.edit().putString("default_home", "相册").apply()
+                        }
+                        onPixivTabEnabledChange(it)
                     }
-                    onPixivTabEnabledChange(it)
                 }
             }
         }
@@ -366,143 +381,208 @@ fun SettingsScreen(
         if (settingsSection == "文件操作") {
         // Permissions are what the category is about, so they lead the page.
         item {
-            ToggleRow(
-                "所有文件访问权限",
-                if (allFilesAccess) "已开启，归档可直接写入目录" else "未开启，点击前往系统设置授权",
-                allFilesAccess
-            ) { openAllFilesSettings() }
-        }
-        item {
-            ToggleRow(
-                "媒体管理权限",
-                if (mediaManagement) "已开启，删除时使用应用内确认弹窗" else "未开启，点击前往系统设置授权",
-                mediaManagement
-            ) { openMediaManagementSettings() }
-        }
-        item { ToggleRow("回收站", "开启后，删除的文件将进入回收站", recycleBin) { setBoolean("recycle_bin", it) { recycleBin = it } } }
-        item { ValueRow("回收站文件保留期限", value("retention", "60天"), "保存在应用私有目录，卸载时会一并删除") {
-            choose("回收站文件保留期限", "retention", listOf("10天", "30天", "60天", "90天"), value("retention", "60天")) { selected ->
-                onRetentionChange(selected.filter(Char::isDigit).toIntOrNull() ?: 60)
+            SettingsCard {
+                ToggleRow(
+                    "所有文件访问权限",
+                    if (allFilesAccess) "已开启，归档可直接写入目录" else "未开启，点击前往系统设置授权",
+                    allFilesAccess
+                ) { openAllFilesSettings() }
+                SettingsRowDivider()
+                ToggleRow(
+                    "媒体管理权限",
+                    if (mediaManagement) "已开启，删除时使用应用内确认弹窗" else "未开启，点击前往系统设置授权",
+                    mediaManagement
+                ) { openMediaManagementSettings() }
             }
-        } }
-        item {
-            ToggleRow(
-                "删除前确认",
-                "普通删除是否二次确认",
-                deleteConfirmation
-            ) { setBoolean("delete_confirmation", it) { deleteConfirmation = it } }
         }
-        item { ToggleRow("复制/移动/编辑时保留原日期", null, preserveDate) { setBoolean("preserve_date", it) { preserveDate = it } } }
-        item { ToggleRow("重命名时显示后缀", "关闭后只编辑文件名，原后缀会自动保留", showRenameExtension) { setBoolean("rename_show_extension", it) { showRenameExtension = it; onRenameExtensionChange(it) } } }
-        item { ValueRow("编辑后保存方式", value("edit_save", "每次询问"), "保留编辑副本或替换当前版本，保存前均需确认") { choose("编辑后保存方式", "edit_save", listOf("每次询问", "保留二者", "替换原图"), value("edit_save", "每次询问")) } }
-        item { ValueRow("复制/移动文件已存在", value("conflict", "保留两者")) { choose("同名文件处理", "conflict", listOf("保留两者", "覆盖", "跳过"), value("conflict", "保留两者")) } }
+        item {
+            SettingsCard {
+                ToggleRow("回收站", "开启后，删除的文件将进入回收站", recycleBin) { setBoolean("recycle_bin", it) { recycleBin = it } }
+                SettingsRowDivider()
+                ValueRow("回收站文件保留期限", value("retention", "60天"), "保存在应用私有目录，卸载时会一并删除") {
+                    choose("回收站文件保留期限", "retention", listOf("10天", "30天", "60天", "90天"), value("retention", "60天")) { selected ->
+                        onRetentionChange(selected.filter(Char::isDigit).toIntOrNull() ?: 60)
+                    }
+                }
+                SettingsRowDivider()
+                ToggleRow(
+                    "删除前确认",
+                    "普通删除是否二次确认",
+                    deleteConfirmation
+                ) { setBoolean("delete_confirmation", it) { deleteConfirmation = it } }
+                SettingsRowDivider()
+                ToggleRow("复制/移动/编辑时保留原日期", null, preserveDate) { setBoolean("preserve_date", it) { preserveDate = it } }
+            }
+        }
+        item {
+            SettingsCard {
+                ToggleRow("重命名时显示后缀", "关闭后只编辑文件名，原后缀会自动保留", showRenameExtension) { setBoolean("rename_show_extension", it) { showRenameExtension = it; onRenameExtensionChange(it) } }
+                SettingsRowDivider()
+                ValueRow("编辑后保存方式", value("edit_save", "每次询问"), "保留编辑副本或替换当前版本，保存前均需确认") { choose("编辑后保存方式", "edit_save", listOf("每次询问", "保留二者", "替换原图"), value("edit_save", "每次询问")) }
+                SettingsRowDivider()
+                ValueRow("复制/移动文件已存在", value("conflict", "保留两者")) { choose("同名文件处理", "conflict", listOf("保留两者", "覆盖", "跳过"), value("conflict", "保留两者")) }
+            }
+        }
         // Backups close the page, so they sit at its end.
         item {
-            ClickableRow("导出应用数据", "收藏、队列与偏好设置，不含媒体和账号") {
-                exportLauncher.launch(UserDataBackup.defaultFileName())
-            }
-        }
-        item {
-            ClickableRow("导入应用数据", "会覆盖当前数据") {
-                importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+            SettingsCard {
+                ClickableRow("导出应用数据", "收藏、队列与偏好设置，不含媒体和账号") {
+                    exportLauncher.launch(UserDataBackup.defaultFileName())
+                }
+                SettingsRowDivider()
+                ClickableRow("导入应用数据", "会覆盖当前数据") {
+                    importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+                }
             }
         }
         }
         if (settingsSection == "显示") {
-        item { ToggleRow("播放 GIF 缩略图", "仅控制缩略图，预览和全屏始终播放", gifThumbnails) { setBoolean("gif_thumbnails", it) { gifThumbnails = it } } }
-        item { ToggleRow("预览页显示原图", "先显示缩略图再加载原图", previewOriginal) { setBoolean("preview_original", it) { previewOriginal = it } } }
-        item { ToggleRow("显示收藏星标", "在缩略图右上角显示收藏星标", showFavoriteBadge) { setBoolean("show_favorite_badge", it) { onShowFavoriteBadgeChange(it) } } }
-        item { ToggleRow("显示点号开头的图片", "显示文件名以 . 开头的图片文件", showHiddenMedia) {
-            setBoolean("show_hidden_media", it) {
-                showHiddenMedia = it
-                onShowHiddenMediaChange(it)
+        item {
+            SettingsCard {
+                ToggleRow("播放 GIF 缩略图", "仅控制缩略图，预览和全屏始终播放", gifThumbnails) { setBoolean("gif_thumbnails", it) { gifThumbnails = it } }
+                SettingsRowDivider()
+                ToggleRow("预览页显示原图", "先显示缩略图再加载原图", previewOriginal) { setBoolean("preview_original", it) { previewOriginal = it } }
+                SettingsRowDivider()
+                ToggleRow("显示收藏星标", "在缩略图右上角显示收藏星标", showFavoriteBadge) { setBoolean("show_favorite_badge", it) { onShowFavoriteBadgeChange(it) } }
+                SettingsRowDivider()
+                ToggleRow("显示点号开头的图片", "显示文件名以 . 开头的图片文件", showHiddenMedia) {
+                    setBoolean("show_hidden_media", it) {
+                        showHiddenMedia = it
+                        onShowHiddenMediaChange(it)
+                    }
+                }
+                SettingsRowDivider()
+                ToggleRow("屏蔽 R-18 图片", "隐藏归档时写入 R-18 tag 的图片", hideAdultTagged) {
+                    setBoolean("hide_adult_tagged", it) {
+                        hideAdultTagged = it
+                        onHideAdultTaggedChange(it)
+                    }
+                }
             }
-        } }
-        item { ToggleRow("屏蔽 R-18 图片", "隐藏归档时写入 R-18 tag 的图片", hideAdultTagged) {
-            setBoolean("hide_adult_tagged", it) {
-                hideAdultTagged = it
-                onHideAdultTaggedChange(it)
-            }
-        } }
+        }
         }
         if (settingsSection == "视频") {
-        item { ToggleRow("打开视频时自动播放", null, autoplay) { setBoolean("video_autoplay", it) { autoplay = it } } }
-        item { ToggleRow("进入后台时自动暂停", null, pauseVideoOnBackground) { setBoolean("video_pause_on_background", it) { pauseVideoOnBackground = it } } }
-        item { ToggleRow("记住最后一次播放进度", null, rememberProgress) { setBoolean("video_progress", it) { rememberProgress = it } } }
-        item { ToggleRow("自动隐藏播放器界面", "播放中无操作 3 秒后隐藏控件", autoHidePlayer) { setBoolean("video_auto_hide", it) { autoHidePlayer = it } } }
-        item { ToggleRow("手势提示浮层", "手势操作时显示中间提示", centerPopup) { setBoolean("video_center_popup", it) { centerPopup = it } } }
-        item { ToggleRow("长快进", "在播放器中显示长快退和长快进按钮", longSkip) { setBoolean("long_skip", it) { longSkip = it } } }
-        if (longSkip) {
-            item { ValueRow("长快进长度", value("long_skip_length", "30秒")) {
-                choose("长快进长度", "long_skip_length", listOf("15秒", "30秒", "45秒", "60秒", "90秒", "120秒"), value("long_skip_length", "30秒"))
-            } }
+        item {
+            SettingsCard {
+                ToggleRow("打开视频时自动播放", null, autoplay) { setBoolean("video_autoplay", it) { autoplay = it } }
+                SettingsRowDivider()
+                ToggleRow("进入后台时自动暂停", null, pauseVideoOnBackground) { setBoolean("video_pause_on_background", it) { pauseVideoOnBackground = it } }
+                SettingsRowDivider()
+                ToggleRow("记住最后一次播放进度", null, rememberProgress) { setBoolean("video_progress", it) { rememberProgress = it } }
+                SettingsRowDivider()
+                ToggleRow("自动隐藏播放器界面", "播放中无操作 3 秒后隐藏控件", autoHidePlayer) { setBoolean("video_auto_hide", it) { autoHidePlayer = it } }
+            }
         }
-        item { ValueRow("快进长度", value("normal_skip", "10秒")) { choose("快进长度", "normal_skip", listOf("3秒", "5秒", "10秒", "15秒", "30秒"), value("normal_skip", "10秒")) } }
-        item { ValueRow("满屏滑动跳过时间", value("gesture_seek", "90秒"), "横向滑满整个屏幕对应的进度") { choose("满屏滑动跳过时间", "gesture_seek", listOf("30秒", "60秒", "90秒", "120秒", "150秒"), value("gesture_seek", "90秒")) } }
-        item { ToggleRow("边缘误触保护", "在屏幕边缘松手时取消当次跳转", edgeProtection) { setBoolean("edge_protection", it) { edgeProtection = it } } }
-        item { ToggleRow("单击暂停", null, tapPause) {
-            setBoolean("video_tap_pause", it) {
-                tapPause = it
-                if (!it) {
-                    portraitTapPause = false
-                    preferences.edit().putBoolean("video_portrait_tap_pause", false).apply()
+        item {
+            SettingsCard {
+                ToggleRow("手势提示浮层", "手势操作时显示中间提示", centerPopup) { setBoolean("video_center_popup", it) { centerPopup = it } }
+                SettingsRowDivider()
+                ToggleRow("长快进", "在播放器中显示长快退和长快进按钮", longSkip) { setBoolean("long_skip", it) { longSkip = it } }
+                if (longSkip) {
+                    SettingsRowDivider()
+                    ValueRow("长快进长度", value("long_skip_length", "30秒")) {
+                        choose("长快进长度", "long_skip_length", listOf("15秒", "30秒", "45秒", "60秒", "90秒", "120秒"), value("long_skip_length", "30秒"))
+                    }
+                }
+                SettingsRowDivider()
+                ValueRow("快进长度", value("normal_skip", "10秒")) { choose("快进长度", "normal_skip", listOf("3秒", "5秒", "10秒", "15秒", "30秒"), value("normal_skip", "10秒")) }
+                SettingsRowDivider()
+                ValueRow("满屏滑动跳过时间", value("gesture_seek", "90秒"), "横向滑满整个屏幕对应的进度") { choose("满屏滑动跳过时间", "gesture_seek", listOf("30秒", "60秒", "90秒", "120秒", "150秒"), value("gesture_seek", "90秒")) }
+                SettingsRowDivider()
+                ToggleRow("边缘误触保护", "在屏幕边缘松手时取消当次跳转", edgeProtection) { setBoolean("edge_protection", it) { edgeProtection = it } }
+            }
+        }
+        item {
+            SettingsCard {
+                ToggleRow("单击暂停", null, tapPause) {
+                    setBoolean("video_tap_pause", it) {
+                        tapPause = it
+                        if (!it) {
+                            portraitTapPause = false
+                            preferences.edit().putBoolean("video_portrait_tap_pause", false).apply()
+                        }
+                    }
+                }
+                SettingsRowDivider()
+                ToggleRow("只在竖屏下单击暂停", null, portraitTapPause) {
+                    setBoolean("video_portrait_tap_pause", it) {
+                        portraitTapPause = it
+                        if (it) {
+                            tapPause = true
+                            preferences.edit().putBoolean("video_tap_pause", true).apply()
+                        }
+                    }
+                }
+                SettingsRowDivider()
+                ToggleRow("自动小窗", "播放中切到后台时自动进入小窗并保持播放", autoMini) {
+                    setBoolean("video_auto_mini", it) { autoMini = it }
+                }
+                SettingsRowDivider()
+                ValueRow("亮度：空白：音量 触控占比", value("video_brightness_volume_ratio", "1:1")) {
+                    choose("亮度：空白：音量 触控占比", "video_brightness_volume_ratio", listOf("1:1", "1:1:1", "1:2:1"), value("video_brightness_volume_ratio", "1:1"))
+                }
+                SettingsRowDivider()
+                ValueRow("快退：暂停：快进 触控占比", value("video_seek_pause_ratio", "1:1:1")) {
+                    choose("快退：暂停：快进 触控占比", "video_seek_pause_ratio", listOf("1:1:1", "1:2:1", "1:0:1"), value("video_seek_pause_ratio", "1:1:1"))
                 }
             }
-        } }
-        item { ToggleRow("只在竖屏下单击暂停", null, portraitTapPause) {
-            setBoolean("video_portrait_tap_pause", it) {
-                portraitTapPause = it
-                if (it) {
-                    tapPause = true
-                    preferences.edit().putBoolean("video_tap_pause", true).apply()
-                }
-            }
-        } }
-        item { ToggleRow("自动小窗", "播放中切到后台时自动进入小窗并保持播放", autoMini) {
-            setBoolean("video_auto_mini", it) { autoMini = it }
-        } }
-        item { ValueRow("亮度：空白：音量 触控占比", value("video_brightness_volume_ratio", "1:1")) {
-            choose("亮度：空白：音量 触控占比", "video_brightness_volume_ratio", listOf("1:1", "1:1:1", "1:2:1"), value("video_brightness_volume_ratio", "1:1"))
-        } }
-        item { ValueRow("快退：暂停：快进 触控占比", value("video_seek_pause_ratio", "1:1:1")) {
-            choose("快退：暂停：快进 触控占比", "video_seek_pause_ratio", listOf("1:1:1", "1:2:1", "1:0:1"), value("video_seek_pause_ratio", "1:1:1"))
-        } }
+        }
         }
         if (settingsSection == "滚动条") {
-        item { ValueRow("拖动宽度", value("scroll_width", "24px"), "调整右侧滚动条的触控区域") { choose("拖动宽度", "scroll_width", listOf("16px", "24px", "32px"), value("scroll_width", "24px")) } }
-        item { ValueRow("浮现时间", value("scroll_duration", "1秒"), "停止滚动后继续显示的时间") { choose("浮现时间", "scroll_duration", listOf("0.5秒", "1秒", "2秒", "3秒"), value("scroll_duration", "1秒")) } }
-        item { ToggleRow("始终显示", "页面可滚动时保持滚动条常驻", persistentScrollbar) { setBoolean("persistent_scrollbar", it) { persistentScrollbar = it } } }
+        item {
+            SettingsCard {
+                ValueRow("拖动宽度", value("scroll_width", "24px"), "调整右侧滚动条的触控区域") { choose("拖动宽度", "scroll_width", listOf("16px", "24px", "32px"), value("scroll_width", "24px")) }
+                SettingsRowDivider()
+                ValueRow("浮现时间", value("scroll_duration", "1秒"), "停止滚动后继续显示的时间") { choose("浮现时间", "scroll_duration", listOf("0.5秒", "1秒", "2秒", "3秒"), value("scroll_duration", "1秒")) }
+                SettingsRowDivider()
+                ToggleRow("始终显示", "页面可滚动时保持滚动条常驻", persistentScrollbar) { setBoolean("persistent_scrollbar", it) { persistentScrollbar = it } }
+            }
+        }
         }
         if (settingsSection == "幻灯片") {
-        item { ValueRow("幻灯片播放间隔", value("slideshow_interval", "3秒")) { choose("幻灯片播放间隔", "slideshow_interval", (1..10).map { "${it}秒" }, value("slideshow_interval", "3秒")) } }
-        item { ValueRow("幻灯片播放动画", value("slideshow_animation", "自然")) { choose("幻灯片播放动画", "slideshow_animation", listOf("自然", "淡入淡出", "滑动"), value("slideshow_animation", "自然")) } }
-        item { ToggleRow("幻灯片随机播放", null, randomSlideshow) { setBoolean("random_slideshow", it) { randomSlideshow = it } } }
+        item {
+            SettingsCard {
+                ValueRow("幻灯片播放间隔", value("slideshow_interval", "3秒")) { choose("幻灯片播放间隔", "slideshow_interval", (1..10).map { "${it}秒" }, value("slideshow_interval", "3秒")) }
+                SettingsRowDivider()
+                ValueRow("幻灯片播放动画", value("slideshow_animation", "自然")) { choose("幻灯片播放动画", "slideshow_animation", listOf("自然", "淡入淡出", "滑动"), value("slideshow_animation", "自然")) }
+                SettingsRowDivider()
+                ToggleRow("幻灯片随机播放", null, randomSlideshow) { setBoolean("random_slideshow", it) { randomSlideshow = it } }
+            }
+        }
         }
         if (settingsSection == "缓存") {
-        item { ToggleRow("后台优化", "在后台增量生成分级缩略图", backgroundOptimization) {
-            setBoolean("background_optimization", it) {
-                backgroundOptimization = it
-                onBackgroundOptimizationChange(it)
-            }
-        } }
-        item { ValueRow("缓存上限", value("cache_limit", "自动")) {
-            choose("缓存上限", "cache_limit", listOf("自动", "250 MB", "500 MB", "1 GB"), value("cache_limit", "自动")) {
-                scope.launch {
-                    withContext(Dispatchers.IO) { ThumbnailRepository.applyCacheLimit(context, preferences) }
-                    cacheBytes = withContext(Dispatchers.IO) { ThumbnailRepository.cacheBytes(context) }
+        item {
+            SettingsCard {
+                ToggleRow("后台优化", "在后台增量生成分级缩略图", backgroundOptimization) {
+                    setBoolean("background_optimization", it) {
+                        backgroundOptimization = it
+                        onBackgroundOptimizationChange(it)
+                    }
+                }
+                SettingsRowDivider()
+                ValueRow("缓存上限", value("cache_limit", "自动")) {
+                    choose("缓存上限", "cache_limit", listOf("自动", "250 MB", "500 MB", "1 GB"), value("cache_limit", "自动")) {
+                        scope.launch {
+                            withContext(Dispatchers.IO) { ThumbnailRepository.applyCacheLimit(context, preferences) }
+                            cacheBytes = withContext(Dispatchers.IO) { ThumbnailRepository.cacheBytes(context) }
+                        }
+                    }
+                }
+                SettingsRowDivider()
+                ValueRow("清理缓存", formatCacheSize(cacheBytes)) {
+                    scope.launch {
+                        val cleared = withContext(Dispatchers.IO) { ThumbnailRepository.clear(context, preferences) }
+                        cacheBytes = 0L
+                        Toast.makeText(context, if (isEnglish) "Cleared ${formatCacheSize(cleared)} of cache" else "已清理 ${formatCacheSize(cleared)} 缓存", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
-        } }
-        item { ValueRow("清理缓存", formatCacheSize(cacheBytes)) {
-            scope.launch {
-                val cleared = withContext(Dispatchers.IO) { ThumbnailRepository.clear(context, preferences) }
-                cacheBytes = 0L
-                Toast.makeText(context, if (isEnglish) "Cleared ${formatCacheSize(cleared)} of cache" else "已清理 ${formatCacheSize(cleared)} 缓存", Toast.LENGTH_SHORT).show()
-            }
-        } }
+        }
         }
         if (settingsSection == "关于") {
-        item { ValueRow("隐私政策", "›") {
+        item {
+        SettingsCard {
+        ValueRow("隐私政策") {
             dialog = InfoDialog(
                 "隐私政策",
                 if (isEnglish) {
@@ -525,16 +605,17 @@ fun SettingsScreen(
                         "版本：v$appVersion\n最后修订：2026年9月17日"
                 }
             )
-        } }
-        item { ValueRow("开源许可", "›") { showLicenses = true } }
-        item {
+        }
+        SettingsRowDivider()
+        ValueRow("开源许可") { showLicenses = true }
+        SettingsRowDivider()
             ValueRow(
                 "应用版本",
                 when {
                     checkingUpdate -> "检查中..."
                     availableUpdate != null -> if (isEnglish) "v${availableUpdate?.versionName} available" else "发现 v${availableUpdate?.versionName}"
                     updateChecked -> "已是最新版本"
-                    else -> "›"
+                    else -> ""
                 },
                 "v$appVersion",
                 if (checkingUpdate) null else {
@@ -592,6 +673,7 @@ fun SettingsScreen(
                     }
                 }
             )
+        }
         }
         }
     }
@@ -743,29 +825,160 @@ private fun formatCacheSize(bytes: Long): String = when {
     else -> String.format(java.util.Locale.CHINA, "%.1f GB", bytes / 1024f / 1024f / 1024f)
 }
 
+/** One entry of the settings home: an icon, a name and what is inside it. */
+private data class SettingsCategory(
+    val title: String,
+    val subtitle: String,
+    val icon: ImageVector
+)
+
+private val settingsCategories = listOf(
+    SettingsCategory("主题", "主题模式、配色、语言与主页", Icons.Outlined.Palette),
+    SettingsCategory("文件操作", "权限、回收站、重命名与备份", Icons.Outlined.FolderOpen),
+    SettingsCategory("显示", "缩略图、预览与内容过滤", Icons.Outlined.Visibility),
+    SettingsCategory("视频", "播放、手势与自动小窗", Icons.Outlined.Movie),
+    SettingsCategory("滚动条", "宽度、浮现时间与常驻显示", Icons.Outlined.Height),
+    SettingsCategory("幻灯片", "间隔、动画与随机播放", Icons.Outlined.Slideshow),
+    SettingsCategory("缓存", "后台优化、上限与清理", Icons.Outlined.Storage),
+    SettingsCategory("关于", "隐私、许可与版本更新", Icons.Outlined.Info)
+)
+
 @Composable
-private fun SettingsHeader(title: String, expanded: Boolean = true, onClick: (() -> Unit)? = null) {
+private fun SettingsPageHeader(english: Boolean) {
+    Column(
+        Modifier.fillMaxWidth().padding(start = 4.dp, top = 10.dp, bottom = 6.dp)
+    ) {
+        Text(
+            settingsText("设置", english),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            if (english) "Appearance, playback and files" else "外观、播放与文件管理",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 3.dp)
+        )
+    }
+}
+
+@Composable
+private fun SettingsSectionHeader(title: String, onBack: () -> Unit) {
+    val english = LocalSettingsEnglish.current
     Row(
-        Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(start = 15.dp, end = 15.dp, top = 17.dp, bottom = 8.dp),
+        Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // The category rows on the settings home are the page's navigation, so
-        // they read a size larger than the rows inside a category.
-        Text(
-            settingsText(title, LocalSettingsEnglish.current),
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.primary,
-            style = MaterialTheme.typography.titleSmall
-        )
-        if (onClick != null) {
+        Box(
+            Modifier.size(40.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                .clickable(onClick = onBack),
+            contentAlignment = Alignment.Center
+        ) {
             Icon(
-                imageVector = if (expanded) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                Icons.AutoMirrored.Outlined.ArrowBack,
+                contentDescription = settingsText("返回", english),
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Text(
+            title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 12.dp)
+        )
+    }
+}
+
+@Composable
+private fun SettingsCategoryCard(category: SettingsCategory, onClick: () -> Unit) {
+    val english = LocalSettingsEnglish.current
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(VaultDimens.AlbumRadius),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Row(
+            Modifier.fillMaxWidth()
+                .settingsPress(onClick)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                Modifier.size(40.dp)
+                    .background(
+                        MaterialTheme.colorScheme.primary.copy(alpha = .13f),
+                        RoundedCornerShape(10.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    category.icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(21.dp)
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(settingsText(category.title, english), style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    settingsText(category.subtitle, english),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                Icons.Outlined.ChevronRight,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
             )
         }
     }
+}
+
+/** Related settings live on one surface, the same card the toolbox uses. */
+@Composable
+private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(VaultDimens.AlbumRadius),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Column(content = content)
+    }
+}
+
+@Composable
+private fun SettingsRowDivider() {
+    Box(
+        Modifier.fillMaxWidth()
+            .padding(start = 16.dp)
+            .height(1.dp)
+            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .14f))
+    )
+}
+
+/**
+ * The theme turns ripples off, so rows answer a press with a faint tint
+ * instead of nothing at all. It is clipped by the surrounding card.
+ */
+@Composable
+private fun Modifier.settingsPress(onClick: (() -> Unit)?): Modifier {
+    if (onClick == null) return this
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val tint by animateFloatAsState(if (pressed) 0.06f else 0f, label = "settings-row-press")
+    return this
+        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = tint))
+        .clickable(
+            interactionSource = interaction,
+            indication = null,
+            role = Role.Button,
+            onClick = onClick
+        )
 }
 
 /** A plain row that only opens something else. */
@@ -774,8 +987,8 @@ private fun ClickableRow(label: String, note: String?, onClick: () -> Unit) {
     val english = LocalSettingsEnglish.current
     Row(
         Modifier.fillMaxWidth().heightIn(min = VaultDimens.SettingsRowMinHeight)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .settingsPress(onClick)
+            .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -788,17 +1001,29 @@ private fun ClickableRow(label: String, note: String?, onClick: () -> Unit) {
                 )
             }
         }
+        Icon(
+            Icons.Outlined.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f),
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 
 @Composable
-private fun ValueRow(label: String, value: String, note: String? = null, onClick: (() -> Unit)?) {
+private fun ValueRow(label: String, value: String = "", note: String? = null, onClick: (() -> Unit)?) {
     val english = LocalSettingsEnglish.current
     Row(
         Modifier.fillMaxWidth().heightIn(min = VaultDimens.SettingsRowMinHeight)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .semantics { contentDescription = "${settingsText(label, english)}: ${settingsText(value, english)}" }
-            .padding(horizontal = 15.dp, vertical = 9.dp),
+            .settingsPress(onClick)
+            .semantics {
+                contentDescription = if (value.isBlank()) {
+                    settingsText(label, english)
+                } else {
+                    "${settingsText(label, english)}: ${settingsText(value, english)}"
+                }
+            }
+            .padding(start = 16.dp, end = 12.dp, top = 9.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -806,7 +1031,24 @@ private fun ValueRow(label: String, value: String, note: String? = null, onClick
             note?.let { Text(settingsText(it, english), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         // The chosen option is the row's value, so it carries the theme colour.
-        Text(settingsText(value, english), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+        if (value.isNotBlank()) {
+            Text(
+                settingsText(value, english),
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 10.dp)
+            )
+        }
+        if (onClick != null) {
+            Icon(
+                Icons.Outlined.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f),
+                modifier = Modifier.padding(start = 2.dp).size(18.dp)
+            )
+        }
     }
 }
 
@@ -814,8 +1056,9 @@ private fun ValueRow(label: String, value: String, note: String? = null, onClick
 private fun ThemeColorRow(value: String, onClick: () -> Unit) {
     val english = LocalSettingsEnglish.current
     Row(
-        Modifier.fillMaxWidth().heightIn(min = VaultDimens.SettingsRowMinHeight).clickable(onClick = onClick)
-            .padding(horizontal = 15.dp, vertical = 9.dp),
+        Modifier.fillMaxWidth().heightIn(min = VaultDimens.SettingsRowMinHeight)
+            .settingsPress(onClick)
+            .padding(start = 16.dp, end = 14.dp, top = 9.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(settingsText("主题颜色", english), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
@@ -829,11 +1072,21 @@ private fun ThemeColorRow(value: String, onClick: () -> Unit) {
 @Composable
 private fun ToggleRow(label: String, note: String?, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     val english = LocalSettingsEnglish.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val tint by animateFloatAsState(if (pressed) 0.06f else 0f, label = "settings-row-press")
     Row(
         Modifier.fillMaxWidth().heightIn(min = VaultDimens.SettingsRowMinHeight)
-            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = tint))
+            .toggleable(
+                value = checked,
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Switch,
+                onValueChange = onCheckedChange
+            )
             .semantics { stateDescription = if (checked) settingsText("已开启", english) else settingsText("已关闭", english) }
-            .padding(horizontal = 16.dp, vertical = 9.dp),
+            .padding(start = 16.dp, end = 10.dp, top = 9.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
