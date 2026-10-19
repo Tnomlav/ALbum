@@ -40,7 +40,6 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.Height
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Palette
@@ -328,9 +327,9 @@ fun SettingsScreen(
                 SettingsCategoryCard(category) { onSettingsSectionChange(category.title) }
             }
         }
-        if (settingsSection == "主题") {
+        if (settingsSection == "界面") {
         item {
-            SettingsCard {
+            SettingsCard("外观") {
                 ValueRow("主题模式", if (isEnglish && themeMode == "自动") "System" else themeMode) { choose("主题模式", "theme_mode", listOf("自动", "浅色", "深色"), themeMode) { themeMode = it; onThemeModeChange(it) } }
                 SettingsRowDivider()
                 ThemeColorRow(themeAccent.label) { showThemeColors = true }
@@ -341,7 +340,7 @@ fun SettingsScreen(
             }
         }
         item {
-            SettingsCard {
+            SettingsCard("导航与底栏") {
                 ValueRow("主页", value("default_home", "相册")) {
                     choose(
                         "主页",
@@ -381,7 +380,7 @@ fun SettingsScreen(
         if (settingsSection == "文件操作") {
         // Permissions are what the category is about, so they lead the page.
         item {
-            SettingsCard {
+            SettingsCard("权限") {
                 ToggleRow(
                     "所有文件访问权限",
                     if (allFilesAccess) "已开启，归档可直接写入目录" else "未开启，点击前往系统设置授权",
@@ -396,7 +395,7 @@ fun SettingsScreen(
             }
         }
         item {
-            SettingsCard {
+            SettingsCard("删除与回收站") {
                 ToggleRow("回收站", "开启后，删除的文件将进入回收站", recycleBin) { setBoolean("recycle_bin", it) { recycleBin = it } }
                 SettingsRowDivider()
                 ValueRow("回收站文件保留期限", value("retention", "60天"), "保存在应用私有目录，卸载时会一并删除") {
@@ -410,12 +409,12 @@ fun SettingsScreen(
                     "普通删除是否二次确认",
                     deleteConfirmation
                 ) { setBoolean("delete_confirmation", it) { deleteConfirmation = it } }
-                SettingsRowDivider()
-                ToggleRow("复制/移动/编辑时保留原日期", null, preserveDate) { setBoolean("preserve_date", it) { preserveDate = it } }
             }
         }
         item {
-            SettingsCard {
+            SettingsCard("复制、编辑与重命名") {
+                ToggleRow("复制/移动/编辑时保留原日期", null, preserveDate) { setBoolean("preserve_date", it) { preserveDate = it } }
+                SettingsRowDivider()
                 ToggleRow("重命名时显示后缀", "关闭后只编辑文件名，原后缀会自动保留", showRenameExtension) { setBoolean("rename_show_extension", it) { showRenameExtension = it; onRenameExtensionChange(it) } }
                 SettingsRowDivider()
                 ValueRow("编辑后保存方式", value("edit_save", "每次询问"), "保留编辑副本或替换当前版本，保存前均需确认") { choose("编辑后保存方式", "edit_save", listOf("每次询问", "保留二者", "替换原图"), value("edit_save", "每次询问")) }
@@ -425,7 +424,7 @@ fun SettingsScreen(
         }
         // Backups close the page, so they sit at its end.
         item {
-            SettingsCard {
+            SettingsCard("备份") {
                 ClickableRow("导出应用数据", "收藏、队列与偏好设置，不含媒体和账号") {
                     exportLauncher.launch(UserDataBackup.defaultFileName())
                 }
@@ -438,13 +437,16 @@ fun SettingsScreen(
         }
         if (settingsSection == "显示") {
         item {
-            SettingsCard {
+            SettingsCard("缩略图与预览") {
                 ToggleRow("播放 GIF 缩略图", "仅控制缩略图，预览和全屏始终播放", gifThumbnails) { setBoolean("gif_thumbnails", it) { gifThumbnails = it } }
                 SettingsRowDivider()
                 ToggleRow("预览页显示原图", "先显示缩略图再加载原图", previewOriginal) { setBoolean("preview_original", it) { previewOriginal = it } }
                 SettingsRowDivider()
                 ToggleRow("显示收藏星标", "在缩略图右上角显示收藏星标", showFavoriteBadge) { setBoolean("show_favorite_badge", it) { onShowFavoriteBadgeChange(it) } }
-                SettingsRowDivider()
+            }
+        }
+        item {
+            SettingsCard("内容过滤") {
                 ToggleRow("显示点号开头的图片", "显示文件名以 . 开头的图片文件", showHiddenMedia) {
                     setBoolean("show_hidden_media", it) {
                         showHiddenMedia = it
@@ -460,10 +462,20 @@ fun SettingsScreen(
                 }
             }
         }
+        item {
+            // The scrollbar is a display detail, not a category of its own.
+            SettingsCard("滚动条") {
+                ValueRow("拖动宽度", value("scroll_width", "24px"), "调整右侧滚动条的触控区域") { choose("拖动宽度", "scroll_width", listOf("16px", "24px", "32px"), value("scroll_width", "24px")) }
+                SettingsRowDivider()
+                ValueRow("浮现时间", value("scroll_duration", "1秒"), "停止滚动后继续显示的时间") { choose("浮现时间", "scroll_duration", listOf("0.5秒", "1秒", "2秒", "3秒"), value("scroll_duration", "1秒")) }
+                SettingsRowDivider()
+                ToggleRow("始终显示", "页面可滚动时保持滚动条常驻", persistentScrollbar) { setBoolean("persistent_scrollbar", it) { persistentScrollbar = it } }
+            }
+        }
         }
         if (settingsSection == "视频") {
         item {
-            SettingsCard {
+            SettingsCard("播放") {
                 ToggleRow("打开视频时自动播放", null, autoplay) { setBoolean("video_autoplay", it) { autoplay = it } }
                 SettingsRowDivider()
                 ToggleRow("进入后台时自动暂停", null, pauseVideoOnBackground) { setBoolean("video_pause_on_background", it) { pauseVideoOnBackground = it } }
@@ -474,7 +486,7 @@ fun SettingsScreen(
             }
         }
         item {
-            SettingsCard {
+            SettingsCard("手势与跳转") {
                 ToggleRow("手势提示浮层", "手势操作时显示中间提示", centerPopup) { setBoolean("video_center_popup", it) { centerPopup = it } }
                 SettingsRowDivider()
                 ToggleRow("长快进", "在播放器中显示长快退和长快进按钮", longSkip) { setBoolean("long_skip", it) { longSkip = it } }
@@ -493,7 +505,7 @@ fun SettingsScreen(
             }
         }
         item {
-            SettingsCard {
+            SettingsCard("触控与小窗") {
                 ToggleRow("单击暂停", null, tapPause) {
                     setBoolean("video_tap_pause", it) {
                         tapPause = it
@@ -525,17 +537,6 @@ fun SettingsScreen(
                 ValueRow("快退：暂停：快进 触控占比", value("video_seek_pause_ratio", "1:1:1")) {
                     choose("快退：暂停：快进 触控占比", "video_seek_pause_ratio", listOf("1:1:1", "1:2:1", "1:0:1"), value("video_seek_pause_ratio", "1:1:1"))
                 }
-            }
-        }
-        }
-        if (settingsSection == "滚动条") {
-        item {
-            SettingsCard {
-                ValueRow("拖动宽度", value("scroll_width", "24px"), "调整右侧滚动条的触控区域") { choose("拖动宽度", "scroll_width", listOf("16px", "24px", "32px"), value("scroll_width", "24px")) }
-                SettingsRowDivider()
-                ValueRow("浮现时间", value("scroll_duration", "1秒"), "停止滚动后继续显示的时间") { choose("浮现时间", "scroll_duration", listOf("0.5秒", "1秒", "2秒", "3秒"), value("scroll_duration", "1秒")) }
-                SettingsRowDivider()
-                ToggleRow("始终显示", "页面可滚动时保持滚动条常驻", persistentScrollbar) { setBoolean("persistent_scrollbar", it) { persistentScrollbar = it } }
             }
         }
         }
@@ -833,11 +834,10 @@ private data class SettingsCategory(
 )
 
 private val settingsCategories = listOf(
-    SettingsCategory("主题", "主题模式、配色、语言与主页", Icons.Outlined.Palette),
+    SettingsCategory("界面", "主题、配色、语言、主页与底栏", Icons.Outlined.Palette),
     SettingsCategory("文件操作", "权限、回收站、重命名与备份", Icons.Outlined.FolderOpen),
-    SettingsCategory("显示", "缩略图、预览与内容过滤", Icons.Outlined.Visibility),
+    SettingsCategory("显示", "缩略图、预览、内容过滤与滚动条", Icons.Outlined.Visibility),
     SettingsCategory("视频", "播放、手势与自动小窗", Icons.Outlined.Movie),
-    SettingsCategory("滚动条", "宽度、浮现时间与常驻显示", Icons.Outlined.Height),
     SettingsCategory("幻灯片", "间隔、动画与随机播放", Icons.Outlined.Slideshow),
     SettingsCategory("缓存", "后台优化、上限与清理", Icons.Outlined.Storage),
     SettingsCategory("关于", "隐私、许可与版本更新", Icons.Outlined.Info)
@@ -941,13 +941,23 @@ private fun SettingsCategoryCard(category: SettingsCategory, onClick: () -> Unit
 
 /** Related settings live on one surface, the same card the toolbox uses. */
 @Composable
-private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(VaultDimens.AlbumRadius),
-        color = MaterialTheme.colorScheme.surfaceVariant
-    ) {
-        Column(content = content)
+private fun SettingsCard(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        if (title != null) {
+            Text(
+                settingsText(title, LocalSettingsEnglish.current),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 6.dp)
+            )
+        }
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(VaultDimens.AlbumRadius),
+            color = MaterialTheme.colorScheme.surfaceVariant
+        ) {
+            Column(content = content)
+        }
     }
 }
 
