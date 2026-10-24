@@ -1325,7 +1325,8 @@ private fun MediaInfoPanel(item: MediaItem, modifier: Modifier = Modifier, playe
         modifier = modifier.width(228.dp),
         shape = RoundedCornerShape(14.dp),
         shadowElevation = 10.dp,
-        color = if (playerStyle) Color.Black.copy(alpha = .20f) else Color.White
+        color = if (playerStyle) PlayerPopupSurface else Color.White,
+        border = if (playerStyle) androidx.compose.foundation.BorderStroke(1.dp, PlayerPopupBorder) else null
     ) {
         Text(
             text = buildString {

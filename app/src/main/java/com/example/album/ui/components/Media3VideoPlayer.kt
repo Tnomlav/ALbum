@@ -21,6 +21,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
@@ -270,6 +272,12 @@ private val HtmlLandscapeIcon: ImageVector by lazy {
         }
     }.build()
 }
+
+/**
+ * One width for the player's popups: the menu and the speed wheel use the same
+ * card width so switching between them does not make the panel jump size.
+ */
+private val PlayerPopupWidth = 288.dp
 
 private val HtmlPortraitIcon: ImageVector by lazy {
     ImageVector.Builder("html-portrait", 24.dp, 24.dp, 24f, 24f).apply {
@@ -1016,11 +1024,18 @@ internal fun Media3VideoPlayer(
     fun pauseForPopup() {
         popupWasPlaying = player.playWhenReady
         if (popupWasPlaying) player.pause()
+        // A popup owns the screen while it is open. Leaving the player's top
+        // and bottom bars underneath made them show through the scrim and
+        // overlap the card.
+        controlsVisible = false
     }
 
     fun resumeAfterPopup() {
         if (popupWasPlaying) player.play()
         popupWasPlaying = false
+        // The bars were hidden for the popup; bring them back with it closing.
+        controlsVisible = true
+        controlsInteraction++
     }
 
     LaunchedEffect(settingsVersion) {
@@ -1598,13 +1613,27 @@ internal fun Media3VideoPlayer(
                     // menu used to centre against the wrong rectangle. Insets
                     // fix the centring; the width cap keeps it menu-sized
                     // instead of stretching across a landscape screen.
-                    Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 24.dp),
+                    Modifier.fillMaxSize()
+                        // The window is full-screen, so "outside the menu" is
+                        // still inside this Box: without handling the tap here the
+                        // system's dismiss-on-outside-tap never fires.
+                        .background(PlayerPopupScrim)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            playerMenuOpen = false
+                            resumeAfterPopup()
+                        }
+                        .safeDrawingPadding()
+                        .padding(horizontal = 24.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Surface(
-                        modifier = Modifier.widthIn(max = 360.dp).fillMaxWidth().padding(horizontal = 12.dp),
-                        color = Color.Black.copy(alpha = .20f),
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                        modifier = Modifier.widthIn(max = PlayerPopupWidth).fillMaxWidth(),
+                        color = PlayerPopupSurface,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, PlayerPopupBorder)
                     ) {
                         Column(Modifier.padding(vertical = 8.dp)) {
                             DropdownMenuItem(
@@ -1672,6 +1701,7 @@ internal fun Media3VideoPlayer(
                 options = speedOptions,
                 selected = if (speed == 1f) "1x" else "${speed}x",
                 playerStyle = true,
+                maxWidth = PlayerPopupWidth,
                 onDismiss = { showSpeed = false; resumeAfterPopup() },
                 onApply = { selected ->
                     speed = selected.removeSuffix("x").toFloatOrNull() ?: 1f

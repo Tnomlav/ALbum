@@ -441,6 +441,22 @@ private fun VaultConfirmationFrame(
     }
 }
 
+/**
+ * Dimming behind a player popup. It has to be clearly darker than the card,
+ * otherwise a glassy card and the scrim read as one flat layer.
+ */
+internal val PlayerPopupScrim = Color.Black.copy(alpha = .55f)
+
+/**
+ * The card of a player popup: dark glass, not a solid sheet. 20% alpha vanished
+ * into the scrim, while a fully opaque card hid the video completely; 86% keeps
+ * the card clearly in front without losing the sense that it floats over the
+ * picture.
+ */
+internal val PlayerPopupSurface = Color(0xFF1E1E1E).copy(alpha = .86f)
+
+internal val PlayerPopupBorder = Color.White.copy(alpha = .12f)
+
 @Composable
 fun VaultWheelChoiceSheet(
     title: String,
@@ -448,7 +464,9 @@ fun VaultWheelChoiceSheet(
     selected: String,
     onDismiss: () -> Unit,
     onApply: (String) -> Unit,
-    playerStyle: Boolean = false
+    playerStyle: Boolean = false,
+    /** Width cap; the player passes the same width its menu card uses. */
+    maxWidth: androidx.compose.ui.unit.Dp = 360.dp
 ) {
     var draft by remember(selected, options) { mutableStateOf(if (selected in options) selected else options.firstOrNull().orEmpty()) }
     var shown by remember { mutableStateOf(false) }
@@ -476,7 +494,7 @@ fun VaultWheelChoiceSheet(
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
         Box(
-            Modifier.fillMaxSize().background(Color.Black.copy(alpha = (if (playerStyle) .34f else .30f) * progress))
+            Modifier.fillMaxSize().background(Color.Black.copy(alpha = (if (playerStyle) .55f else .30f) * progress))
                 .pointerInput(panelBounds, closing) {
                     detectTapGestures { position ->
                         if (!closing && panelBounds?.contains(position) != true) dismissAnimated()
@@ -486,16 +504,17 @@ fun VaultWheelChoiceSheet(
             contentAlignment = if (playerStyle) Alignment.Center else Alignment.BottomCenter
         ) {
             Surface(
-                modifier = Modifier.fillMaxWidth().widthIn(max = 360.dp)
+                modifier = Modifier.fillMaxWidth().widthIn(max = maxWidth)
                     .onGloballyPositioned { panelBounds = it.boundsInParent() }
                     .graphicsLayer {
                         alpha = progress
                         translationY = if (playerStyle) 0f else (1f - progress) * slideDistance
                         if (playerStyle) { scaleX = .94f + .06f * progress; scaleY = .94f + .06f * progress }
                     },
-                color = if (playerStyle) Color(0xFF141414).copy(alpha = .20f) else MaterialTheme.colorScheme.surface,
+                color = if (playerStyle) PlayerPopupSurface else MaterialTheme.colorScheme.surface,
                 contentColor = foreground,
                 shape = RoundedCornerShape(24.dp),
+                border = if (playerStyle) androidx.compose.foundation.BorderStroke(1.dp, PlayerPopupBorder) else null,
                 shadowElevation = 20.dp
             ) {
                 Column(
