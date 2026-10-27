@@ -1,69 +1,98 @@
+<div align="center">
+
 # Album
 
-一个面向 Android 的本地图片、视频与壁纸管理器，使用 Kotlin 和 Jetpack Compose 构建。
+**本地优先的 Android 图片、视频与壁纸管理器**
 
-Album 主要服务于希望直接管理本机媒体文件的用户：不上传媒体、不依赖云端相册，并提供比系统相册更完整的整理、编辑和播放入口。
+整理、编辑、播放和展示你的媒体，不把图库交给云端。
 
-## 功能
+[![Latest release](https://img.shields.io/github/v/release/Tnomlav/ALbum?display_name=tag&style=flat-square)](https://github.com/Tnomlav/ALbum/releases)
+[![Android build](https://img.shields.io/github/actions/workflow/status/Tnomlav/ALbum/android.yml?branch=main&label=build&style=flat-square)](https://github.com/Tnomlav/ALbum/actions/workflows/android.yml)
+![Android 7.0+](https://img.shields.io/badge/Android-7.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white)
+![Kotlin + Compose](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?style=flat-square&logo=kotlin&logoColor=white)
+![MIT License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
 
-- 图片和视频按文件夹、相册、时间轴浏览
-- 收藏、搜索、排序、批量选择与批量操作
-- 使用 MediaStore 和 Storage Access Framework 移动、复制和删除媒体
-- 回收站、重复图片检测和文件夹排除
-- 图片裁剪、旋转、调整和保存副本
-- 视频播放、播放进度记忆、后台播放和画中画
-- 静态/动态壁纸队列、裁剪、轮播和低功耗模式
-- Pixiv 登录后按作品、画师和 Tag 归档下载的图片
-- 接收系统分享（其他应用"分享到 Album"后选择文件夹导入）
-- 导出/导入应用数据（收藏、队列、排除文件夹与偏好设置）
-- 收藏跟随文件改名与移动（不再因为 URI 变化而丢失）
-- 中文和英文界面
+[下载](#下载) · [功能](#功能) · [构建](#从源码构建) · [隐私](#隐私与权限) · [English overview](#english-overview)
+
+</div>
+
+Album 是一个开源、本地优先的 Android 媒体管理器，使用 Kotlin 与 Jetpack Compose 构建。它把文件夹浏览、时间轴、批量整理、图片编辑、视频播放、回收站和壁纸队列放进同一套工具里；扫描、排序、编辑、播放与缩略图缓存默认都在设备上完成。
 
 ## 截图
 
-| 相册 | 编辑器 | 视频 |
-| --- | --- | --- |
-| ![相册首页](final-home.png) | ![图片编辑器](album-editor.png) | ![视频列表](video-list.png) |
+<table>
+  <tr>
+    <td align="center"><a href="docs/screenshots/library.png"><img src="docs/screenshots/library.png" width="210" alt="按文件夹浏览图片"></a><br><sub>相册与文件夹</sub></td>
+    <td align="center"><a href="docs/screenshots/timeline.png"><img src="docs/screenshots/timeline.png" width="210" alt="按时间查看图片"></a><br><sub>时间轴</sub></td>
+    <td align="center"><a href="docs/screenshots/video-player.png"><img src="docs/screenshots/video-player.png" width="210" alt="视频播放与播放控制"></a><br><sub>视频播放</sub></td>
+    <td align="center"><a href="docs/screenshots/editor.png"><img src="docs/screenshots/editor.png" width="210" alt="图片编辑与调节"></a><br><sub>图片编辑</sub></td>
+  </tr>
+</table>
+
+## 为什么是 Album
+
+- **媒体留在本机。** 不要求注册账号，不提供云端相册，也不接入分析或广告 SDK。
+- **从浏览到整理是一套完整流程。** 可以按文件夹、相册或时间轴查看，批量复制、移动、重命名和删除，并用回收站降低误删风险。
+- **为实际使用补齐细节。** 收藏会跟随文件改名和移动；导入导出覆盖收藏、队列、排除文件夹与偏好设置。
+
+## 功能
+
+**浏览与整理**
+
+- 图片和视频按文件夹、相册、时间轴浏览，支持搜索、排序、收藏和多选
+- 使用 MediaStore 与 Storage Access Framework 复制、移动、重命名和删除媒体
+- 回收站保留期、重复图片检测、文件夹排除
+- 接收其他应用的“分享到 Album”，导入时选择目标文件夹
+
+**编辑与播放**
+
+- 图片裁剪、旋转、翻转、曝光与色彩调节、滤镜、涂鸦和文字
+- 保存编辑副本或替换原图，保存前明确确认
+- Media3 视频播放、播放进度记忆、后台播放、画中画与小窗
+- AVI 等格式可通过 LibVLC 兼容路径播放，支持手势跳转和播放控制
+
+**壁纸与展示**
+
+- 静态与动态壁纸队列、裁剪、轮播和低功耗模式
+- 幻灯片队列与显示设置
+- 深浅色主题、强调色、中文和英文界面
+
+**可选工具**
+
+- Pixiv 登录后按作品、画师与 Tag 归档本地图片
+- 开源许可可在应用内离线查看
 
 ## 下载
 
-- [GitHub Releases](https://github.com/Tnomlav/ALbum/releases)
-- 已发布版本与更新清单见 [GitHub Releases](https://github.com/Tnomlav/ALbum/releases)（资产名固定为 `album-update.json`，APK 按 ABI 分包）
-- 版本号只在 `version.properties` 中维护，不在本文件写具体数字
+前往 [GitHub Releases](https://github.com/Tnomlav/ALbum/releases) 获取已发布的 APK、更新清单与校验信息。安装包按 CPU 架构拆分：
 
-本地签名构建产物位于 `app/release/`，仅用于交付前验证，不纳入版本控制（历史上的提交把每个版本的 APK 都存进了仓库，仓库因此膨胀到 200 MB 以上）。当前本地验证构建为 `1.2.79`（arm64-v8a 分包，其余架构见构建输出目录 `app/build/outputs/apk/release/`），其 SHA-256 为：
+| 文件 | 适用设备 |
+| --- | --- |
+| `arm64-v8a` | 大多数近年的 Android 手机和平板 |
+| `armeabi-v7a` | 32 位 ARM 设备 |
+| `x86_64` | Android 模拟器 |
 
-```text
-BD64CAC6028BA4851098704B00D446A4FCED0ABC51DBBD6661E837FD0F270ADC
-```
+APK、更新清单和校验文件都通过 Releases 分发，不提交到 Git 仓库。
 
-安装前请确认文件来自本仓库，并通过 SHA-256 校验下载完整性。正式发布版本和发布说明会优先放在 GitHub Releases。
+## 从源码构建
 
-README 中的"下一个发布版本"与仓库内 APK 的版本可能不一致：APK 只在执行签名 release 构建时更新，构建成功后 `version.properties` 会自动把 patch 号加一。版本号只在 `version.properties` 维护，不要在本文件或 `app/release/output-metadata.json` 中手工修改。
-
-## 要求
-
-- Android 7.0（API 24）或更高版本
-- Android Studio，或 JDK 17 与项目自带 Gradle Wrapper
-- 图片/视频访问权限；移动、复制和 Pixiv 归档功能可能需要额外的文件夹访问授权
-
-应用只在执行对应功能时请求权限。媒体库默认读取设备上的图片和视频；Pixiv 归档功能会访问 Pixiv 网络服务并使用应用内登录状态。
-
-## 构建
+运行构建需要 JDK 17 和 Android SDK；也可以直接用 Android Studio 打开仓库。
 
 ```bash
 git clone https://github.com/Tnomlav/ALbum.git
 cd ALbum
-./gradlew lintDebug testDebugUnitTest assembleDebug
+./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
 Windows PowerShell：
 
 ```powershell
-.\gradlew.bat lintDebug testDebugUnitTest assembleDebug
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug
 ```
 
-生成的 Debug APK 位于 `app/build/outputs/apk/debug/`。Release 签名配置通过 Gradle 属性提供，不应把 keystore 或密码提交到仓库：
+Debug APK 位于 `app/build/outputs/apk/debug/`。项目默认按 ABI 拆分；需要单个全架构包时加上 `-PalbumUniversalApk=true`。
+
+Release 签名通过本机 Gradle 属性提供，不要提交 keystore 或密码：
 
 ```text
 ALBUM_STORE_FILE
@@ -72,44 +101,36 @@ ALBUM_KEY_ALIAS
 ALBUM_KEY_PASSWORD
 ```
 
-构建默认按 ABI 拆分，因为 AVI 播放使用的 LibVLC 每个架构约 60 MB 原生库。每个设备只需要安装自己架构的包：
+版本号以 [`version.properties`](version.properties) 为唯一来源。完整发布步骤见 [RELEASING.md](RELEASING.md)。
 
-```text
-app/build/outputs/apk/debug/app-arm64-v8a-debug.apk      # 现代手机
-app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk    # 32 位 ARM 设备
-app/build/outputs/apk/debug/app-x86_64-debug.apk         # 模拟器
-```
+## 隐私与权限
 
-用 Android Studio 直接运行时会自动选择匹配的架构。手动 `adb install` 时请选择与设备 CPU 对应的 APK。需要单个全架构包时加上 `-PalbumUniversalApk=true`（体积约为单架构包的 3–4 倍）。压缩原生库会增加 Gradle 打包内存占用，`gradle.properties` 已把堆上限调到 4 GB。
+Album 的本地媒体扫描、排序、编辑、播放、收藏和缩略图缓存默认都在设备上完成。App 不提供云端媒体同步，也不接入统计或广告服务。
 
-## 发布
+Pixiv 归档是可选功能：只有主动使用时会连接 Pixiv 读取公开作品信息。请遵守 Pixiv 的服务条款、版权要求和所在地法律。
 
-版本号只保存在 `version.properties`。完整步骤（构建、生成更新清单、打标签、创建 Release、发布后自检）见 [RELEASING.md](RELEASING.md)。应用的更新检查地址由 `ALBUM_UPDATE_URL` 配置，默认指向 `releases/latest/download/album-update.json`，也就是最近一次发布附带的清单资产，而不是任何分支上的文件。
+应用只在对应功能需要时请求媒体或文件夹权限。移动、复制和归档能力受 Android 版本、目标目录和应用权限策略影响。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
 
-## 产品成熟度
+## 项目状态
 
-当前版本距离"成熟可用产品"还差什么、优先级清单与验收标准，见 [产品成熟度全盘复盘](docs/product-readiness-review.md)。
-
-## 第三方组件
-
-随包分发的第三方组件与其许可（LibVLC 的 LGPL-2.1、内置字体的 OFL-1.1 等）见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，也可在应用内**设置 → 关于 → 开源许可**离线查看。
-
-## 开发素材
-
-`dev-assets/` 中的图片和视频仅用于本地 UI、媒体扫描和播放测试。导入模拟器的命令见：
-
-```powershell
-.\scripts\import-sample-videos.ps1
-```
-
-## 隐私与第三方服务
-
-Album 不提供云端媒体同步。Pixiv 归档是可选功能，会连接 Pixiv 以读取公开作品信息；请遵守 Pixiv 的服务条款、版权要求和所在地法律。项目不应提交真实账号 Cookie、个人媒体或私有密钥。
+- 当前功能范围、已知短板和验收标准见 [产品成熟度复盘](docs/product-readiness-review.md)
+- 每个版本的改动记录见 [CHANGELOG.md](CHANGELOG.md)
+- 第三方组件与许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
 ## 贡献
 
-欢迎提交 Issue 和 Pull Request。提交前请先运行 `./gradlew lintDebug testDebugUnitTest assembleDebug`，并在行为或界面变化时附上复现步骤、设备版本和截图。
+欢迎提交 Issue 和 Pull Request。提交前请至少运行：
+
+```bash
+./gradlew testDebugUnitTest lintDebug
+```
+
+界面和行为改动请附复现步骤、设备版本与截图。界面文案统一放在 `ui/AppLanguage.kt` 的字典中，新增中文文案时请同时补英文；关键逻辑请配单元测试。
+
+## English overview
+
+Album is a local-first, open-source Android photo and video manager built with Kotlin and Jetpack Compose. It combines folder browsing, a timeline, batch organization, photo editing, video playback, a recycle bin, wallpaper queues, and optional Pixiv archiving in one app. Media processing stays on the device; Album has no cloud gallery, analytics, or advertising SDK. See [Releases](https://github.com/Tnomlav/ALbum/releases) for builds and [RELEASING.md](RELEASING.md) for the release workflow.
 
 ## License
 
-本项目使用 [MIT License](LICENSE)。
+Album is released under the [MIT License](LICENSE).
