@@ -1,4 +1,4 @@
-package com.example.album.ui.screens
+package com.example.album.ui.components
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals

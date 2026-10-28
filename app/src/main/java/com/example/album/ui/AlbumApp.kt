@@ -200,6 +200,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlin.coroutines.resume
 import kotlin.coroutines.coroutineContext
 import kotlin.math.roundToInt
+import java.util.Locale
 
 /**
  * How long the P page's refresh indicator stays up at minimum. The folder index
@@ -371,10 +372,10 @@ private fun ToolsScreen(
                     mark = when (id) {
                         "pixiv" -> { markModifier -> PixivMarkBadge(40.dp, markModifier) }
                         "saucenao" -> { markModifier ->
-                            SearchServiceBadge("S", Color(0xFFA35752), markModifier)
+                            SearchServiceBadge("S", markModifier)
                         }
                         "ascii2d" -> { markModifier ->
-                            SearchServiceBadge("a", Color(0xFF40756B), markModifier)
+                            SearchServiceBadge("A", markModifier)
                         }
                         else -> null
                     },
@@ -401,17 +402,16 @@ private fun ToolsScreen(
 @Composable
 private fun SearchServiceBadge(
     letter: String,
-    color: Color,
     modifier: Modifier = Modifier
 ) {
     Surface(
         modifier = modifier.size(40.dp),
-        shape = RoundedCornerShape(8.dp),
-        color = color
+        shape = RoundedCornerShape(7.dp),
+        color = MaterialTheme.colorScheme.primary
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                letter,
+                letter.uppercase(Locale.ROOT),
                 color = Color.White,
                 fontSize = 19.sp,
                 fontWeight = FontWeight.Bold

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -44,8 +45,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
@@ -55,6 +58,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -88,6 +92,11 @@ fun AlbumTile(
     onClick: () -> Unit
 ) {
     val english = LocalAppEnglish.current
+    val darkTheme = MaterialTheme.colorScheme.surfaceVariant.luminance() < .45f
+    val tone = remember(album.name, darkTheme) { emptyFolderTone(album.name, darkTheme) }
+    var coverLoaded by remember(album.cover.uri, album.cover.size, album.cover.dateModified) {
+        mutableStateOf(false)
+    }
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) .975f else 1f, tween(90), label = "album-press")
@@ -100,15 +109,28 @@ fun AlbumTile(
                 onLongClick = onLongClick
             )
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(1f)
+                .background(tone.background, RoundedCornerShape(VaultDimens.AlbumRadius))
+        ) {
             MediaThumbnail(
                 item = album.cover,
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(VaultDimens.AlbumRadius)).let {
                     if (sharedElementEnabled) it.mediaSharedElement(album.cover) else it
                 },
-                showVideoMark = album.cover.isVideo,
-                showVideoDuration = false
+                showVideoMark = album.cover.isVideo && coverLoaded,
+                showVideoDuration = false,
+                backgroundColor = tone.background,
+                onLoaded = { coverLoaded = true }
             )
+            if (!coverLoaded) {
+                Icon(
+                    Icons.Outlined.Folder,
+                    contentDescription = null,
+                    tint = tone.icon,
+                    modifier = Modifier.fillMaxSize(.34f).align(Alignment.Center)
+                )
+            }
             if (showPixivMark) {
                 PixivMarkBadge(24.dp, Modifier.align(Alignment.TopStart).padding(6.dp))
             }
