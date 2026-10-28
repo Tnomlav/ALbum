@@ -1258,9 +1258,23 @@ fun AlbumApp(
         // read once the user actually searches by tag.
         if (pixivSearchMode == PixivSearchMode.Tag && appliedQuery.isNotBlank()) {
             pixivTagsLoading = true
+            pixivTagsByUri = emptyMap()
+            val batchChannel = Channel<Map<String, List<String>>>(Channel.UNLIMITED)
+            val collector = scope.launch {
+                for (batch in batchChannel) {
+                    pixivTagsByUri = pixivTagsByUri + batch
+                }
+            }
             try {
-                pixivTagsByUri = pixivRepository.loadTags(pixivImages)
+                val loaded = pixivRepository.loadTags(pixivImages) { batch ->
+                    batchChannel.send(batch)
+                }
+                batchChannel.close()
+                collector.join()
+                pixivTagsByUri = loaded
             } finally {
+                batchChannel.close()
+                collector.cancel()
                 pixivTagsLoading = false
             }
         } else {

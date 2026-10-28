@@ -235,7 +235,7 @@ fun AlbumsScreen(
         media.isEmpty() && !initialLoadComplete -> Box(Modifier.fillMaxSize())
         media.isEmpty() && refreshing -> Box(Modifier.fillMaxSize())
         !permissionGranted && media.isEmpty() -> PermissionEmpty(onRequestPermission)
-        tagLoading -> TagIndexLoading()
+        tagLoading && media.isEmpty() -> TagIndexLoading()
         media.isEmpty() && openedFolder.equals("Pixiv", ignoreCase = true) && onOpenPixivArchive != null ->
             FolderGrid(
                 MediaAlbum("Pixiv", emptyList(), null),

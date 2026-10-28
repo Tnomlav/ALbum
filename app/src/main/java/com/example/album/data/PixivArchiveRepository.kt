@@ -206,42 +206,81 @@ class PixivArchiveRepository(private val context: Context) {
         }
     }
 
-    suspend fun loadTags(items: List<MediaItem>): Map<String, List<String>> = withContext(Dispatchers.IO) {
+    suspend fun loadTags(
+        items: List<MediaItem>,
+        onBatch: suspend (Map<String, List<String>>) -> Unit = {}
+    ): Map<String, List<String>> = withContext(Dispatchers.IO) {
         val gate = Semaphore(6)
+        val collected = linkedMapOf<String, List<String>>()
+        val needsEmbedded = mutableListOf<MediaItem>()
         coroutineScope {
-            items.map { item ->
-                async {
-                    val key = item.uri.toString()
-                    val tags = tagCacheLock.withLock { tagCache[key] }
-                        ?: gate.withPermit {
-                            expandedStoredTags(item).also { loaded ->
-                                tagCacheLock.withLock { tagCache[key] = loaded }
+            items.chunked(16).forEach { chunk ->
+                val loaded = chunk.map { item ->
+                    async {
+                        val key = item.uri.toString()
+                        val cached = tagCacheLock.withLock { tagCache[key] }
+                        if (cached != null) {
+                            return@async key to cached
+                        }
+                        val quick = gate.withPermit { quickStoredTags(item) }
+                        if (quick.isEmpty()) {
+                            synchronized(needsEmbedded) { needsEmbedded += item }
+                        } else {
+                            tagCacheLock.withLock { tagCache[key] = quick }
+                        }
+                        key to quick
+                    }
+                }.awaitAll()
+                    .mapNotNull { (key, tags) ->
+                        tags.takeIf { it.isNotEmpty() }?.let { key to it }
+                    }
+                if (loaded.isNotEmpty()) {
+                    val batch = loaded.toMap()
+                    collected.putAll(batch)
+                    onBatch(batch)
+                }
+            }
+
+            needsEmbedded.chunked(8).forEach { chunk ->
+                val loaded = chunk.map { item ->
+                    async {
+                        val key = item.uri.toString()
+                        val tags = gate.withPermit {
+                            val embedded = readEmbeddedTags(item.uri, item.mimeType)
+                            val translations = persistedMetadata(item)
+                                ?.tagTranslations
+                                .orEmpty()
+                                .values
+                                .flatMap { it.values }
+                            (embedded + translations).distinct().also { indexed ->
+                                tagCacheLock.withLock { tagCache[key] = indexed }
                             }
                         }
-                    key to tags
+                        key to tags
+                    }
+                }.awaitAll()
+                    .mapNotNull { (key, tags) ->
+                        tags.takeIf { it.isNotEmpty() }?.let { key to it }
+                    }
+                if (loaded.isNotEmpty()) {
+                    val batch = loaded.toMap()
+                    collected.putAll(batch)
+                    onBatch(batch)
                 }
-            }.awaitAll().mapNotNull { (key, tags) ->
-                tags.takeIf { it.isNotEmpty() }?.let { key to it }
-            }.toMap()
+            }
         }
+        collected
     }
 
     fun matchesTagQuery(tags: List<String>, query: String): Boolean =
         tags.any { it.contains(query.trim(), ignoreCase = true) }
 
-    private suspend fun expandedStoredTags(item: MediaItem): List<String> {
+    private fun quickStoredTags(item: MediaItem): List<String> {
         val sidecar = sidecarForItem(item)
         val sidecarTags = readSidecarTagsIfPresent(sidecar)
         val sidecarTranslations = sidecar?.let(::readSidecarTagTranslations).orEmpty()
         val persisted = persistedMetadata(item)
-        // Sidecars are tiny and already describe the archived artwork. Read the
-        // large image itself only when neither sidecar nor persisted metadata
-        // can supply tags. This keeps the first Tag query off the N² path that
-        // recursively searched the archive once per image.
-        val original = sidecarTags.ifEmpty {
-            persisted?.tags?.takeIf { it.isNotEmpty() }
-                ?: readEmbeddedTags(item.uri, item.mimeType)
-        }
+        val original = sidecarTags.ifEmpty { persisted?.tags.orEmpty() }
         val translations = sidecarTranslations + persisted?.tagTranslations.orEmpty()
         return (
             original +
