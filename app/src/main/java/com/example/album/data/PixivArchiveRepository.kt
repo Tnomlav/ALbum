@@ -120,6 +120,8 @@ class PixivArchiveRepository(private val context: Context) {
     private val metadataCacheLock = Mutex()
     private val tagCache = mutableMapOf<String, List<String>>()
     private val tagCacheLock = Mutex()
+    private val tagFingerprintCache = mutableMapOf<String, PixivTagFingerprint>()
+    private val tagIndexStore = PixivTagIndexStore(context)
     // Populated while the archive tree is already being traversed. Tag search
     // can then open the matching sidecar directly instead of walking the whole
     // archive tree once per image.
@@ -213,36 +215,60 @@ class PixivArchiveRepository(private val context: Context) {
         val gate = Semaphore(6)
         val collected = linkedMapOf<String, List<String>>()
         val needsEmbedded = mutableListOf<MediaItem>()
+        val persisted = tagIndexStore.loadValid(items)
+        val fingerprints = items.associate { item ->
+            item.uri.toString() to mediaItemTagFingerprint(item)
+        }
+        tagCacheLock.withLock {
+            items.forEach { item ->
+                val key = item.uri.toString()
+                if (tagFingerprintCache[key] != fingerprints[key]) {
+                    tagCache.remove(key)
+                    tagFingerprintCache.remove(key)
+                }
+            }
+            persisted.forEach { (key, tags) ->
+                tagCache[key] = tags
+                fingerprints[key]?.let { tagFingerprintCache[key] = it }
+            }
+        }
+        persisted.entries
+            .filter { it.value.isNotEmpty() }
+            .chunked(32)
+            .forEach { chunk ->
+                val batch = chunk.associate { it.key to it.value }
+                collected.putAll(batch)
+                onBatch(batch)
+            }
+        val pending = items.filter { item ->
+            tagFingerprintCache[item.uri.toString()] == null
+        }
         coroutineScope {
-            items.chunked(16).forEach { chunk ->
-                val loaded = chunk.map { item ->
+            pending.chunked(16).forEach { chunk ->
+                val indexed = chunk.map { item ->
                     async {
                         val key = item.uri.toString()
-                        val cached = tagCacheLock.withLock { tagCache[key] }
-                        if (cached != null) {
-                            return@async key to cached
-                        }
                         val quick = gate.withPermit { quickStoredTags(item) }
                         if (quick.isEmpty()) {
                             synchronized(needsEmbedded) { needsEmbedded += item }
                         } else {
-                            tagCacheLock.withLock { tagCache[key] = quick }
+                            persistTagIndex(item, quick, fingerprints)
                         }
-                        key to quick
+                        Triple(item, key, quick)
                     }
                 }.awaitAll()
-                    .mapNotNull { (key, tags) ->
+                    .mapNotNull { (_, key, tags) ->
                         tags.takeIf { it.isNotEmpty() }?.let { key to it }
                     }
-                if (loaded.isNotEmpty()) {
-                    val batch = loaded.toMap()
+                if (indexed.isNotEmpty()) {
+                    val batch = indexed.toMap()
                     collected.putAll(batch)
                     onBatch(batch)
                 }
             }
 
             needsEmbedded.chunked(8).forEach { chunk ->
-                val loaded = chunk.map { item ->
+                val indexed = chunk.map { item ->
                     async {
                         val key = item.uri.toString()
                         val tags = gate.withPermit {
@@ -252,24 +278,36 @@ class PixivArchiveRepository(private val context: Context) {
                                 .orEmpty()
                                 .values
                                 .flatMap { it.values }
-                            (embedded + translations).distinct().also { indexed ->
-                                tagCacheLock.withLock { tagCache[key] = indexed }
-                            }
+                            (embedded + translations).distinct()
                         }
-                        key to tags
+                        persistTagIndex(item, tags, fingerprints)
+                        Triple(item, key, tags)
                     }
                 }.awaitAll()
-                    .mapNotNull { (key, tags) ->
+                    .mapNotNull { (_, key, tags) ->
                         tags.takeIf { it.isNotEmpty() }?.let { key to it }
                     }
-                if (loaded.isNotEmpty()) {
-                    val batch = loaded.toMap()
+                if (indexed.isNotEmpty()) {
+                    val batch = indexed.toMap()
                     collected.putAll(batch)
                     onBatch(batch)
                 }
             }
         }
         collected
+    }
+
+    private suspend fun persistTagIndex(
+        item: MediaItem,
+        tags: List<String>,
+        fingerprints: Map<String, PixivTagFingerprint>
+    ) {
+        tagIndexStore.upsert(item, tags)
+        val key = item.uri.toString()
+        tagCacheLock.withLock {
+            tagCache[key] = tags
+            fingerprints[key]?.let { tagFingerprintCache[key] = it }
+        }
     }
 
     fun matchesTagQuery(tags: List<String>, query: String): Boolean =
@@ -388,7 +426,12 @@ class PixivArchiveRepository(private val context: Context) {
                     } ?: error("无法写入 Tag 信息")
                 }
             }
-            tagCacheLock.withLock { tagCache[item.uri.toString()] = tags.distinct() }
+            val normalizedTags = tags.distinct()
+            tagIndexStore.upsert(item, normalizedTags)
+            tagCacheLock.withLock {
+                tagCache[item.uri.toString()] = normalizedTags
+                tagFingerprintCache[item.uri.toString()] = mediaItemTagFingerprint(item)
+            }
             true
         }.getOrDefault(false)
     }
