@@ -106,6 +106,12 @@
             android:theme="@style/Theme.Album"
             android:windowSoftInputMode="adjustResize" />
         <activity
+            android:name=".ImageSearchActivity"
+            android:exported="false"
+            android:process=":image_search"
+            android:theme="@style/Theme.Album"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".MainActivity"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|fontScale"
             android:exported="true"

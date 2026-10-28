@@ -1,10 +1,28 @@
 package com.example.album.ui
 
 import androidx.compose.runtime.compositionLocalOf
+import com.example.album.ImageSearchSource
 
 val LocalAppEnglish = compositionLocalOf { false }
 
 fun appText(chinese: String, english: Boolean): String = if (english) APP_ENGLISH[chinese] ?: chinese else chinese
+
+fun imageSearchToolTitle(source: ImageSearchSource, english: Boolean): String = when (source) {
+    ImageSearchSource.SauceNao -> appText("SauceNAO 搜图", english)
+    ImageSearchSource.Ascii2d -> appText("ascii2d 搜图", english)
+}
+
+fun imageSearchToolSubtitle(source: ImageSearchSource, english: Boolean): String = when (source) {
+    ImageSearchSource.SauceNao ->
+        appText("查找插画、漫画与作品来源", english)
+    ImageSearchSource.Ascii2d ->
+        appText("按颜色与特征查找二次元图片来源", english)
+}
+
+fun imageSearchActionText(source: ImageSearchSource, english: Boolean): String = when (source) {
+    ImageSearchSource.SauceNao -> appText("在 SauceNAO 搜原图", english)
+    ImageSearchSource.Ascii2d -> appText("在 ascii2d 搜原图", english)
+}
 
 fun appSeekText(actionChinese: String, milliseconds: Long, english: Boolean): String {
     val seconds = milliseconds.coerceAtLeast(0L) / 1000L
@@ -41,6 +59,27 @@ private val APP_ENGLISH = mapOf(
     "管理幻灯片队列并开始播放" to "Manage the slideshow queue and start playing",
     "重复图片、回收站与排除文件夹" to "Duplicates, recycle bin and excluded folders",
     "扫描并整理 Pixiv 图片到画师目录" to "Scan and sort Pixiv images into artist folders",
+    "SauceNAO 搜图" to "Search with SauceNAO",
+    "ascii2d 搜图" to "Search with ascii2d",
+    "查找插画、漫画与作品来源" to "Find artwork, manga and illustration sources",
+    "按颜色与特征查找二次元图片来源" to "Find anime image sources by colour and visual features",
+    "在 SauceNAO 搜原图" to "Find original on SauceNAO",
+    "在 ascii2d 搜原图" to "Find original on ascii2d",
+    "请选择一张图片开始搜索" to "Choose an image to start searching",
+    "正在准备所选图片…" to "Preparing the selected image…",
+    "图片将上传至所选网站，仅在本次搜索中使用" to
+        "The image will be uploaded to the selected site for this search only",
+    "无法准备所选图片，请在网页中手动选择" to
+        "Unable to prepare the selected image; choose it manually on the page",
+    "正在将所选图片填入网页…" to "Filling the page with the selected image…",
+    "未找到上传控件，请手动选择图片" to "Upload control not found; choose an image manually",
+    "正在提交搜索…" to "Submitting search…",
+    "图片已填入，请在网页中点击搜索按钮" to
+        "Image filled in; tap the search button on the page",
+    "正在载入搜索结果…" to "Loading search results…",
+    "网页加载失败" to "Web page failed to load",
+    "无法打开搜图页面" to "Unable to open the image search page",
+    "重试" to "Retry",
     "加入幻灯片队列" to "Add to slideshow queue", "移出幻灯片队列" to "Remove from slideshow queue",
     "切换" to "Switch", "使用提示" to "Getting around",
     "没有匹配的内容" to "No matching items", "文件夹为空" to "This folder is empty",

@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -90,6 +91,7 @@ import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Minimize
 import androidx.compose.material.icons.outlined.PictureInPictureAlt
 import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.ScreenRotation
 import androidx.compose.material.icons.outlined.Shuffle
 import androidx.compose.material.icons.outlined.Speed
@@ -171,6 +173,7 @@ import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.ui.PlayerView
 import com.example.album.data.MediaItem
+import com.example.album.ImageSearchSource
 import com.example.album.data.displayAddress
 import com.example.album.data.ThumbnailRepository
 import com.example.album.data.openMediaInputStream
@@ -178,6 +181,7 @@ import com.example.album.ui.LocalAppEnglish
 import com.example.album.ui.appSeekDeltaText
 import com.example.album.ui.appSeekText
 import com.example.album.ui.appText
+import com.example.album.ui.imageSearchActionText
 import com.example.album.playback.MediaPlaybackService
 import com.example.album.playback.PlaybackResumeRequest
 import com.example.album.playback.positionForPersistence
@@ -235,6 +239,7 @@ fun MediaViewer(
     onFavorite: (MediaItem) -> Unit,
     onEditTags: ((MediaItem) -> Unit)? = null,
     onWallpaper: ((MediaItem) -> Unit)? = null,
+    onImageSearch: ((MediaItem, ImageSearchSource) -> Unit)? = null,
     pictureInPictureMode: Boolean = false,
     onEnterPictureInPicture: () -> Boolean = { false },
     onAutoEnterPictureInPictureChange: (Boolean, Int, Int) -> Unit = { _, _, _ -> },
@@ -770,7 +775,10 @@ fun MediaViewer(
                             onCopy = { onCopy(current) },
                             onSettings = current.takeIf { it.isVideo }?.let { { showVideoSettings = true } },
                             onEditTags = onEditTags?.let { action -> { action(current) } },
-                            onWallpaper = onWallpaper?.let { action -> { action(current) } }
+                            onWallpaper = onWallpaper?.let { action -> { action(current) } },
+                            onImageSearch = onImageSearch?.let { search -> { source ->
+                                search(current, source)
+                            } }
                         )
                     }
                     AnimatedVisibility(
@@ -887,7 +895,8 @@ private fun ViewerTopBar(
     onCopy: () -> Unit,
     onSettings: (() -> Unit)?,
     onEditTags: (() -> Unit)?,
-    onWallpaper: (() -> Unit)?
+    onWallpaper: (() -> Unit)?,
+    onImageSearch: ((ImageSearchSource) -> Unit)?
 ) {
     val english = LocalAppEnglish.current
     val menuForeground = if (item.isVideo) Color.White else Color(0xFF1A1A1A)
@@ -933,6 +942,26 @@ private fun ViewerTopBar(
                 }
                 onWallpaper?.let { action ->
                     DropdownMenuItem(text = { Text(appText("设置为壁纸", english), color = menuForeground, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Wallpaper, null, tint = menuForeground) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); action() })
+                }
+                if (!item.isVideo) {
+                    onImageSearch?.let { action ->
+                        listOf(ImageSearchSource.SauceNao, ImageSearchSource.Ascii2d).forEach { source ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        imageSearchActionText(source, english),
+                                        color = menuForeground,
+                                        fontSize = 14.sp
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.Search, null, tint = menuForeground)
+                                },
+                                modifier = Modifier.heightIn(min = 52.dp),
+                                onClick = { onMenuExpanded(false); action(source) }
+                            )
+                        }
+                    }
                 }
             }
         }

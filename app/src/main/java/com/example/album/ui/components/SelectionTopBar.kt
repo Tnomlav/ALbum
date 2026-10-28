@@ -61,7 +61,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.Layout
 import com.example.album.ui.theme.VaultDimens
+import com.example.album.ImageSearchSource
 import com.example.album.ui.LocalAppEnglish
+import com.example.album.ui.imageSearchActionText
 import com.example.album.ui.appText
 
 @Composable
@@ -83,6 +85,8 @@ fun SelectionTopBar(
     onEdit: (() -> Unit)? = null,
     onWallpaper: (() -> Unit)? = null,
     onAddToWallpaperQueue: (() -> Unit)? = null,
+    onSearchSauceNao: (() -> Unit)? = null,
+    onSearchAscii2d: (() -> Unit)? = null,
     onExclude: (() -> Unit)? = null,
     selectingFolders: Boolean = false,
     query: String = "",
@@ -192,6 +196,20 @@ fun SelectionTopBar(
                     onEdit?.let { action -> DropdownMenuItem(text = { Text(appText("编辑", english)) }, leadingIcon = { Icon(Icons.Outlined.Edit, null) }, onClick = { run(action) }) }
                     onWallpaper?.let { action -> DropdownMenuItem(text = { Text(appText("设置为壁纸", english)) }, leadingIcon = { Icon(Icons.Outlined.Wallpaper, null) }, onClick = { run(action) }) }
                     onAddToWallpaperQueue?.let { action -> DropdownMenuItem(text = { Text(appText("加入壁纸队列", english)) }, leadingIcon = { Icon(Icons.Outlined.Wallpaper, null) }, onClick = { run(action) }) }
+                    onSearchSauceNao?.let { action ->
+                        DropdownMenuItem(
+                            text = { Text(imageSearchActionText(ImageSearchSource.SauceNao, english)) },
+                            leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                            onClick = { run(action) }
+                        )
+                    }
+                    onSearchAscii2d?.let { action ->
+                        DropdownMenuItem(
+                            text = { Text(imageSearchActionText(ImageSearchSource.Ascii2d, english)) },
+                            leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                            onClick = { run(action) }
+                        )
+                    }
                     onExclude?.let { action -> DropdownMenuItem(text = { Text(appText("排除", english)) }, leadingIcon = { Icon(Icons.Outlined.FolderOff, null) }, onClick = { run(action) }) }
                 }
             }

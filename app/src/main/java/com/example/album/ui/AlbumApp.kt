@@ -74,6 +74,7 @@ import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.Slideshow
 import androidx.compose.material.icons.outlined.Wallpaper
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -129,6 +130,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.example.album.data.MediaItem
+import com.example.album.ImageSearchActivity
+import com.example.album.ImageSearchSource
 import com.example.album.data.transferFolderPath
 import com.example.album.data.displayAddress
 import com.example.album.data.PixivArchiveRepository
@@ -261,26 +264,60 @@ private fun normalizedTabOrder(stored: List<MainTab>, pixivEnabled: Boolean): Li
     return result
 }
 
+private val DEFAULT_TOOLBOX_ORDER = listOf(
+    "wallpaper",
+    "cleanup",
+    "slideshow",
+    "pixiv",
+    "saucenao",
+    "ascii2d"
+)
+private val TOOLBOX_IDS = DEFAULT_TOOLBOX_ORDER.toSet()
+
+/**
+ * Existing installations stored a toolbox order before the search modules
+ * existed. Keep the user's custom order, discard removed ids, and insert new
+ * modules beside the nearest default neighbours so upgrades never hide them.
+ */
+internal fun normalizeToolboxOrder(stored: List<String>): List<String> {
+    val result = stored.filter { it in TOOLBOX_IDS }
+        .distinct()
+        .toMutableList()
+    DEFAULT_TOOLBOX_ORDER.forEachIndexed { defaultIndex, id ->
+        if (id !in result) {
+            val nextExisting = DEFAULT_TOOLBOX_ORDER
+                .drop(defaultIndex + 1)
+                .firstOrNull { it in result }
+            val insertion = nextExisting?.let(result::indexOf)?.takeIf { it >= 0 }
+                ?: result.size
+            result.add(insertion, id)
+        }
+    }
+    return result
+}
+
 internal data class PixivTagSearchEntry(val item: MediaItem, val tags: List<String>)
 
 /** Toolbox tab: shortcuts to the standalone tools that used to be buried in menus. */
 @Composable
 private fun ToolsScreen(
     english: Boolean,
-    onOpenArchive: () -> Unit,
     onOpenWallpaper: () -> Unit,
     onOpenCleanup: () -> Unit,
     onStartSlideshow: () -> Unit,
     onOpenPixiv: () -> Unit,
+    onOpenSauceNao: () -> Unit,
+    onOpenAscii2d: () -> Unit,
     reorderEnabled: Boolean = false,
-    order: List<String> = listOf("wallpaper", "cleanup", "slideshow", "pixiv"),
+    order: List<String> = DEFAULT_TOOLBOX_ORDER,
     onOrderChange: (List<String>) -> Unit = {}
 ) {
+    val displayOrder = remember(order) { normalizeToolboxOrder(order) }
     // Entries are looked up per id: a stored order can still contain the removed
     // "archive" id, and indexing the filtered list would have shown the wrong
     // label for every entry after it.
-    val entryById = remember(order, english) {
-        order.mapNotNull { id ->
+    val entryById = remember(displayOrder, english) {
+        displayOrder.mapNotNull { id ->
             val entry = when (id) {
                 "wallpaper" -> Triple(Icons.Outlined.Wallpaper, appText("壁纸队列", english), appText("管理静态与动态壁纸队列并应用", english))
                 "cleanup" -> Triple(Icons.Outlined.CleaningServices, appText("文件清理", english), appText("重复图片、回收站与排除文件夹", english))
@@ -288,6 +325,16 @@ private fun ToolsScreen(
                 // The Pixiv page keeps the archive entry's icon and wording:
                 // the archive itself is opened from inside that page.
                 "pixiv" -> Triple(Icons.Outlined.Archive, appText("Pixiv 文件归档", english), appText("扫描并整理 Pixiv 图片到画师目录", english))
+                "saucenao" -> Triple(
+                    Icons.Outlined.Search,
+                    imageSearchToolTitle(ImageSearchSource.SauceNao, english),
+                    imageSearchToolSubtitle(ImageSearchSource.SauceNao, english)
+                )
+                "ascii2d" -> Triple(
+                    Icons.Outlined.Search,
+                    imageSearchToolTitle(ImageSearchSource.Ascii2d, english),
+                    imageSearchToolSubtitle(ImageSearchSource.Ascii2d, english)
+                )
                 else -> null
             }
             entry?.let { id to it }
@@ -297,7 +344,9 @@ private fun ToolsScreen(
         "wallpaper" to onOpenWallpaper,
         "cleanup" to onOpenCleanup,
         "slideshow" to onStartSlideshow,
-        "pixiv" to onOpenPixiv
+        "pixiv" to onOpenPixiv,
+        "saucenao" to onOpenSauceNao,
+        "ascii2d" to onOpenAscii2d
     )
     Column(
         Modifier.fillMaxSize()
@@ -307,7 +356,7 @@ private fun ToolsScreen(
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        order.forEachIndexed { index, id ->
+        displayOrder.forEachIndexed { index, id ->
             val entry = entryById[id] ?: return@forEachIndexed
             // The drag state has to follow the entry, not the slot: without a
             // key a swap moved the rows but left the offset behind, which is
@@ -319,27 +368,54 @@ private fun ToolsScreen(
                     subtitle = entry.third,
                     // The archive tool wears the Pixiv mark instead of a plain
                     // outline icon, the same tile the pinned folder shows.
-                    mark = if (id == "pixiv") {
-                        { markModifier -> PixivMarkBadge(40.dp, markModifier) }
-                    } else {
-                        null
+                    mark = when (id) {
+                        "pixiv" -> { markModifier -> PixivMarkBadge(40.dp, markModifier) }
+                        "saucenao" -> { markModifier ->
+                            SearchServiceBadge("S", Color(0xFFA35752), markModifier)
+                        }
+                        "ascii2d" -> { markModifier ->
+                            SearchServiceBadge("a", Color(0xFF40756B), markModifier)
+                        }
+                        else -> null
                     },
                     reorderEnabled = reorderEnabled,
                     onMoveUp = {
-                        if (index > 0 && index - 1 < order.size) {
-                            val updated = order.toMutableList().apply { add(index - 1, removeAt(index)) }
+                        if (index > 0 && index - 1 < displayOrder.size) {
+                            val updated = displayOrder.toMutableList().apply { add(index - 1, removeAt(index)) }
                             onOrderChange(updated)
                         }
                     },
                     onMoveDown = {
-                        if (index < order.lastIndex) {
-                            val updated = order.toMutableList().apply { add(index + 1, removeAt(index)) }
+                        if (index < displayOrder.lastIndex) {
+                            val updated = displayOrder.toMutableList().apply { add(index + 1, removeAt(index)) }
                             onOrderChange(updated)
                         }
                     },
                     onClick = actions[id] ?: {}
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun SearchServiceBadge(
+    letter: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.size(40.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = color
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                letter,
+                color = Color.White,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
@@ -835,11 +911,12 @@ fun AlbumApp(
     var searchReturnMediaFirstVisibleItem by remember { mutableIntStateOf(0) }
     var toolsOrder by remember {
         mutableStateOf(
-            albumSettings.getString("tools_order", null)
-                ?.split(',')
-                ?.filter { it.isNotBlank() }
-                ?.takeIf { it.isNotEmpty() }
-                ?: listOf("archive", "wallpaper", "cleanup", "slideshow", "pixiv")
+            normalizeToolboxOrder(
+                albumSettings.getString("tools_order", null)
+                    ?.split(',')
+                    ?.filter { it.isNotBlank() }
+                    .orEmpty()
+            )
         )
     }
     var pixivTabEnabled by remember { mutableStateOf(pixivEnabledAtStart) }
@@ -1303,6 +1380,8 @@ fun AlbumApp(
         if (selectingFolders) completeSelectionMedia.filter { it.folder in selectedFolders }
         else completeSelectionMedia.filter { it.uri.toString() in selectedUris }
     } }
+    val singleSelectedImage = selectedItemsForAction.singleOrNull()
+        ?.takeIf { !selectingFolders && !it.isVideo }
     val observerRefreshJob = remember { arrayOfNulls<Job>(1) }
     var suppressObserverRefreshUntil by remember { mutableLongStateOf(0L) }
     val latestSuppressObserverRefreshUntil by rememberUpdatedState(suppressObserverRefreshUntil)
@@ -1410,6 +1489,19 @@ fun AlbumApp(
         viewerScope = candidateScope.takeIf { scope -> scope.any { it.uri == item.uri } } ?: listOf(item)
         viewerMedia = item
         selectedMedia = item
+    }
+
+    fun openImageSearch(item: MediaItem, source: ImageSearchSource) {
+        if (item.isVideo) return
+        runCatching {
+            context.startActivity(ImageSearchActivity.intent(context, source, item.uri, item.name))
+        }.onFailure {
+            Toast.makeText(
+                context,
+                appText("无法打开搜图页面", english),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     LaunchedEffect(externalMediaUri) {
@@ -2858,6 +2950,12 @@ fun AlbumApp(
                         clearSelection()
                     }
                 } else null,
+                onSearchSauceNao = singleSelectedImage?.let { selected -> {
+                    openImageSearch(selected, ImageSearchSource.SauceNao)
+                }},
+                onSearchAscii2d = singleSelectedImage?.let { selected -> {
+                    openImageSearch(selected, ImageSearchSource.Ascii2d)
+                }},
                 onExclude = if (selectingFolders && selectedFolders.isNotEmpty()) {{
                     selectedFolders.forEach(library::excludeFolder)
                     Toast.makeText(context, if (english) "Excluded ${selectedFolders.size} folders" else "已排除 ${selectedFolders.size} 个文件夹", Toast.LENGTH_SHORT).show()
@@ -3723,7 +3821,6 @@ fun AlbumApp(
                 }
                 MainTab.Tools -> ToolsScreen(
                     english = english,
-                    onOpenArchive = { pixivArchiveOpen = true },
                     onOpenWallpaper = {
                         wallpaperShowVideos = false
                         wallpaperManagerOpen = true
@@ -3731,6 +3828,32 @@ fun AlbumApp(
                     onOpenCleanup = { cleanupOpen = true },
                     onStartSlideshow = {
                         slideshowQueueOpen = true
+                    },
+                    onOpenSauceNao = {
+                        runCatching {
+                            context.startActivity(
+                                ImageSearchActivity.intent(context, ImageSearchSource.SauceNao)
+                            )
+                        }.onFailure {
+                            Toast.makeText(
+                                context,
+                                appText("无法打开搜图页面", english),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
+                    onOpenAscii2d = {
+                        runCatching {
+                            context.startActivity(
+                                ImageSearchActivity.intent(context, ImageSearchSource.Ascii2d)
+                            )
+                        }.onFailure {
+                            Toast.makeText(
+                                context,
+                                appText("无法打开搜图页面", english),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     },
                     reorderEnabled = toolsReorderEnabled,
                     order = toolsOrder,
@@ -4015,6 +4138,7 @@ fun AlbumApp(
                             },
                             onEditTags = { editing -> openTagEditor(editing) },
                             onWallpaper = ::requestWallpaper,
+                            onImageSearch = { selected, source -> openImageSearch(selected, source) },
                             pictureInPictureMode = pictureInPictureMode,
                             onEnterPictureInPicture = onEnterPictureInPicture,
                             onAutoEnterPictureInPictureChange = onAutoEnterPictureInPictureChange
