@@ -277,9 +277,14 @@ class PixivArchiveRepository(private val context: Context) {
 
     private fun quickStoredTags(item: MediaItem): List<String> {
         val sidecar = sidecarForItem(item)
-        val sidecarTags = readSidecarTagsIfPresent(sidecar)
-        val sidecarTranslations = sidecar?.let(::readSidecarTagTranslations).orEmpty()
-        val persisted = persistedMetadata(item)
+        val sidecarData = sidecar?.let(::readSidecarTagData)
+        val sidecarTags = sidecarData?.tags.orEmpty()
+        val sidecarTranslations = sidecarData?.translations.orEmpty()
+        val persisted = if (sidecarTags.isEmpty() && sidecarTranslations.isEmpty()) {
+            persistedMetadata(item)
+        } else {
+            null
+        }
         val original = sidecarTags.ifEmpty { persisted?.tags.orEmpty() }
         val translations = sidecarTranslations + persisted?.tagTranslations.orEmpty()
         return (
@@ -310,6 +315,36 @@ class PixivArchiveRepository(private val context: Context) {
                         return DocumentFile.fromFile(sidecar).also {
                             archiveSidecarCache[item.uri.toString()] = it
                         }
+                    }
+                }
+            }
+        }
+        if (item.uri.scheme == "content") {
+            val documentId = runCatching { DocumentsContract.getDocumentId(item.uri) }.getOrNull()
+            val parentId = documentId?.substringBeforeLast('/', "")
+            if (!parentId.isNullOrBlank()) {
+                val childrenUri = runCatching {
+                    DocumentsContract.buildChildDocumentsUriUsingTree(item.uri, parentId)
+                }.getOrNull()
+                val projection = arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME
+                )
+                val candidates = pixivSidecarCandidateNames(item.name).toSet()
+                val sidecarId = childrenUri?.let { uri ->
+                    runCatching {
+                        context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+                            while (cursor.moveToNext()) {
+                                if (cursor.getString(1) in candidates) return@use cursor.getString(0)
+                            }
+                            null
+                        }
+                    }.getOrNull()
+                }
+                if (sidecarId != null) {
+                    val sidecarUri = DocumentsContract.buildDocumentUriUsingTree(item.uri, sidecarId)
+                    return DocumentFile.fromSingleUri(context, sidecarUri)?.also {
+                        archiveSidecarCache[item.uri.toString()] = it
                     }
                 }
             }
@@ -1015,20 +1050,33 @@ class PixivArchiveRepository(private val context: Context) {
         }
     }.getOrDefault(emptyList())
 
-    private fun readSidecarTags(sidecar: DocumentFile): List<String> = runCatching {
-        openMediaInputStream(context, sidecar.uri)?.bufferedReader()?.use { reader ->
-            val tags = JSONObject(reader.readText()).optJSONArray("tags") ?: return@use emptyList()
-            buildList {
-                repeat(tags.length()) { index -> tags.optString(index).takeIf(String::isNotBlank)?.let(::add) }
-            }
-        }.orEmpty()
-    }.getOrDefault(emptyList())
+    private data class SidecarTagData(
+        val tags: List<String>,
+        val translations: Map<String, Map<String, String>>
+    )
 
-    private fun readSidecarTagTranslations(sidecar: DocumentFile): Map<String, Map<String, String>> = runCatching {
+    private fun readSidecarTagData(sidecar: DocumentFile): SidecarTagData = runCatching {
         openMediaInputStream(context, sidecar.uri)?.bufferedReader()?.use { reader ->
-            buildTagTranslations(JSONObject(reader.readText()).optJSONObject("tagTranslations"))
-        }.orEmpty()
-    }.getOrDefault(emptyMap())
+            val json = JSONObject(reader.readText())
+            val tags = json.optJSONArray("tags")?.let { array ->
+                buildList {
+                    repeat(array.length()) { index ->
+                        array.optString(index).takeIf(String::isNotBlank)?.let(::add)
+                    }
+                }
+            }.orEmpty()
+            SidecarTagData(
+                tags = tags,
+                translations = buildTagTranslations(json.optJSONObject("tagTranslations"))
+            )
+        }
+    }.getOrNull() ?: SidecarTagData(emptyList(), emptyMap())
+
+    private fun readSidecarTags(sidecar: DocumentFile): List<String> =
+        readSidecarTagData(sidecar).tags
+
+    private fun readSidecarTagTranslations(sidecar: DocumentFile): Map<String, Map<String, String>> =
+        readSidecarTagData(sidecar).translations
 
     private fun findArchivedFile(uri: Uri): Pair<DocumentFile, DocumentFile>? {
         val targetUri = context.getSharedPreferences("pixiv_archive", Context.MODE_PRIVATE)
