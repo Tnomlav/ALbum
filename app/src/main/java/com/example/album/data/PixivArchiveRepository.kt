@@ -106,6 +106,18 @@ data class PixivLibrarySnapshot(
     val walkStats: PixivWalkStats? = null
 )
 
+enum class PixivTagIndexPhase {
+    Cache,
+    Sidecars,
+    Embedded
+}
+
+data class PixivTagIndexProgress(
+    val phase: PixivTagIndexPhase,
+    val completed: Int,
+    val total: Int
+)
+
 class PixivArchiveRepository(private val context: Context) {
     /**
      * User-visible progress text is built here, without a Composable context,
@@ -210,12 +222,15 @@ class PixivArchiveRepository(private val context: Context) {
 
     suspend fun loadTags(
         items: List<MediaItem>,
+        onProgress: suspend (PixivTagIndexProgress) -> Unit = {},
         onBatch: suspend (Map<String, List<String>>) -> Unit = {}
     ): Map<String, List<String>> = withContext(Dispatchers.IO) {
         val gate = Semaphore(6)
         val collected = linkedMapOf<String, List<String>>()
         val needsEmbedded = mutableListOf<MediaItem>()
+        onProgress(PixivTagIndexProgress(PixivTagIndexPhase.Cache, 0, items.size))
         val persisted = tagIndexStore.loadValid(items)
+        onProgress(PixivTagIndexProgress(PixivTagIndexPhase.Cache, persisted.size, items.size))
         val fingerprints = items.associate { item ->
             item.uri.toString() to mediaItemTagFingerprint(item)
         }
@@ -243,6 +258,8 @@ class PixivArchiveRepository(private val context: Context) {
         val pending = items.filter { item ->
             tagFingerprintCache[item.uri.toString()] == null
         }
+        var quickCompleted = 0
+        onProgress(PixivTagIndexProgress(PixivTagIndexPhase.Sidecars, 0, pending.size))
         coroutineScope {
             pending.chunked(16).forEach { chunk ->
                 val indexed = chunk.map { item ->
@@ -265,8 +282,12 @@ class PixivArchiveRepository(private val context: Context) {
                     collected.putAll(batch)
                     onBatch(batch)
                 }
+                quickCompleted += chunk.size
+                onProgress(PixivTagIndexProgress(PixivTagIndexPhase.Sidecars, quickCompleted, pending.size))
             }
 
+            var embeddedCompleted = 0
+            onProgress(PixivTagIndexProgress(PixivTagIndexPhase.Embedded, 0, needsEmbedded.size))
             needsEmbedded.chunked(8).forEach { chunk ->
                 val indexed = chunk.map { item ->
                     async {
@@ -292,6 +313,8 @@ class PixivArchiveRepository(private val context: Context) {
                     collected.putAll(batch)
                     onBatch(batch)
                 }
+                embeddedCompleted += chunk.size
+                onProgress(PixivTagIndexProgress(PixivTagIndexPhase.Embedded, embeddedCompleted, needsEmbedded.size))
             }
         }
         collected

@@ -81,6 +81,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
@@ -132,9 +133,12 @@ import androidx.lifecycle.LifecycleOwner
 import com.example.album.data.MediaItem
 import com.example.album.ImageSearchActivity
 import com.example.album.ImageSearchSource
+import com.example.album.PixivTagIndexService
 import com.example.album.data.transferFolderPath
 import com.example.album.data.displayAddress
 import com.example.album.data.PixivArchiveRepository
+import com.example.album.data.PixivTagIndexPhase
+import com.example.album.data.PixivTagIndexProgress
 import com.example.album.data.WallpaperQueueState
 import com.example.album.data.WallpaperQueueStore
 import com.example.album.data.SlideshowQueueStore
@@ -931,6 +935,9 @@ fun AlbumApp(
     // update the grid but must not restart the (expensive) tag index build.
     var pixivLibraryVersion by remember { mutableIntStateOf(0) }
     var pixivTagsLoading by remember { mutableStateOf(false) }
+    var pixivTagIndexProgress by remember { mutableStateOf<PixivTagIndexProgress?>(null) }
+    var showPixivTagIndexDialog by remember { mutableStateOf(false) }
+    var pixivTagIndexDialogDismissed by remember { mutableStateOf(false) }
     var pixivPageRefreshing by remember { mutableStateOf(false) }
     var pixivRefreshKey by remember { mutableIntStateOf(0) }
     var archiveMediaRefreshPending by remember { mutableStateOf(false) }
@@ -1259,14 +1266,35 @@ fun AlbumApp(
         if (pixivSearchMode == PixivSearchMode.Tag && appliedQuery.isNotBlank()) {
             pixivTagsLoading = true
             pixivTagsByUri = emptyMap()
+            pixivTagIndexProgress = null
+            pixivTagIndexDialogDismissed = false
+            showPixivTagIndexDialog = false
             val batchChannel = Channel<Map<String, List<String>>>(Channel.UNLIMITED)
+            val progressChannel = Channel<PixivTagIndexProgress>(Channel.CONFLATED)
+            // Start while this activity is still foregrounded. Android 12+
+            // otherwise rejects a foreground-service start after the app has
+            // already moved to the background.
+            PixivTagIndexService.start(context)
             val collector = scope.launch {
                 for (batch in batchChannel) {
                     pixivTagsByUri = pixivTagsByUri + batch
                 }
             }
+            val progressCollector = scope.launch {
+                for (progress in progressChannel) {
+                    pixivTagIndexProgress = progress
+                    val hasWork = progress.phase != PixivTagIndexPhase.Cache ||
+                        progress.completed < progress.total
+                    if (hasWork && !pixivTagIndexDialogDismissed) {
+                        showPixivTagIndexDialog = true
+                    }
+                }
+            }
             try {
-                val loaded = pixivRepository.loadTags(pixivImages) { batch ->
+                val loaded = pixivRepository.loadTags(
+                    pixivImages,
+                    onProgress = { progress -> progressChannel.send(progress) }
+                ) { batch ->
                     batchChannel.send(batch)
                 }
                 batchChannel.close()
@@ -1275,6 +1303,11 @@ fun AlbumApp(
             } finally {
                 batchChannel.close()
                 collector.cancel()
+                progressChannel.close()
+                progressCollector.cancel()
+                PixivTagIndexService.stop(context)
+                pixivTagIndexProgress = null
+                showPixivTagIndexDialog = false
                 pixivTagsLoading = false
             }
         } else {
@@ -4471,6 +4504,15 @@ fun AlbumApp(
             }
         )
     }
+    if (showPixivTagIndexDialog) {
+        PixivTagIndexProgressDialog(
+            progress = pixivTagIndexProgress,
+            onRunInBackground = {
+                pixivTagIndexDialogDismissed = true
+                showPixivTagIndexDialog = false
+            }
+        )
+    }
     // Held back while a system delete dialog is up, so the two prompts never
     // stack and the retry cannot be swallowed by externalDeleteRequestInFlight.
     if (!externalDeleteRequestInFlight) pendingUnbackedDelete?.let { unbacked ->
@@ -4630,6 +4672,52 @@ fun AlbumApp(
             }
         )
     }
+}
+
+@Composable
+private fun PixivTagIndexProgressDialog(
+    progress: PixivTagIndexProgress?,
+    onRunInBackground: () -> Unit
+) {
+    val english = LocalAppEnglish.current
+    val phaseText = when (progress?.phase) {
+        PixivTagIndexPhase.Cache -> appText("正在载入已有 Tag 索引", english)
+        PixivTagIndexPhase.Sidecars ->
+            appText("正在读取侧车与 Pixiv 元数据", english)
+        PixivTagIndexPhase.Embedded ->
+            appText("正在读取图片内嵌 Tags", english)
+        null -> appText("正在准备 Tag 索引", english)
+    }
+    AlertDialog(
+        onDismissRequest = onRunInBackground,
+        title = { Text(appText("正在建立 Tag 索引", english)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(phaseText, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val total = progress?.total?.coerceAtLeast(0) ?: 0
+                val completed = progress?.completed?.coerceIn(0, total) ?: 0
+                if (total > 0) {
+                    LinearProgressIndicator(
+                        progress = { completed.toFloat() / total.toFloat() },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("$completed / $total", style = MaterialTheme.typography.labelSmall)
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                Text(
+                    appText("可以关闭此窗口，索引会在后台继续运行", english),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onRunInBackground) {
+                Text(appText("后台运行", english))
+            }
+        }
+    )
 }
 
 internal fun resolveDeletionSources(
