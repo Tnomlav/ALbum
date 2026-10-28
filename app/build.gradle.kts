@@ -132,7 +132,7 @@ tasks.matching { it.name == "packageRelease" }.configureEach {
         val nextProperties = Properties().apply {
             putAll(releaseVersionProperties)
             val patch = getProperty("VERSION_PATCH", "0").toInt()
-            setProperty("VERSION_PATCH", (patch + 1).toString())
+            setProperty("VERSION_PATCH", (patch + 10).toString())
             setProperty("VERSION_CODE", (releaseVersionCode + 1).toString())
         }
         releaseVersionFile.outputStream().use { nextProperties.store(it, "Album release version; updated after each successful signed release build") }

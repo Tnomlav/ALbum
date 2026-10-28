@@ -853,12 +853,6 @@ private fun SettingsPageHeader(english: Boolean) {
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold
         )
-        Text(
-            if (english) "Appearance, playback and files" else "外观、播放与文件管理",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 3.dp)
-        )
     }
 }
 
