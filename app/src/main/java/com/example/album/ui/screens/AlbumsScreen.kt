@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -117,6 +118,7 @@ fun AlbumsScreen(
      */
     initialLoadComplete: Boolean = true,
     permissionGranted: Boolean,
+    tagLoading: Boolean = false,
     sort: MediaSort,
     sortDirection: SortDirection,
     albumColumns: Int,
@@ -233,6 +235,7 @@ fun AlbumsScreen(
         media.isEmpty() && !initialLoadComplete -> Box(Modifier.fillMaxSize())
         media.isEmpty() && refreshing -> Box(Modifier.fillMaxSize())
         !permissionGranted && media.isEmpty() -> PermissionEmpty(onRequestPermission)
+        tagLoading -> TagIndexLoading()
         media.isEmpty() && openedFolder.equals("Pixiv", ignoreCase = true) && onOpenPixivArchive != null ->
             FolderGrid(
                 MediaAlbum("Pixiv", emptyList(), null),
@@ -329,6 +332,24 @@ fun AlbumsScreen(
                     AlbumGrid(albums, albumColumns, refreshing = refreshing, onOpenAlbum = onOpenedFolderChange, onLongPressAlbum = onLongPressAlbum, onSelectionGestureStartAlbum = onSelectionGestureStartAlbum, onBatchSelectAlbums = onBatchSelectAlbums, onSelectionGestureEnd = onAlbumSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, favoriteUris = favoriteUris, selectionPreview = selectionPreview, selectedFolders = selectedFolders, initialFirstVisibleItem = initialAlbumFirstVisibleItem, initialFirstVisibleOffset = initialAlbumFirstVisibleOffset, onScrollPositionChanged = onAlbumScrollPositionChanged, onFirstVisibleFolderChanged = onFirstVisibleFolderChanged, scrollToTopToken = scrollToTopToken, scrollRequest = scrollRequest, pullRequestToken = pullRequestToken)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TagIndexLoading() {
+    val english = LocalAppEnglish.current
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+            Text(
+                appText("正在读取 Tags…", english),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp
+            )
         }
     }
 }

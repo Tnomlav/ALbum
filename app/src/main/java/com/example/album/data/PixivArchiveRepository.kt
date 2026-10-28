@@ -198,11 +198,11 @@ class PixivArchiveRepository(private val context: Context) {
     ).filterNot { it.isNullOrBlank() }.joinToString(";") { it.orEmpty() }.ifBlank { null }
 
     suspend fun readTags(item: MediaItem): List<String> = withContext(Dispatchers.IO) {
-        readEmbeddedTags(item.uri, item.mimeType).ifEmpty {
-            archiveSidecarCache[item.uri.toString()]?.let(::readSidecarTags)
-                ?: findArchivedFile(item.uri)?.let { (file, parent) ->
-                    parent.findFile("${file.name}.pixiv.json")?.let(::readSidecarTags).orEmpty()
-                }.orEmpty()
+        val sidecar = sidecarForItem(item)
+        readSidecarTagsIfPresent(sidecar).ifEmpty {
+            readEmbeddedTags(item.uri, item.mimeType).ifEmpty {
+                persistedTags(item)
+            }
         }
     }
 
@@ -230,13 +230,58 @@ class PixivArchiveRepository(private val context: Context) {
         tags.any { it.contains(query.trim(), ignoreCase = true) }
 
     private suspend fun expandedStoredTags(item: MediaItem): List<String> {
-        val original = readTags(item)
-        val translations = archiveSidecarCache[item.uri.toString()]?.let(::readSidecarTagTranslations)
-            ?: findArchivedFile(item.uri)?.let { (_, parent) ->
-                parent.findFile("${item.name}.pixiv.json")?.let(::readSidecarTagTranslations).orEmpty()
-            }.orEmpty()
-        return (original + translations.values.flatMap { it.values }).distinct()
+        val sidecar = sidecarForItem(item)
+        val sidecarTags = readSidecarTagsIfPresent(sidecar)
+        val sidecarTranslations = sidecar?.let(::readSidecarTagTranslations).orEmpty()
+        val persisted = persistedMetadata(item)
+        // Sidecars are tiny and already describe the archived artwork. Read the
+        // large image itself only when neither sidecar nor persisted metadata
+        // can supply tags. This keeps the first Tag query off the N² path that
+        // recursively searched the archive once per image.
+        val original = sidecarTags.ifEmpty {
+            persisted?.tags?.takeIf { it.isNotEmpty() }
+                ?: readEmbeddedTags(item.uri, item.mimeType)
+        }
+        val translations = sidecarTranslations + persisted?.tagTranslations.orEmpty()
+        return (
+            original +
+                translations.values.flatMap { it.values }
+            ).distinct()
     }
+
+    private fun persistedMetadata(item: MediaItem): PixivMetadata? {
+        val pid = parsePixivFilename(item.name)?.first ?: return null
+        return readPersistedMetadata(pid)
+    }
+
+    private fun persistedTags(item: MediaItem): List<String> {
+        val metadata = persistedMetadata(item) ?: return emptyList()
+        return (metadata.tags + metadata.tagTranslations.values.flatMap { it.values }).distinct()
+    }
+
+    private fun sidecarForItem(item: MediaItem): DocumentFile? {
+        archiveSidecarCache[item.uri.toString()]?.let { return it }
+        if (item.uri.scheme == "file" && item.uri.path != null) {
+            val source = File(item.uri.path!!)
+            val parent = source.parentFile
+            if (parent != null) {
+                pixivSidecarCandidateNames(source.name).forEach { candidate ->
+                    val sidecar = File(parent, candidate)
+                    if (sidecar.isFile) {
+                        return DocumentFile.fromFile(sidecar).also {
+                            archiveSidecarCache[item.uri.toString()] = it
+                        }
+                    }
+                }
+            }
+        }
+        return findArchivedFile(item.uri)?.let { (file, parent) ->
+            findPixivSidecar(file.name.orEmpty(), parent)
+        }?.also { archiveSidecarCache[item.uri.toString()] = it }
+    }
+
+    private fun readSidecarTagsIfPresent(sidecar: DocumentFile?): List<String> =
+        sidecar?.let(::readSidecarTags).orEmpty()
 
     suspend fun updateTags(item: MediaItem, tags: List<String>): Boolean = withContext(Dispatchers.IO) {
         runCatching {
@@ -254,8 +299,7 @@ class PixivArchiveRepository(private val context: Context) {
                 } ?: error("无法写入 JPEG 信息")
                 else -> {
                     val (file, parent) = findArchivedFile(item.uri) ?: error("无法定位归档文件")
-                    val sidecarName = "${file.name}.pixiv.json"
-                    val sidecar = parent.findFile(sidecarName) ?: parent.createFile("application/json", sidecarName)
+                    val sidecar = findOrCreatePixivSidecar(file.name.orEmpty(), parent, context)
                         ?: error("无法创建 Tag 信息文件")
                     val json = JSONObject().apply {
                         put("tags", org.json.JSONArray(tags))
@@ -326,7 +370,7 @@ class PixivArchiveRepository(private val context: Context) {
             onItem = { entry, _, siblings ->
                 val uri = entry.uri.toUri()
                 val tags = readEmbeddedTags(uri, entry.mimeType).ifEmpty {
-                    siblings["${entry.name}.pixiv.json"]?.let { sidecar ->
+                    findPixivSidecar(entry.name, siblings)?.let { sidecar ->
                         DocumentFile.fromSingleUri(context, sidecar.uri.toUri())?.let(::readSidecarTags)
                     }.orEmpty()
                 }
@@ -553,7 +597,7 @@ class PixivArchiveRepository(private val context: Context) {
                         output += item
                         // Keep the sidecar around so tag reads do not have to
                         // search the tree again later.
-                        siblings["${entry.name}.pixiv.json"]?.let { sidecar ->
+                        findPixivSidecar(entry.name, siblings)?.let { sidecar ->
                             DocumentFile.fromSingleUri(context, sidecar.uri.toUri())
                                 ?.let { archiveSidecarCache[item.uri.toString()] = it }
                         }
@@ -1313,9 +1357,8 @@ class PixivArchiveRepository(private val context: Context) {
             writePngTags(target.uri, metadata.tags)
             return writeSidecarMetadataIfNeeded(target, folder, metadata)
         }
-        val sidecarName = "${target.name ?: "image"}.pixiv.json"
         val sidecar = requireNotNull(
-            folder.findFile(sidecarName) ?: folder.createFile("application/json", sidecarName)
+            findOrCreatePixivSidecar(target.name.orEmpty(), folder, context)
         ) { "无法创建 Tag 信息文件" }
         val json = JSONObject().apply {
             put("title", metadata.title)
@@ -1337,8 +1380,9 @@ class PixivArchiveRepository(private val context: Context) {
         folder: DocumentFile,
         metadata: PixivMetadata
     ): DocumentFile? = metadata.tagTranslations.takeIf { it.isNotEmpty() }?.let {
-        val sidecarName = "${target.name ?: "image"}.pixiv.json"
-        val sidecar = requireNotNull(folder.findFile(sidecarName) ?: folder.createFile("application/json", sidecarName))
+        val sidecar = requireNotNull(
+            findOrCreatePixivSidecar(target.name.orEmpty(), folder, context)
+        )
         val json = JSONObject().apply {
             put("title", metadata.title)
             put("artist", metadata.artist)
@@ -1463,6 +1507,52 @@ class PixivArchiveRepository(private val context: Context) {
 
 private fun sanitize(value: String): String = value.replace(Regex("[\\/:*?\"<>|]"), "_").trim().take(120)
 
+}
+
+/**
+ * Some document providers append their own `.json` extension when
+ * `DocumentFile.createFile` is given a display name that already ends in
+ * `.pixiv.json`. Keep reading those files instead of making old sidecars
+ * invisible to the tag index.
+ */
+internal fun pixivSidecarCandidateNames(imageName: String): List<String> {
+    val base = imageName.trim()
+    if (base.isEmpty()) return emptyList()
+    return listOf("$base.pixiv.json", "$base.pixiv.json.json")
+}
+
+internal fun <T> findPixivSidecar(imageName: String, siblings: Map<String, T>): T? =
+    pixivSidecarCandidateNames(imageName).firstNotNullOfOrNull(siblings::get)
+
+private fun findPixivSidecar(imageName: String, folder: DocumentFile): DocumentFile? =
+    pixivSidecarCandidateNames(imageName).firstNotNullOfOrNull(folder::findFile)
+
+private fun findOrCreatePixivSidecar(
+    imageName: String,
+    folder: DocumentFile,
+    context: Context
+): DocumentFile? {
+    findPixivSidecar(imageName, folder)?.let { return it }
+    val preferredName = pixivSidecarCandidateNames(imageName.ifBlank { "image" }).first()
+    var sidecar = folder.createFile("application/json", preferredName) ?: return null
+    if (sidecar.name == preferredName) return sidecar
+
+    // Many SAF providers append the MIME extension even when the requested
+    // display name already ends in .json. Rename the created document back to
+    // the canonical sidecar name so new files never become .pixiv.json.json.
+    runCatching {
+        DocumentsContract.renameDocument(
+            context.contentResolver,
+            sidecar.uri,
+            preferredName
+        )
+    }.getOrNull()?.let { renamedUri ->
+        DocumentFile.fromSingleUri(context, renamedUri)?.let { sidecar = it }
+    }
+
+    // A provider that refuses the rename may still return one of the names the
+    // reader accepts. Returning it keeps tag writes functional as a fallback.
+    return sidecar.takeIf { it.name in pixivSidecarCandidateNames(imageName.ifBlank { "image" }) }
 }
 
 /** Prevents duplicated terminal extensions from being carried into archives. */

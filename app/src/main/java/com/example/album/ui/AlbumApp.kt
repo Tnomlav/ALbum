@@ -3165,6 +3165,8 @@ fun AlbumApp(
                         val mode = if (index == 0) PixivSearchMode.Artist else PixivSearchMode.Tag
                         if (mode != pixivSearchMode) {
                             pixivSearchMode = mode
+                            query = ""
+                            appliedQuery = ""
                             // Leave the folder the previous mode was showing:
                             // inside a folder the bar shows the folder name and
                             // the switch disappears with it, so the mode could
@@ -3184,7 +3186,11 @@ fun AlbumApp(
                         }
                     } else {
                         val mode = if (index == 0) PixivSearchMode.Artist else PixivSearchMode.Tag
-                        if (mode != pixivSearchMode) pixivSearchMode = mode
+                        if (mode != pixivSearchMode) {
+                            pixivSearchMode = mode
+                            query = ""
+                            appliedQuery = ""
+                        }
                     }
                 },
                 onTitleClick = null,
@@ -3750,6 +3756,7 @@ fun AlbumApp(
                     scanning = library.scanning,
                     suppressRefreshIndicator = !startupLibraryReadDone,
                     permissionGranted = true,
+                    tagLoading = pixivTagsLoading && pixivSearchMode == PixivSearchMode.Tag,
                     sort = mediaSort,
                     sortDirection = sortDirection,
                     albumColumns = albumColumns,

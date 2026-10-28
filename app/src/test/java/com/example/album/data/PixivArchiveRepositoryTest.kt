@@ -136,4 +136,18 @@ class PixivArchiveRepositoryTest {
             readPngTags(ByteArrayInputStream(output.toByteArray()))
         )
     }
+
+    @Test
+    fun readsStandardAndProviderDuplicatedSidecarNames() {
+        val imageName = "illust_123.png"
+        assertEquals(
+            listOf("illust_123.png.pixiv.json", "illust_123.png.pixiv.json.json"),
+            pixivSidecarCandidateNames(imageName)
+        )
+        val siblings = mapOf("illust_123.png.pixiv.json.json" to "sidecar")
+        assertEquals(
+            "sidecar",
+            findPixivSidecar(imageName, siblings)
+        )
+    }
 }

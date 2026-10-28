@@ -77,6 +77,7 @@ private val APP_ENGLISH = mapOf(
     "图片已填入，请在网页中点击搜索按钮" to
         "Image filled in; tap the search button on the page",
     "正在载入搜索结果…" to "Loading search results…",
+    "正在读取 Tags…" to "Loading tags…",
     "网页加载失败" to "Web page failed to load",
     "无法打开搜图页面" to "Unable to open the image search page",
     "重试" to "Retry",
