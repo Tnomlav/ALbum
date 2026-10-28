@@ -5,7 +5,7 @@
 
 1. **准备版本**：编辑 `version.properties`
    （`VERSION_CODE`、`VERSION_MAJOR`、`VERSION_MINOR`、`VERSION_PATCH`）。
-   一次发布只改这里。每次升版时 `VERSION_PATCH` 增加 `10`。
+   一次发布只改这里。每次升版时 `VERSION_PATCH` 增加 `1`。
 
 2. **写发布说明**：在 `CHANGELOG.md` 顶部新增一节，内容对应用户能看到的变化。
 
@@ -44,7 +44,7 @@
 ## 版本号只在前进一步之后更新
 
 `app/build.gradle.kts` 里的 `packageRelease` 钩子会在签名 release 构建成功后
-自动把 `VERSION_PATCH` 加十、`VERSION_CODE` 加一。也就是说：
+自动把 `VERSION_PATCH` 和 `VERSION_CODE` 加一。也就是说：
 
 - 打出来的包用的是构建开始时的版本号；
 - 构建成功后文件里保存的是"下一个"版本号。

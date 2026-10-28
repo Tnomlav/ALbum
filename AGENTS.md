@@ -26,8 +26,8 @@
 
 - 唯一来源是 `version.properties`。任何其它文件（README、`app/release/`）都不要再写
   "当前版本号"。
-- 每次升版时 `VERSION_PATCH` 增加 `10`，`VERSION_CODE` 每次构建仍按 `1` 递增。
-- 签名 release 构建成功后 `packageRelease` 会自动把 patch 号加十；如果只是本地验证
+- 每次升版时 `VERSION_PATCH` 增加 `1`，`VERSION_CODE` 每次构建也按 `1` 递增。
+- 签名 release 构建成功后 `packageRelease` 会自动把 patch 号加一；如果只是本地验证
   构建、并不打算发布，记得把 `version.properties` 改回本次目标版本。
 - 发布流程见 [RELEASING.md](RELEASING.md)；更新清单必须作为 Release 资产上传，资产名
   固定为 `album-update.json`。

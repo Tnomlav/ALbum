@@ -708,18 +708,20 @@ private fun DuplicateContent(
             Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
                 CleanupSummary {
                     Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                        if (liveGroups.isNotEmpty()) {
-                            IconButton(
-                                onClick = {
-                                    collapsedGroups = if (allCollapsed) emptySet() else liveGroups.mapTo(mutableSetOf()) { it.hash }
-                                },
-                                modifier = Modifier.size(38.dp)
-                            ) {
-                                Icon(
-                                    Icons.Outlined.ChevronRight,
-                                    appText(if (allCollapsed) "展开全部" else "折叠全部", english),
-                                    modifier = Modifier.size(17.dp).graphicsLayer { rotationZ = if (allCollapsed) 0f else 90f }
-                                )
+                        Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+                            if (liveGroups.isNotEmpty()) {
+                                IconButton(
+                                    onClick = {
+                                        collapsedGroups = if (allCollapsed) emptySet() else liveGroups.mapTo(mutableSetOf()) { it.hash }
+                                    },
+                                    modifier = Modifier.size(38.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.ChevronRight,
+                                        appText(if (allCollapsed) "展开全部" else "折叠全部", english),
+                                        modifier = Modifier.size(17.dp).graphicsLayer { rotationZ = if (allCollapsed) 0f else 90f }
+                                    )
+                                }
                             }
                         }
                         Text(if (english) "${liveGroups.size} duplicate groups" else "${liveGroups.size} 组重复图片", fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1)
@@ -1085,48 +1087,38 @@ private fun RecycleContent(
         ),
         contentPadding = PaddingValues(start = 7.dp, end = 7.dp, bottom = 28.dp)
     ) {
-        item {
-            CleanupSummary {
-                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    if (entries.isNotEmpty()) {
-                        IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(38.dp)) {
-                            Icon(
-                                Icons.Outlined.ChevronRight,
-                                appText(if (collapsed) "展开" else "折叠", english),
-                                modifier = Modifier.size(17.dp).graphicsLayer { rotationZ = if (collapsed) 0f else 90f }
-                            )
+        stickyHeader {
+            Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
+                CleanupSummary {
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+                            if (entries.isNotEmpty()) {
+                                IconButton(onClick = { collapsed = !collapsed }, modifier = Modifier.size(38.dp)) {
+                                    Icon(
+                                        Icons.Outlined.ChevronRight,
+                                        appText(if (collapsed) "展开" else "折叠", english),
+                                        modifier = Modifier.size(17.dp).graphicsLayer { rotationZ = if (collapsed) 0f else 90f }
+                                    )
+                                }
+                            }
                         }
+                        Text(
+                            buildString {
+                                append(if (english) "${entries.size} items" else "${entries.size} 项")
+                                if (usageBytes > 0L) append(" · ${formatMediaSize(usageBytes)}")
+                            },
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
-                    Text(
-                        buildString {
-                            append(if (english) "${entries.size} items" else "${entries.size} 项")
-                            if (usageBytes > 0L) append(" · ${formatMediaSize(usageBytes)}")
-                        },
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                if (entries.isEmpty()) {
-                    Text(if (english) "Empty" else "暂无内容", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        CleanupCommand(if (selectedIds.isEmpty()) "全部还原" else "还原选中", onClick = onRestoreAll)
-                        CleanupCommand(if (selectedIds.isEmpty()) "全部清除" else "清除选中", color = Color(0xFFFF453A), onClick = onDeleteAll)
+                    if (entries.isNotEmpty()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            CleanupCommand(if (selectedIds.isEmpty()) "全部还原" else "还原选中", onClick = onRestoreAll)
+                            CleanupCommand(if (selectedIds.isEmpty()) "全部清除" else "清除选中", color = Color(0xFFFF453A), onClick = onDeleteAll)
+                        }
                     }
                 }
             }
-        }
-        item {
-            Text(
-                if (english) {
-                    "Retention is set in Settings; uninstalling Album or clearing its data empties the trash."
-                } else {
-                    "保留期限在设置中调整；卸载或清除数据会清空回收站。"
-                },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(start = 2.dp, end = 2.dp, bottom = 10.dp)
-            )
         }
         if (entries.isEmpty()) {
             item { CleanupEmpty("回收站为空") }
@@ -1220,10 +1212,23 @@ private fun ExcludedContent(
         ),
         contentPadding = PaddingValues(start = 7.dp, end = 7.dp, bottom = 28.dp)
     ) {
-        item {
-            CleanupSummary {
-                Text(if (english) "${folders.size} folders" else "${folders.size} 个文件夹", modifier = Modifier.weight(1f), fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                if (folders.isNotEmpty()) CleanupCommand(if (selectedFolders.isEmpty()) "全部还原" else "还原选中") { if (selectedFolders.isEmpty()) folders.keys.forEach(onRestore) else onRestoreSelected() }
+        stickyHeader {
+            Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
+                CleanupSummary {
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(Modifier.size(38.dp))
+                        Text(
+                            if (english) "${folders.size} folders" else "${folders.size} 个文件夹",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    if (folders.isNotEmpty()) {
+                        CleanupCommand(if (selectedFolders.isEmpty()) "全部还原" else "还原选中") {
+                            if (selectedFolders.isEmpty()) folders.keys.forEach(onRestore) else onRestoreSelected()
+                        }
+                    }
+                }
             }
         }
         if (folders.isEmpty()) item { CleanupEmpty("没有已排除文件夹") }
