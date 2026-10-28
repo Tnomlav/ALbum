@@ -1103,18 +1103,33 @@ class PixivArchiveRepository(private val context: Context) {
     }
 
     private fun readEmbeddedTags(uri: Uri, mimeType: String): List<String> = runCatching {
+        val extension = uri.lastPathSegment.orEmpty().substringAfterLast('.', "").lowercase(Locale.ROOT)
+        val isJpeg = mimeType == "image/jpeg" || extension in setOf("jpg", "jpeg")
+        val isPng = mimeType == "image/png" || extension == "png"
         when {
-            mimeType == "image/jpeg" -> if (uri.scheme == "file" && uri.path != null) {
+            isJpeg -> if (uri.scheme == "file" && uri.path != null) {
                 ExifInterface(uri.path!!).getAttribute(ExifInterface.TAG_USER_COMMENT)
                     ?.split(',')?.map(String::trim)?.filter(String::isNotBlank).orEmpty()
             } else context.contentResolver.openFileDescriptor(uri, "r")?.use { descriptor ->
                 ExifInterface(descriptor.fileDescriptor).getAttribute(ExifInterface.TAG_USER_COMMENT)
                     ?.split(',')?.map(String::trim)?.filter(String::isNotBlank).orEmpty()
             }.orEmpty()
-            mimeType == "image/png" -> openMediaInputStream(context, uri)?.use(::readPngTags).orEmpty()
+            isPng -> readPngTagsFromUri(uri)
             else -> emptyList()
         }
     }.getOrDefault(emptyList())
+
+    private fun readPngTagsFromUri(uri: Uri): List<String> {
+        if (uri.scheme == "file" && uri.path != null) {
+            return FileInputStream(uri.path!!).use(::readPngTags)
+        }
+        runCatching {
+            return context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+                descriptor.createInputStream().use(::readPngTags)
+            }.orEmpty()
+        }
+        return openMediaInputStream(context, uri)?.use(::readPngTags).orEmpty()
+    }
 
     private data class SidecarTagData(
         val tags: List<String>,
@@ -2001,10 +2016,16 @@ private fun parseXmpTags(xmp: String): List<String> = runCatching {
 
 private fun skipExactly(input: InputStream, length: Int) {
     var remaining = length
-    val buffer = ByteArray(32 * 1024)
     while (remaining > 0) {
-        val count = input.read(buffer, 0, minOf(buffer.size, remaining))
-        if (count < 0) throw EOFException("PNG 数据块不完整")
-        remaining -= count
+        // Never pull IDAT pixel payload through userspace just to reach the
+        // next metadata chunk. File-backed streams can seek here, so a 15 MB
+        // PNG normally costs a few small reads instead of a full 15 MB scan.
+        val skipped = input.skip(remaining.toLong())
+        if (skipped > 0L) {
+            remaining -= skipped.coerceAtMost(remaining.toLong()).toInt()
+            continue
+        }
+        if (input.read() < 0) throw EOFException("PNG 数据块不完整")
+        remaining -= 1
     }
 }
