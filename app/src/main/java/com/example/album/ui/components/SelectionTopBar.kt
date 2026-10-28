@@ -175,10 +175,15 @@ fun SelectionTopBar(
                     modifier = Modifier.width(190.dp).clip(RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp))
                 ) {
                     fun run(action: () -> Unit) { menuOpen = false; action() }
+                    DropdownMenuItem(text = { Text(appText("分享", english)) }, leadingIcon = { Icon(Icons.Outlined.Share, null) }, onClick = { run(onShare) })
+                    DropdownMenuItem(text = { Text(appText("复制", english)) }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) }, onClick = { run(onCopy) })
                     if (searchExpanded) {
-                        DropdownMenuItem(text = { Text(appText("删除所选", english)) }, leadingIcon = { Icon(Icons.Outlined.Delete, null) }, enabled = selected > 0, onClick = { run(onDelete) })
                         DropdownMenuItem(text = { Text(appText("移动", english)) }, leadingIcon = { Icon(Icons.AutoMirrored.Outlined.DriveFileMove, null) }, enabled = selected > 0, onClick = { run(onMove) })
                         DropdownMenuItem(text = { Text(appText("重命名", english)) }, leadingIcon = { Icon(Icons.Outlined.Edit, null) }, enabled = selected == 1 && renameEnabled, onClick = { run(onRename) })
+                    }
+                    onEdit?.let { action -> DropdownMenuItem(text = { Text(appText("编辑", english)) }, leadingIcon = { Icon(Icons.Outlined.Edit, null) }, onClick = { run(action) }) }
+                    onEditTags?.let { action -> DropdownMenuItem(text = { Text(if (english) "View/Edit Tags" else "查看/编辑 Tags") }, leadingIcon = { Icon(Icons.Outlined.Label, null) }, onClick = { run(action) }) }
+                    if (searchExpanded) {
                         DropdownMenuItem(
                             text = { Text(if (favoriteSelected) appText("取消收藏所选", english) else appText("收藏所选", english)) },
                             leadingIcon = { Icon(if (favoriteSelected) Icons.Filled.Star else Icons.Outlined.StarBorder, null) },
@@ -186,14 +191,10 @@ fun SelectionTopBar(
                             onClick = { run(onFavorite) }
                         )
                     }
-                    DropdownMenuItem(text = { Text(appText("分享", english)) }, leadingIcon = { Icon(Icons.Outlined.Share, null) }, onClick = { run(onShare) })
-                    DropdownMenuItem(text = { Text(appText("复制", english)) }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) }, onClick = { run(onCopy) })
-                    onSlideshow?.let { action -> DropdownMenuItem(text = { Text(appText("幻灯片", english)) }, leadingIcon = { Icon(Icons.Outlined.PhotoLibrary, null) }, onClick = { run(action) }) }
-                    onAddToSlideshowQueue?.let { action -> DropdownMenuItem(text = { Text(appText("加入幻灯片队列", english)) }, leadingIcon = { Icon(Icons.Outlined.AddPhotoAlternate, null) }, onClick = { run(action) }) }
                     onOpenWith?.let { action -> DropdownMenuItem(text = { Text(appText("打开方式", english)) }, leadingIcon = { Icon(Icons.Outlined.OpenInNew, null) }, onClick = { run(action) }) }
                     onInfo?.let { action -> DropdownMenuItem(text = { Text(appText("信息", english)) }, leadingIcon = { Icon(Icons.Outlined.Info, null) }, onClick = { run(action) }) }
-                    onEditTags?.let { action -> DropdownMenuItem(text = { Text(if (english) "View/Edit Tags" else "查看/编辑 Tags") }, leadingIcon = { Icon(Icons.Outlined.Label, null) }, onClick = { run(action) }) }
-                    onEdit?.let { action -> DropdownMenuItem(text = { Text(appText("编辑", english)) }, leadingIcon = { Icon(Icons.Outlined.Edit, null) }, onClick = { run(action) }) }
+                    onSlideshow?.let { action -> DropdownMenuItem(text = { Text(appText("幻灯片", english)) }, leadingIcon = { Icon(Icons.Outlined.PhotoLibrary, null) }, onClick = { run(action) }) }
+                    onAddToSlideshowQueue?.let { action -> DropdownMenuItem(text = { Text(appText("加入幻灯片队列", english)) }, leadingIcon = { Icon(Icons.Outlined.AddPhotoAlternate, null) }, onClick = { run(action) }) }
                     onWallpaper?.let { action -> DropdownMenuItem(text = { Text(appText("设置为壁纸", english)) }, leadingIcon = { Icon(Icons.Outlined.Wallpaper, null) }, onClick = { run(action) }) }
                     onAddToWallpaperQueue?.let { action -> DropdownMenuItem(text = { Text(appText("加入壁纸队列", english)) }, leadingIcon = { Icon(Icons.Outlined.Wallpaper, null) }, onClick = { run(action) }) }
                     onSearchSauceNao?.let { action ->
@@ -211,6 +212,9 @@ fun SelectionTopBar(
                         )
                     }
                     onExclude?.let { action -> DropdownMenuItem(text = { Text(appText("排除", english)) }, leadingIcon = { Icon(Icons.Outlined.FolderOff, null) }, onClick = { run(action) }) }
+                    if (searchExpanded) {
+                        DropdownMenuItem(text = { Text(appText("删除所选", english)) }, leadingIcon = { Icon(Icons.Outlined.Delete, null) }, enabled = selected > 0, onClick = { run(onDelete) })
+                    }
                 }
             }
         }

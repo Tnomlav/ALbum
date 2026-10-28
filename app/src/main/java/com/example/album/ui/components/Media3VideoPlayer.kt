@@ -1637,6 +1637,32 @@ internal fun Media3VideoPlayer(
                     ) {
                         Column(Modifier.padding(vertical = 8.dp)) {
                             DropdownMenuItem(
+                                text = { Text(if (mirrorVideo) appText("取消镜像", english) else appText("镜像翻转", english), color = Color.White) },
+                                leadingIcon = { Icon(EditorPrototypeIcons.FlipHorizontal, null, tint = Color.White) },
+                                colors = MenuDefaults.itemColors(
+                                    textColor = Color.White,
+                                    leadingIconColor = Color.White
+                                ),
+                                onClick = {
+                                    mirrorVideo = !mirrorVideo
+                                    playerMenuOpen = false
+                                    resumeAfterPopup()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(appText("设置", english), color = Color.White) },
+                                leadingIcon = { Icon(Icons.Outlined.SettingsIcon, null, tint = Color.White) },
+                                colors = MenuDefaults.itemColors(
+                                    textColor = Color.White,
+                                    leadingIconColor = Color.White
+                                ),
+                                onClick = {
+                                    playerMenuOpen = false
+                                    settingsPausePending = true
+                                    onSettings()
+                                }
+                            )
+                            DropdownMenuItem(
                                 text = { Text(appText("分享", english), color = Color.White) },
                                 leadingIcon = { Icon(Icons.Outlined.Share, null, tint = Color.White) },
                                 colors = MenuDefaults.itemColors(
@@ -1655,19 +1681,6 @@ internal fun Media3VideoPlayer(
                                 onClick = { playerMenuOpen = false; onWallpaper(); resumeAfterPopup() }
                             )
                             DropdownMenuItem(
-                                text = { Text(if (mirrorVideo) appText("取消镜像", english) else appText("镜像翻转", english), color = Color.White) },
-                                leadingIcon = { Icon(EditorPrototypeIcons.FlipHorizontal, null, tint = Color.White) },
-                                colors = MenuDefaults.itemColors(
-                                    textColor = Color.White,
-                                    leadingIconColor = Color.White
-                                ),
-                                onClick = {
-                                    mirrorVideo = !mirrorVideo
-                                    playerMenuOpen = false
-                                    resumeAfterPopup()
-                                }
-                            )
-                            DropdownMenuItem(
                                 text = { Text(appText("信息", english), color = Color.White) },
                                 leadingIcon = { Icon(Icons.Outlined.Info, null, tint = Color.White) },
                                 colors = MenuDefaults.itemColors(
@@ -1675,19 +1688,6 @@ internal fun Media3VideoPlayer(
                                     leadingIconColor = Color.White
                                 ),
                                 onClick = { playerMenuOpen = false; onInfo(); resumeAfterPopup() }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(appText("设置", english), color = Color.White) },
-                                leadingIcon = { Icon(Icons.Outlined.SettingsIcon, null, tint = Color.White) },
-                                colors = MenuDefaults.itemColors(
-                                    textColor = Color.White,
-                                    leadingIconColor = Color.White
-                                ),
-                                onClick = {
-                                    playerMenuOpen = false
-                                    settingsPausePending = true
-                                    onSettings()
-                                }
                             )
                         }
                     }

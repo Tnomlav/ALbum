@@ -2746,10 +2746,10 @@ fun AlbumApp(
                 favoriteVisible = false,
                 onFavoriteClick = {},
                 menuItems = listOf(
-                    appText("设置", english),
-                    appText("列数", english),
-                    appText("排布方式", english),
                     appText("排序方式", english),
+                    appText("排布方式", english),
+                    appText("列数", english),
+                    appText("设置", english),
                     appText("清空幻灯片队列", english)
                 ),
                 onMenuItemClick = { action ->
@@ -2808,10 +2808,10 @@ fun AlbumApp(
                 favoriteActive = false,
                 onFavoriteClick = {},
                 menuItems = listOf(
-                    appText("设置", english),
-                    appText("列数", english),
-                    appText("排布方式", english),
                     appText("排序方式", english),
+                    appText("排布方式", english),
+                    appText("列数", english),
+                    appText("设置", english),
                     appText("清空壁纸队列", english)
                 ),
                 onMenuItemClick = { action ->
@@ -3014,31 +3014,31 @@ fun AlbumApp(
                 onFavoriteClick = { favoriteFilter = !favoriteFilter },
                 menuItems = when (tab) {
                     MainTab.Albums -> if (appLanguage == "English") {
-                        if (openedFolder == null) listOf("Rescan", "Add local folder", "Columns", "Sort", "Select")
-                        else listOf("Rescan", "New folder", "Columns", "Layout", "Sort", "Select")
+                        if (openedFolder == null) listOf("Select", "Sort", "Columns", "Add local folder", "Rescan")
+                        else listOf("Select", "Sort", "Layout", "Columns", "New folder", "Rescan")
                     } else {
-                        if (openedFolder == null) listOf("重新扫描", "添加本地文件夹", "列数", "排序方式", "进入多选")
-                        else listOf("重新扫描", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
+                        if (openedFolder == null) listOf("进入多选", "排序方式", "列数", "添加本地文件夹", "重新扫描")
+                        else listOf("进入多选", "排序方式", "排布方式", "列数", "新建文件夹", "重新扫描")
                     }
                     MainTab.Timeline -> if (appLanguage == "English") {
-                        listOf("Rescan", "Add local folder", "Jump to date", "Columns", "Layout", "Select")
-                    } else listOf("重新扫描", "添加本地文件夹", "跳转日期", "列数", "排布方式", "进入多选")
+                        listOf("Select", "Jump to date", "Layout", "Columns", "Add local folder", "Rescan")
+                    } else listOf("进入多选", "跳转日期", "排布方式", "列数", "添加本地文件夹", "重新扫描")
                     MainTab.Videos -> if (appLanguage == "English") {
-                        if (openedFolder == null) listOf("Rescan", "Add local folder", "Columns", "Sort", "Select")
-                        else listOf("Rescan", "New folder", "Columns", "Layout", "Sort", "Select")
+                        if (openedFolder == null) listOf("Select", "Sort", "Columns", "Add local folder", "Rescan")
+                        else listOf("Select", "Sort", "Layout", "Columns", "New folder", "Rescan")
                     } else {
-                        if (openedFolder == null) listOf("重新扫描", "添加本地文件夹", "列数", "排序方式", "进入多选")
-                        else listOf("重新扫描", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选")
+                        if (openedFolder == null) listOf("进入多选", "排序方式", "列数", "添加本地文件夹", "重新扫描")
+                        else listOf("进入多选", "排序方式", "排布方式", "列数", "新建文件夹", "重新扫描")
                     }
                     MainTab.Pixiv -> if (appLanguage == "English") {
-                        if (pixivSearchMode == PixivSearchMode.Tag) listOf("Rescan", "Columns", "Layout", "Sort", "Select", "Notes")
-                        else if (openedFolder == null) listOf("Rescan", "Columns", "Sort", "Select", "Notes")
-                        else listOf("Rescan", "New folder", "Columns", "Layout", "Sort", "Select", "Notes")
+                        if (pixivSearchMode == PixivSearchMode.Tag) listOf("Select", "Sort", "Layout", "Columns", "Notes", "Rescan")
+                        else if (openedFolder == null) listOf("Select", "Sort", "Columns", "Notes", "Rescan")
+                        else listOf("Select", "Sort", "Layout", "Columns", "New folder", "Notes", "Rescan")
                     } else if (pixivSearchMode == PixivSearchMode.Tag) {
-                        listOf("重新扫描", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
+                        listOf("进入多选", "排序方式", "排布方式", "列数", "注意事项", "重新扫描")
                     } else if (openedFolder == null) {
-                        listOf("重新扫描", "列数", "排序方式", "进入多选", "注意事项")
-                    } else listOf("重新扫描", "新建文件夹", "列数", "排布方式", "排序方式", "进入多选", "注意事项")
+                        listOf("进入多选", "排序方式", "列数", "注意事项", "重新扫描")
+                    } else listOf("进入多选", "排序方式", "排布方式", "列数", "新建文件夹", "注意事项", "重新扫描")
                     MainTab.Tools -> emptyList()
                     MainTab.Settings -> emptyList()
                 },

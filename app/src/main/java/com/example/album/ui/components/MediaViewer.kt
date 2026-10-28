@@ -933,7 +933,6 @@ private fun ViewerTopBar(
             ) {
                 DropdownMenuItem(text = { Text(appText("分享", english), color = menuForeground, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Share, null, tint = menuForeground) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); onShare() })
                 DropdownMenuItem(text = { Text(appText("复制", english), color = menuForeground, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null, tint = menuForeground) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); onCopy() })
-                DropdownMenuItem(text = { Text(appText("信息", english), color = menuForeground, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Info, null, tint = menuForeground) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); onInfo() })
                 onSettings?.let { action ->
                     DropdownMenuItem(text = { Text(appText("设置", english), color = menuForeground, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.SettingsIcon, null, tint = menuForeground) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); action() })
                 }
@@ -963,6 +962,7 @@ private fun ViewerTopBar(
                         }
                     }
                 }
+                DropdownMenuItem(text = { Text(appText("信息", english), color = menuForeground, fontSize = 14.sp) }, leadingIcon = { Icon(Icons.Outlined.Info, null, tint = menuForeground) }, modifier = Modifier.height(52.dp), onClick = { onMenuExpanded(false); onInfo() })
             }
         }
     }
