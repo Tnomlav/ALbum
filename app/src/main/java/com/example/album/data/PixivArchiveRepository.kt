@@ -379,6 +379,10 @@ class PixivArchiveRepository(private val context: Context) {
                     }
                 }
             }
+            // A missing sidecar is a normal fast-index miss. Recursing through
+            // the entire archive here turns 28k missing files into billions of
+            // directory checks, which is why the progress used to stop at 16.
+            return null
         }
         if (item.uri.scheme == "content") {
             val documentId = runCatching { DocumentsContract.getDocumentId(item.uri) }.getOrNull()
@@ -409,10 +413,9 @@ class PixivArchiveRepository(private val context: Context) {
                     }
                 }
             }
+            return null
         }
-        return findArchivedFile(item.uri)?.let { (file, parent) ->
-            findPixivSidecar(file.name.orEmpty(), parent)
-        }?.also { archiveSidecarCache[item.uri.toString()] = it }
+        return null
     }
 
     private fun readSidecarTagsIfPresent(sidecar: DocumentFile?): List<String> =
