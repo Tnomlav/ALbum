@@ -326,7 +326,7 @@ fun AlbumsScreen(
                     onFirstVisibleMediaChanged = onFirstVisibleMediaChanged,
                     pullRequestToken = pullRequestToken)
                 } else {
-                    AlbumGrid(albums, albumColumns, refreshing = refreshing, onOpenAlbum = onOpenedFolderChange, onLongPressAlbum = onLongPressAlbum, onSelectionGestureStartAlbum = onSelectionGestureStartAlbum, onBatchSelectAlbums = onBatchSelectAlbums, onSelectionGestureEnd = onAlbumSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, favoriteUris = favoriteUris, selectionPreview = selectionPreview, selectedFolders = selectedFolders, pinnedFolderName = pinnedAlbumName, initialFirstVisibleItem = initialAlbumFirstVisibleItem, initialFirstVisibleOffset = initialAlbumFirstVisibleOffset, onScrollPositionChanged = onAlbumScrollPositionChanged, onFirstVisibleFolderChanged = onFirstVisibleFolderChanged, scrollToTopToken = scrollToTopToken, scrollRequest = scrollRequest, pullRequestToken = pullRequestToken)
+                    AlbumGrid(albums, albumColumns, refreshing = refreshing, onOpenAlbum = onOpenedFolderChange, onLongPressAlbum = onLongPressAlbum, onSelectionGestureStartAlbum = onSelectionGestureStartAlbum, onBatchSelectAlbums = onBatchSelectAlbums, onSelectionGestureEnd = onAlbumSelectionGestureEnd, onRefresh = onRefresh, sharedElementEnabled = sharedElementEnabled, favoriteUris = favoriteUris, selectionPreview = selectionPreview, selectedFolders = selectedFolders, initialFirstVisibleItem = initialAlbumFirstVisibleItem, initialFirstVisibleOffset = initialAlbumFirstVisibleOffset, onScrollPositionChanged = onAlbumScrollPositionChanged, onFirstVisibleFolderChanged = onFirstVisibleFolderChanged, scrollToTopToken = scrollToTopToken, scrollRequest = scrollRequest, pullRequestToken = pullRequestToken)
                 }
             }
         }
@@ -334,7 +334,7 @@ fun AlbumsScreen(
 }
 
 @Composable
-private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolean, onOpenAlbum: (String) -> Unit, onLongPressAlbum: (MediaAlbum, Int, Int) -> Unit, onSelectionGestureStartAlbum: ((MediaAlbum) -> Unit)?, onBatchSelectAlbums: (List<MediaAlbum>) -> Unit, onSelectionGestureEnd: () -> Unit, onRefresh: () -> Unit, sharedElementEnabled: Boolean = true, favoriteUris: Set<String> = emptySet(), selectionPreview: Boolean = false, selectedFolders: Set<String> = emptySet(), pinnedFolderName: String? = null, initialFirstVisibleItem: Int = 0, initialFirstVisibleOffset: Int = 0, onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }, onFirstVisibleFolderChanged: (String?) -> Unit = {}, scrollToTopToken: Long = 0L, scrollRequest: com.example.album.ui.PageScrollRequest? = null, pullRequestToken: Long = 0L) {
+private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolean, onOpenAlbum: (String) -> Unit, onLongPressAlbum: (MediaAlbum, Int, Int) -> Unit, onSelectionGestureStartAlbum: ((MediaAlbum) -> Unit)?, onBatchSelectAlbums: (List<MediaAlbum>) -> Unit, onSelectionGestureEnd: () -> Unit, onRefresh: () -> Unit, sharedElementEnabled: Boolean = true, favoriteUris: Set<String> = emptySet(), selectionPreview: Boolean = false, selectedFolders: Set<String> = emptySet(), initialFirstVisibleItem: Int = 0, initialFirstVisibleOffset: Int = 0, onScrollPositionChanged: (Int, Int) -> Unit = { _, _ -> }, onFirstVisibleFolderChanged: (String?) -> Unit = {}, scrollToTopToken: Long = 0L, scrollRequest: com.example.album.ui.PageScrollRequest? = null, pullRequestToken: Long = 0L) {
     val context = LocalContext.current
     val pullEnabled = remember { context.getSharedPreferences("album_settings", Context.MODE_PRIVATE).getBoolean("pull_refresh", true) }
     val gridState = rememberLazyGridState(
@@ -418,16 +418,16 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
             verticalArrangement = Arrangement.spacedBy(VaultDimens.AlbumGap)
         ) {
             items(albums, key = { it.name }) { album ->
-                val pinnedPixiv = pinnedFolderName != null && album.name.equals(pinnedFolderName, ignoreCase = true)
+                val pixivFolder = isPixivFolderName(album.name)
                 if (album.items.isEmpty()) {
-                    EmptyAlbumTile(album.name, showPixivMark = pinnedPixiv) { onOpenAlbum(album.name) }
+                    EmptyAlbumTile(album.name, showPixivMark = pixivFolder) { onOpenAlbum(album.name) }
                 } else {
                     AlbumTile(
                         album = album,
                         onLongClick = {},
                         sharedElementEnabled = sharedElementEnabled,
                         selected = if (selectionPreview) album.name in selectedFolders else null,
-                        showPixivMark = pinnedPixiv
+                        showPixivMark = pixivFolder
                     ) { onOpenAlbum(album.name) }
                 }
             }
@@ -446,6 +446,9 @@ private fun AlbumGrid(albums: List<MediaAlbum>, columns: Int, refreshing: Boolea
     }
 }
 
+internal fun isPixivFolderName(name: String): Boolean =
+    name.equals("Pixiv", ignoreCase = true)
+
 @Composable
 private fun EmptyAlbumTile(name: String, showPixivMark: Boolean = false, onClick: () -> Unit) {
     val darkTheme = MaterialTheme.colorScheme.surfaceVariant.luminance() < .45f
@@ -456,12 +459,14 @@ private fun EmptyAlbumTile(name: String, showPixivMark: Boolean = false, onClick
                 .background(tone.background, RoundedCornerShape(VaultDimens.AlbumRadius)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                Icons.Outlined.Folder,
-                contentDescription = null,
-                tint = tone.icon,
-                modifier = Modifier.fillMaxSize(.34f)
-            )
+            if (!showPixivMark) {
+                Icon(
+                    Icons.Outlined.Folder,
+                    contentDescription = null,
+                    tint = tone.icon,
+                    modifier = Modifier.fillMaxSize(.34f)
+                )
+            }
             if (showPixivMark) {
                 com.example.album.ui.components.PixivMarkBadge(
                     24.dp,

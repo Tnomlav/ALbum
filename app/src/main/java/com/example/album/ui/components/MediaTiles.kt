@@ -123,7 +123,7 @@ fun AlbumTile(
                 backgroundColor = tone.background,
                 onLoaded = { coverLoaded = true }
             )
-            if (!coverLoaded) {
+            if (!coverLoaded && !showPixivMark) {
                 Icon(
                     Icons.Outlined.Folder,
                     contentDescription = null,
